@@ -92,8 +92,8 @@ test('actor card renders as soon as console resolves before conversation', async
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-new', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-new', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-old';
 
@@ -174,7 +174,7 @@ test('slow conversation does not disable runtime actions after console loads', a
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-controls', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-controls', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
 
     selection = app.selectActor(state, elements, 'act-controls');
@@ -229,8 +229,8 @@ test('manual refresh renders roster before selected conversation completes', asy
     if (requestUrl === '/api/actors') {
       return Promise.resolve(okResponse({
         actors: [
-          { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-          { actor_id: 'act-roster-new', role: 'market', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+          { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+          { actor_id: 'act-roster-new', role: 'market', lifecycle_state: 'stopped', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
         ],
       }));
     }
@@ -260,7 +260,7 @@ test('manual refresh renders roster before selected conversation completes', asy
     const elements = createRenderElements();
     state.selectedActorId = 'act-old';
     state.actors = [
-      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
 
     refresh = app.refreshVisibleRegionsWithFeedback(state, elements);
@@ -315,7 +315,7 @@ test('manual refresh preserves visible conversation while revalidating it', asyn
     if (requestUrl === '/api/actors') {
       return Promise.resolve(okResponse({
         actors: [
-          { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+          { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
         ],
       }));
     }
@@ -345,7 +345,7 @@ test('manual refresh preserves visible conversation while revalidating it', asyn
     const elements = createRenderElements();
     state.selectedActorId = 'act-old';
     state.actors = [
-      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.imConversationIdentityId = 'act-old';
     state.imConversation = [
@@ -434,8 +434,8 @@ test('rapid actor switching keeps stale conversation from overwriting latest sel
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-first', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-second', role: 'pm', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-first', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-second', role: 'pm', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-old';
 
@@ -601,8 +601,8 @@ test('send completion cannot append the prior actor message after selection chan
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-b', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-a';
     state.actorConsole = {
@@ -675,8 +675,8 @@ test('stale send completion cannot clear a newer actor send pending state', asyn
     const state = app.createState();
     const elements = createRenderElements();
     state.actors = [
-      { actor_id: 'act-send-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-send-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-send-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-send-b', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.selectedActorId = 'act-send-a';
     state.actorConsole = {
@@ -982,8 +982,8 @@ test('IM event processing cannot restore a prior actor conversation after select
     state.selectedActorId = 'act-a';
     state.imConversationIdentityId = 'act-a';
     state.actors = [
-      { actor_id: 'act-a', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
-      { actor_id: 'act-b', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-a', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-b', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
     state.actorConsole = {
       actor: { actor_id: 'act-a', role: 'market' },

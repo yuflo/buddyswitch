@@ -73,6 +73,8 @@ def _lifecycle_action_label(action: str) -> str:
         return "Clear"
     if action == "delete":
         return "Delete"
+    if action == "retry":
+        return "Retry"
     return "Lifecycle action"
 
 
@@ -385,6 +387,8 @@ class WebManagementService:
             return 200, self._interrupt(actor_id)
         if method == "POST" and action == "resume":
             return 202, self._resume(actor_id)
+        if method == "POST" and action == "retry":
+            return 202, self._retry(actor_id)
         if method == "POST" and action == "stop":
             return 202, self._stop(actor_id)
         if method == "POST" and action == "open-tui":
@@ -419,6 +423,8 @@ class WebManagementService:
             return path[len(status_prefix) : -len("/interrupt")], "interrupt"
         if path.startswith(status_prefix) and path.endswith("/resume"):
             return path[len(status_prefix) : -len("/resume")], "resume"
+        if path.startswith(status_prefix) and path.endswith("/retry"):
+            return path[len(status_prefix) : -len("/retry")], "retry"
         if path.startswith(status_prefix) and path.endswith("/stop"):
             return path[len(status_prefix) : -len("/stop")], "stop"
         if path.startswith(status_prefix) and path.endswith("/open-tui"):
@@ -475,21 +481,59 @@ class WebManagementService:
         if role_row is None:
             raise HttpError(status=400, code="INVALID_REQUEST", message=f"Unknown role: {role_id}")
         role_label = str(role_row.get("label") or role_id)
+        actor_id = self._call_host_control(lambda: self._host_control.allocate_actor_id(role_id))
+        if not isinstance(actor_id, str) or not actor_id:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid actor id allocation for role {role_id}.")
         return self._start_lifecycle_operation(
             key="start",
             action="start",
             label=f"Starting {role_label}",
             detail="Launcher start command is queued.",
-            target={"actor_id": "", "role": role_id},
-            command=lambda: self._create_instance_under_lock(role_id),
+            target={"actor_id": actor_id, "role": role_id},
+            command=lambda: self._create_instance_under_lock(role_id, actor_id),
         )
 
-    def _create_instance_under_lock(self, role: str) -> dict[str, Any]:
-        payload = self._call_host_control(lambda: self._host_control.start(role))
-        actor_id = payload.get("actor_id")
-        if not isinstance(actor_id, str) or not actor_id:
+    def _create_instance_under_lock(self, role: str, actor_id: str) -> dict[str, Any]:
+        payload = self._call_host_control(lambda: self._host_control.start(role, actor_id))
+        returned_actor_id = payload.get("actor_id")
+        if returned_actor_id != actor_id:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid start payload for role {role}.")
         return {"ok": True, "actor_id": actor_id, "instance": self._get_instance_status(actor_id)}
+
+    def _retry(self, actor_id: str) -> dict[str, Any]:
+        prepared = self._call_host_control(lambda: self._host_control.prepare_retry(actor_id))
+        previous_actor_id = prepared.get("actor_id")
+        replacement_actor_id = prepared.get("replacement_actor_id")
+        role = prepared.get("role")
+        if (
+            previous_actor_id != actor_id
+            or not isinstance(replacement_actor_id, str)
+            or not replacement_actor_id
+            or not isinstance(role, str)
+            or not role
+        ):
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid Retry preparation for {actor_id}.")
+        return self._start_lifecycle_operation(
+            key=f"instance:{actor_id}",
+            action="retry",
+            label=f"Retrying {role}",
+            detail="Replacement start command is queued.",
+            target={
+                "actor_id": actor_id,
+                "replacement_actor_id": replacement_actor_id,
+                "role": role,
+            },
+            command=lambda: self._retry_under_lock(actor_id, replacement_actor_id),
+        )
+
+    def _retry_under_lock(self, actor_id: str, replacement_actor_id: str) -> dict[str, Any]:
+        retried = self._call_host_control(lambda: self._host_control.retry(actor_id, replacement_actor_id))
+        if retried.get("previous_actor_id") != actor_id or retried.get("actor_id") != replacement_actor_id:
+            raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid Retry result for {actor_id}.")
+        payload = dict(retried)
+        payload["ok"] = True
+        payload["instance"] = self._get_instance_status(replacement_actor_id)
+        return payload
 
     def _clear(self, actor_id: str) -> dict[str, Any]:
         return self._start_lifecycle_operation(
@@ -680,25 +724,118 @@ class WebManagementService:
         }
 
     def _actor_row_from_instance(self, instance: Mapping[str, Any]) -> dict[str, Any]:
+        status = instance.get("status")
+        last_failure = instance.get("last_failure")
+        if status == "active":
+            lifecycle_state = "active"
+        elif status == "inactive" and isinstance(last_failure, Mapping):
+            lifecycle_state = "start_failed"
+        else:
+            lifecycle_state = "stopped"
         row = {
             "actor_id": instance.get("actor_id"),
             "role": instance.get("role"),
-            "status": instance.get("status"),
+            "status": status,
             "app_server_health": instance.get("app_server_health"),
             "thread_id": instance.get("thread_id"),
             "browser_port": instance.get("browser_port"),
             "updated_at": instance.get("updated_at"),
             "workspace_dir": instance.get("workspace_dir"),
+            "last_failure": dict(last_failure) if isinstance(last_failure, Mapping) else None,
+            "lifecycle_state": lifecycle_state,
         }
         row["runtime"] = self._runtime_row(instance)
         return row
 
     def _list_actor_rows(self) -> list[dict[str, Any]]:
-        return [self._actor_row_from_instance(instance) for instance in self._list_instances()]
+        rows_by_actor_id: dict[str, dict[str, Any]] = {}
+        for instance in self._list_instances():
+            row = self._actor_row_from_instance(instance)
+            actor_id = row.get("actor_id")
+            if isinstance(actor_id, str) and actor_id:
+                rows_by_actor_id[actor_id] = row
+
+        with self._operation_lock:
+            active_operations = [
+                operation.to_payload()
+                for operation in self._operations.values()
+                if operation.status in {"queued", "running"}
+            ]
+
+        claimed_actor_ids: set[str] = set()
+        for operation in active_operations:
+            if operation.get("action") != "retry":
+                continue
+            target = operation.get("target")
+            if not isinstance(target, Mapping):
+                continue
+            previous_actor_id = target.get("actor_id")
+            replacement_actor_id = target.get("replacement_actor_id")
+            role = target.get("role")
+            if not isinstance(previous_actor_id, str) or not isinstance(replacement_actor_id, str):
+                continue
+            previous_row = rows_by_actor_id.pop(previous_actor_id, None)
+            replacement_row = rows_by_actor_id.pop(replacement_actor_id, None)
+            row = replacement_row or previous_row or self._synthetic_actor_row(previous_actor_id, role)
+            if replacement_row is not None:
+                row["actor_id"] = replacement_actor_id
+                row["previous_actor_id"] = previous_actor_id
+                row.pop("replacement_actor_id", None)
+            else:
+                row["actor_id"] = previous_actor_id
+                row["replacement_actor_id"] = replacement_actor_id
+                row.pop("previous_actor_id", None)
+            row["lifecycle_state"] = "retrying"
+            row["lifecycle_operation"] = operation
+            rows_by_actor_id[str(row["actor_id"])] = row
+            claimed_actor_ids.update({previous_actor_id, replacement_actor_id})
+
+        for operation in active_operations:
+            if operation.get("action") != "start":
+                continue
+            target = operation.get("target")
+            if not isinstance(target, Mapping):
+                continue
+            actor_id = target.get("actor_id")
+            role = target.get("role")
+            if not isinstance(actor_id, str) or not actor_id or actor_id in claimed_actor_ids:
+                continue
+            row = rows_by_actor_id.pop(actor_id, None) or self._synthetic_actor_row(actor_id, role)
+            row["lifecycle_state"] = "starting"
+            row["lifecycle_operation"] = operation
+            rows_by_actor_id[actor_id] = row
+            claimed_actor_ids.add(actor_id)
+
+        for operation in active_operations:
+            if operation.get("action") in {"start", "retry"}:
+                continue
+            target = operation.get("target")
+            actor_id = target.get("actor_id") if isinstance(target, Mapping) else None
+            if isinstance(actor_id, str) and actor_id in rows_by_actor_id:
+                rows_by_actor_id[actor_id]["lifecycle_operation"] = operation
+
+        return list(rows_by_actor_id.values())
+
+    def _synthetic_actor_row(self, actor_id: str, role: object) -> dict[str, Any]:
+        normalized_role = role if isinstance(role, str) else ""
+        return self._actor_row_from_instance(
+            {
+                "actor_id": actor_id,
+                "role": normalized_role,
+                "status": "inactive",
+                "app_server_health": "",
+                "thread_id": None,
+                "browser_port": None,
+                "updated_at": None,
+                "workspace_dir": None,
+                "last_failure": None,
+            }
+        )
 
     def _external_im_actor_rows(self, role_id: str | None) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        for row in self._list_actor_rows():
+        for instance in self._list_instances():
+            row = self._actor_row_from_instance(instance)
             if role_id is not None and row.get("role") != role_id:
                 continue
             identity_id = row.get("actor_id")
@@ -734,8 +871,10 @@ class WebManagementService:
             "task_sys": {
                 "active_count": task_projection["active_count"],
                 "recoverable_count": task_projection["recoverable_count"],
+                "terminal_count": task_projection["terminal_count"],
                 "active_tasks": task_projection["active_tasks"][:10],
                 "recoverable_tasks": task_projection["recoverable_tasks"][:10],
+                "terminal_tasks": task_projection["terminal_tasks"][:5],
             },
             "tracks": {
                 "items": track_read.list_external_tracks(owner_identity=current_identity),
@@ -828,14 +967,23 @@ class WebManagementService:
         return {"ok": True, "operation": operation.to_payload()}
 
     def _active_lifecycle_conflict_locked(self, target: dict[str, str]) -> WebLifecycleOperation | None:
-        actor_id = target.get("actor_id")
-        if not isinstance(actor_id, str) or not actor_id:
+        target_actor_ids = {
+            actor_id
+            for actor_id in (target.get("actor_id"), target.get("replacement_actor_id"))
+            if isinstance(actor_id, str) and actor_id
+        }
+        if not target_actor_ids:
             return None
         for operation in self._operations.values():
             operation_target = operation.target if isinstance(operation.target, dict) else {}
+            operation_actor_ids = {
+                actor_id
+                for actor_id in (operation_target.get("actor_id"), operation_target.get("replacement_actor_id"))
+                if isinstance(actor_id, str) and actor_id
+            }
             if (
                 operation.status in {"queued", "running"}
-                and operation_target.get("actor_id") == actor_id
+                and not target_actor_ids.isdisjoint(operation_actor_ids)
             ):
                 return operation
         return None
@@ -878,7 +1026,6 @@ class WebManagementService:
         detail = "Launcher command completed."
         result: dict[str, Any] | None = None
         error: dict[str, str] | None = None
-        target_patch: dict[str, str] = {}
         try:
             result = command()
         except HttpError as exc:
@@ -889,10 +1036,6 @@ class WebManagementService:
             status = "failed"
             detail = str(exc)
             error = {"code": "COMMAND_FAILED", "message": str(exc)}
-        else:
-            actor_id = result.get("actor_id")
-            if isinstance(actor_id, str):
-                target_patch["actor_id"] = actor_id
         finally:
             next_thread = self._complete_lifecycle_operation(
                 operation_id,
@@ -900,7 +1043,6 @@ class WebManagementService:
                 detail=detail,
                 result=result,
                 error=error,
-                target_patch=target_patch,
             )
             if next_thread is not None:
                 next_thread.start()
@@ -913,7 +1055,6 @@ class WebManagementService:
         detail: str,
         result: dict[str, Any] | None,
         error: dict[str, str] | None,
-        target_patch: dict[str, str],
     ) -> threading.Thread | None:
         with self._operation_lock:
             operation = self._operations.get(operation_id)
@@ -922,8 +1063,6 @@ class WebManagementService:
                 operation.detail = detail
                 operation.result = result
                 operation.error = error
-                if target_patch:
-                    operation.target.update(target_patch)
                 operation.updated_at = utc_now_iso()
             self._operation_commands.pop(operation_id, None)
             if self._lifecycle_running_operation_id == operation_id:

@@ -405,11 +405,6 @@ buddyswitch_env_bind_instance() {
   export BUDDYSWITCH_XDG_CONFIG_HOME="${instance_root}/xdg-config"
 }
 
-buddyswitch_generate_actor_id() {
-  local role="$1"
-  "${BUDDYSWITCH_PYTHON}" -c 'import sys, uuid; print(f"act-{sys.argv[1]}-{uuid.uuid4().hex[:12]}")' "${role}"
-}
-
 buddyswitch_instance_activate() {
   local actor_id="$1"
   local role="$2"
@@ -723,6 +718,12 @@ if browser_port_text:
         failure["browser_port"] = browser_port
 
 payload["last_failure"] = failure
+payload["status"] = "inactive"
+payload["app_server_pid"] = None
+payload["app_server_socket"] = None
+payload["app_server_log"] = None
+payload["browser_port"] = None
+payload["thread_id"] = None
 payload["updated_at"] = now
 
 temp_path = instance_json.with_suffix(".tmp")

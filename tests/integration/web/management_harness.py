@@ -89,10 +89,32 @@ def active_status(actor_id: str, thread_id: str, thread_status: str) -> dict[str
         "browser_port": 9222,
         "updated_at": "2026-05-25T10:00:00Z",
         "thread_id": thread_id,
+        "last_failure": None,
         "app_server": {"healthy": True},
         "daemon": {"connected": True},
         "runtime_broker": {"connected": True},
         "thread": {"status": thread_status, "raw": {}},
+    }
+
+
+def failed_status(actor_id: str, *, role: str = "pm") -> dict[str, object]:
+    return {
+        "actor_id": actor_id,
+        "role": role,
+        "status": "inactive",
+        "workspace_dir": f"/tmp/shared/instances/{actor_id}/workspace",
+        "browser_port": None,
+        "updated_at": "2026-07-18T00:00:00Z",
+        "thread_id": None,
+        "last_failure": {
+            "phase": "daemon_start",
+            "message": "Daemon start failed.",
+            "failed_at": "2026-07-18T00:00:00Z",
+        },
+        "app_server": {},
+        "daemon": {},
+        "runtime_broker": {},
+        "thread": {},
     }
 
 
@@ -225,17 +247,43 @@ class RecordingHostControl:
     def roles(self) -> list[dict[str, object]]:
         return self._record("roles", (), self.roles_response)  # type: ignore[return-value]
 
-    def start(self, role_id: str) -> dict[str, object]:
-        actor_id = f"act-{role_id}-demo"
+    def allocate_actor_id(self, role_id: str) -> str:
+        return self._record("allocate_actor_id", (role_id,), f"act-{role_id}-demo")  # type: ignore[return-value]
+
+    def start(self, role_id: str, actor_id: str) -> dict[str, object]:
         return self._record(
             "start",
-            (role_id,),
+            (role_id, actor_id),
             {
                 "actor_id": actor_id,
                 "role": role_id,
                 "workspace_dir": f"/tmp/shared/instances/{actor_id}/workspace",
                 "project_workspace_dir": "/tmp/shared/projects/app",
                 "instance_record": f"/tmp/shared/instances/{actor_id}/instance.json",
+            },
+        )  # type: ignore[return-value]
+
+    def prepare_retry(self, actor_id: str) -> dict[str, object]:
+        role = str(self.status_response.get("role") or "pm")
+        return self._record(
+            "prepare_retry",
+            (actor_id,),
+            {
+                "actor_id": actor_id,
+                "replacement_actor_id": f"act-{role}-replacement",
+                "role": role,
+            },
+        )  # type: ignore[return-value]
+
+    def retry(self, actor_id: str, replacement_actor_id: str) -> dict[str, object]:
+        role = str(self.status_response.get("role") or "pm")
+        return self._record(
+            "retry",
+            (actor_id, replacement_actor_id),
+            {
+                "previous_actor_id": actor_id,
+                "actor_id": replacement_actor_id,
+                "role": role,
             },
         )  # type: ignore[return-value]
 

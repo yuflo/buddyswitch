@@ -57,6 +57,7 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         actor_id: str = "act-pm-demo",
         role_id: str = "pm",
         updated_at: str,
+        status: str = "in_progress.side_processing",
         result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
@@ -65,7 +66,7 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
             "source_ref": {"demand_id": f"demand-{task_id}", "basis_revision": 1},
             "actor_target": {"actor_id": actor_id, "role_id": role_id, "internal_stack": "hidden"},
             "inbound_context": {"prompt": "secret prompt"},
-            "status": "in_progress.side_processing",
+            "status": status,
             "execution": {
                 "processor": None if result is not None else "side",
                 "handoff": {"side_thread_id": "thr-secret"},
@@ -168,7 +169,23 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         actor_id = "act-pm-demo"
         records = [
             self._task_record(task_id="task-old", updated_at="2026-07-13T10:00:00Z"),
-            self._task_record(task_id="task-other-actor", actor_id="act-dev-demo", role_id="dev", updated_at="2026-07-13T12:00:00Z"),
+            self._task_record(
+                task_id="task-completed",
+                updated_at="2026-07-13T13:00:00Z",
+                status="completed",
+            ),
+            self._task_record(
+                task_id="task-canceled",
+                updated_at="2026-07-13T12:00:00Z",
+                status="canceled",
+            ),
+            self._task_record(
+                task_id="task-other-actor",
+                actor_id="act-dev-demo",
+                role_id="dev",
+                updated_at="2026-07-13T14:00:00Z",
+                status="completed",
+            ),
             self._task_record(
                 task_id="task-recoverable",
                 updated_at="2026-07-13T11:00:00Z",
@@ -181,18 +198,26 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
             projection = task_read.actor_external_task_projection(actor_profile=self._actor_profile(actor_id=actor_id))
 
         list_tasks.assert_called_once_with(actor_target={"actor_id": actor_id, "role_id": "pm"})
-        self.assertEqual([row["task_id"] for row in projection["tasks"]], ["task-recoverable", "task-old"])
+        self.assertEqual(
+            [row["task_id"] for row in projection["tasks"]],
+            ["task-completed", "task-canceled", "task-recoverable", "task-old"],
+        )
         self.assertEqual(
             [row["task_id"] for row in projection["active_tasks"]],
             ["task-recoverable", "task-old"],
         )
         self.assertEqual([row["task_id"] for row in projection["recoverable_tasks"]], ["task-recoverable"])
-        self.assertEqual(projection["task_count"], 2)
+        self.assertEqual(
+            [row["task_id"] for row in projection["terminal_tasks"]],
+            ["task-completed", "task-canceled"],
+        )
+        self.assertEqual(projection["task_count"], 4)
         self.assertEqual(projection["active_count"], 2)
         self.assertEqual(projection["recoverable_count"], 1)
+        self.assertEqual(projection["terminal_count"], 2)
         self.assertEqual(records, before)
 
-        for group in ("tasks", "active_tasks", "recoverable_tasks"):
+        for group in ("tasks", "active_tasks", "recoverable_tasks", "terminal_tasks"):
             for row in projection[group]:
                 self.assertEqual(tuple(row.keys()), TASK_KEYS)
                 self.assertEqual(tuple(row["actor"].keys()), TASK_ACTOR_KEYS)
@@ -220,7 +245,8 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                     self.assertNotIn(sensitive, row)
 
         projection["tasks"][0]["actor"]["role_id"] = "changed"
-        self.assertEqual(records[2]["actor_target"]["role_id"], "pm")
+        completed_record = next(record for record in records if record["id"] == "task-completed")
+        self.assertEqual(completed_record["actor_target"]["role_id"], "pm")
 
     def test_task_external_get_returns_projection_or_none_without_raw_refs(self) -> None:
         task_read = _task_read_module()
@@ -275,9 +301,11 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                     "tasks": [],
                     "active_tasks": [],
                     "recoverable_tasks": [],
+                    "terminal_tasks": [],
                     "task_count": 0,
                     "active_count": 0,
                     "recoverable_count": 0,
+                    "terminal_count": 0,
                 },
             )
 

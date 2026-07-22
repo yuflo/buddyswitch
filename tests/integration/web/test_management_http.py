@@ -124,8 +124,8 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         release_start = threading.Event()
         runner.roles_response = [{"id": "market", "label": "Market", "scope": "research"}]
-        runner.block("start", ("market",), release_start)
-        runner.set_response("start", ("market",), {"actor_id": "act-market-demo"})
+        runner.block("start", ("market", "act-market-demo"), release_start)
+        runner.set_response("start", ("market", "act-market-demo"), {"actor_id": "act-market-demo"})
         runner.set_response("status", ("act-market-demo",), active_status("act-market-demo", "thread-1", "idle"))
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
         result: dict[str, object] = {}
@@ -146,7 +146,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             self.assertEqual(payload["operation"]["action"], "start")
             self.assertIn(payload["operation"]["status"], {"queued", "running"})
             self.assertEqual(payload["operation"]["target"]["role"], "market")
-            self.assertEqual(payload["operation"]["target"]["actor_id"], "")
+            self.assertEqual(payload["operation"]["target"]["actor_id"], "act-market-demo")
             operation_id = payload["operation"]["id"]
         finally:
             release_start.set()
@@ -162,9 +162,9 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             {"id": "market", "label": "Market", "scope": "research"},
             {"id": "pm", "label": "PM", "scope": "product"},
         ]
-        runner.block("start", ("market",), release_market_start)
-        runner.set_response("start", ("market",), {"actor_id": "act-market-demo"})
-        runner.set_response("start", ("pm",), {"actor_id": "act-pm-demo"})
+        runner.block("start", ("market", "act-market-demo"), release_market_start)
+        runner.set_response("start", ("market", "act-market-demo"), {"actor_id": "act-market-demo"})
+        runner.set_response("start", ("pm", "act-pm-demo"), {"actor_id": "act-pm-demo"})
         runner.set_response("status", ("act-market-demo",), active_status("act-market-demo", "thread-market", "idle"))
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-pm", "idle"))
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
@@ -183,7 +183,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(second_operation["target"]["role"], "pm")
         self.assertEqual(
             [call for call in runner.calls if call[0] == "start"],
-            [("start", ("market",))],
+            [("start", ("market", "act-market-demo"))],
         )
 
         release_market_start.set()
@@ -195,14 +195,14 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(
             [call for call in runner.calls if call[0] == "start"],
             [
-                ("start", ("market",)),
-                ("start", ("pm",)),
+                ("start", ("market", "act-market-demo")),
+                ("start", ("pm", "act-pm-demo")),
             ],
         )
 
     def test_create_instance_delegates_to_host_control_start_without_initialize_input(self) -> None:
         runner = RecordingHostControl()
-        runner.set_response("start", ("pm",), {"actor_id": "act-pm-demo"})
+        runner.set_response("start", ("pm", "act-pm-demo"), {"actor_id": "act-pm-demo"})
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-1", "idle"))
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
@@ -215,12 +215,24 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(operation["result"]["actor_id"], "act-pm-demo")
         self.assertEqual(operation["result"]["instance"]["thread"]["status"], "idle")
         self.assertEqual(operation["result"]["instance"]["thread_id"], "thread-1")
-        self.assertEqual(runner.calls, [("roles", ()), ("start", ("pm",)), ("status", ("act-pm-demo",))])
+        self.assertEqual(
+            runner.calls,
+            [
+                ("roles", ()),
+                ("allocate_actor_id", ("pm",)),
+                ("start", ("pm", "act-pm-demo")),
+                ("status", ("act-pm-demo",)),
+            ],
+        )
         self.assertNotIn("Initialize this " "BuddySwitch thread", json.dumps(runner.calls))
 
     def test_create_instance_returns_host_control_start_error_without_initialize_retry(self) -> None:
         runner = RecordingHostControl()
-        runner.set_error("start", ("pm",), host_control_error("COMMAND_FAILED", "Thread bootstrap failed for thread-1."))
+        runner.set_error(
+            "start",
+            ("pm", "act-pm-demo"),
+            host_control_error("COMMAND_FAILED", "Thread bootstrap failed for thread-1."),
+        )
         service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
@@ -229,7 +241,124 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         operation = wait_for_operation_status(service, payload["operation"]["id"], "failed")
         self.assertEqual(operation["error"]["code"], "COMMAND_FAILED")
         self.assertIn("Thread bootstrap failed", operation["error"]["message"])
-        self.assertEqual(runner.calls, [("roles", ()), ("start", ("pm",))])
+        self.assertEqual(
+            runner.calls,
+            [("roles", ()), ("allocate_actor_id", ("pm",)), ("start", ("pm", "act-pm-demo"))],
+        )
+
+    def test_retry_route_returns_one_operation_with_previous_and_replacement_ids(self) -> None:
+        runner = RecordingHostControl()
+        failed_actor_id = "act-pm-failed"
+        replacement_actor_id = "act-pm-replacement"
+        release_retry = threading.Event()
+        runner.status_response = failed_status(failed_actor_id)
+        runner.set_response(
+            "prepare_retry",
+            (failed_actor_id,),
+            {
+                "actor_id": failed_actor_id,
+                "replacement_actor_id": replacement_actor_id,
+                "role": "pm",
+            },
+        )
+        runner.set_response(
+            "retry",
+            (failed_actor_id, replacement_actor_id),
+            {"previous_actor_id": failed_actor_id, "actor_id": replacement_actor_id, "role": "pm"},
+        )
+        runner.set_response(
+            "status",
+            (replacement_actor_id,),
+            active_status(replacement_actor_id, "thread-replacement", "idle"),
+        )
+        runner.block("retry", (failed_actor_id, replacement_actor_id), release_retry)
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+
+        status, payload = service.handle_api(
+            "POST",
+            f"/api/instances/{failed_actor_id}/retry",
+            b"",
+        )
+
+        self.assertEqual(status, 202)
+        operation = payload["operation"]
+        self.assertEqual(operation["action"], "retry")
+        self.assertEqual(
+            operation["target"],
+            {
+                "actor_id": failed_actor_id,
+                "replacement_actor_id": replacement_actor_id,
+                "role": "pm",
+            },
+        )
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as replacement_conflict:
+            service.handle_api("DELETE", f"/api/instances/{replacement_actor_id}", b"")
+        self.assertEqual(replacement_conflict.exception.status, 409)
+        self.assertEqual(replacement_conflict.exception.code, "BUSY")
+        release_retry.set()
+        final = wait_for_operation_status(service, operation["id"], "succeeded")
+        self.assertEqual(final["target"], operation["target"])
+        self.assertEqual(final["result"]["previous_actor_id"], failed_actor_id)
+        self.assertEqual(final["result"]["actor_id"], replacement_actor_id)
+        self.assertEqual(final["result"]["instance"]["actor_id"], replacement_actor_id)
+        self.assertEqual(
+            runner.calls,
+            [
+                ("prepare_retry", (failed_actor_id,)),
+                ("retry", (failed_actor_id, replacement_actor_id)),
+                ("status", (replacement_actor_id,)),
+            ],
+        )
+
+    def test_retry_validation_failure_creates_no_operation_or_mutation(self) -> None:
+        runner = RecordingHostControl()
+        runner.set_error(
+            "prepare_retry",
+            ("act-pm-stopped",),
+            host_control_error(
+                "LIFECYCLE_BLOCKED",
+                "Retry requires an inactive actor with a recorded start failure.",
+                returncode=3,
+            ),
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+
+        with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
+            service.handle_api("POST", "/api/instances/act-pm-stopped/retry", b"")
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(raised.exception.code, "LIFECYCLE_BLOCKED")
+        self.assertEqual(runner.calls, [("prepare_retry", ("act-pm-stopped",))])
+        self.assertEqual(service._operations, {})
+
+    def test_retry_failure_preserves_both_target_ids_without_success_payload(self) -> None:
+        runner = RecordingHostControl()
+        failed_actor_id = "act-pm-failed"
+        replacement_actor_id = "act-pm-replacement"
+        runner.set_response(
+            "prepare_retry",
+            (failed_actor_id,),
+            {
+                "actor_id": failed_actor_id,
+                "replacement_actor_id": replacement_actor_id,
+                "role": "pm",
+            },
+        )
+        runner.set_error(
+            "retry",
+            (failed_actor_id, replacement_actor_id),
+            host_control_error("COMMAND_FAILED", "Replacement start failed."),
+        )
+        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+
+        status, payload = service.handle_api("POST", f"/api/instances/{failed_actor_id}/retry", b"")
+
+        self.assertEqual(status, 202)
+        final = wait_for_operation_status(service, payload["operation"]["id"], "failed")
+        self.assertIsNone(final["result"])
+        self.assertEqual(final["target"]["actor_id"], failed_actor_id)
+        self.assertEqual(final["target"]["replacement_actor_id"], replacement_actor_id)
+        self.assertEqual(final["error"]["message"], "Replacement start failed.")
 
     def test_clear_route_delegates_to_host_control_clear_without_initialize_input(self) -> None:
         runner = RecordingHostControl()
@@ -664,7 +793,15 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(status, 202)
         operation = wait_for_operation_status(service, payload["operation"]["id"], "succeeded")
         self.assertEqual(operation["result"]["actor_id"], "act-pm-demo")
-        self.assertEqual(host_control.calls, [("roles", ()), ("start", ("pm",)), ("status", ("act-pm-demo",))])
+        self.assertEqual(
+            host_control.calls,
+            [
+                ("roles", ()),
+                ("allocate_actor_id", ("pm",)),
+                ("start", ("pm", "act-pm-demo")),
+                ("status", ("act-pm-demo",)),
+            ],
+        )
 
     def test_status_route_delegates_actor_validation_to_injected_host_control(self) -> None:
         class RejectingHostControl(RecordingHostControl):

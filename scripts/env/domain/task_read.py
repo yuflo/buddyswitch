@@ -161,17 +161,24 @@ def _is_recoverable_task(record: Mapping[str, Any]) -> bool:
     )
 
 
+def _is_terminal_task(record: Mapping[str, Any]) -> bool:
+    return record.get("status") in (task_sys.COMPLETED, task_sys.CANCELED)
+
+
 def actor_external_task_projection(*, actor_profile: ActorIdentityProfile) -> dict[str, object]:
     records = _list_task_records(actor_profile=actor_profile)
     classified = [(record, external_task_projection(record)) for record in records]
     tasks = [summary for _record, summary in classified]
     active_tasks = [summary for record, summary in classified if _is_active_task(record)]
     recoverable_tasks = [summary for record, summary in classified if _is_recoverable_task(record)]
+    terminal_tasks = [summary for record, summary in classified if _is_terminal_task(record)]
     return {
         "tasks": tasks,
         "active_tasks": active_tasks,
         "recoverable_tasks": recoverable_tasks,
+        "terminal_tasks": terminal_tasks,
         "task_count": len(tasks),
         "active_count": len(active_tasks),
         "recoverable_count": len(recoverable_tasks),
+        "terminal_count": len(terminal_tasks),
     }
