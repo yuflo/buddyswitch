@@ -40,10 +40,12 @@ runtime environment.
 
 Web Message belongs to the IM API. `/api/im/*` is the single HTTP product
 contract for browser, local channel, and third-party message calls.
-`ExternalImSession` owns external identity, actor discovery, send, events,
-reply, acknowledgement, conversation, and disposition behavior. Web supplies
-server-owned browser identity context and does not create another message
-contract.
+`ExternalImSession` projects external identity, actor discovery, send, events,
+reply, acknowledgement, and conversation calls onto Central IM. Central IM
+owns immutable messages, `reply_to` edges, identity-visible events and cursors,
+target resolution, and delivery results. Task Sys status is the sole processing
+lifecycle. Web supplies server-owned browser identity context and does not
+create another message contract.
 
 ## Owners
 

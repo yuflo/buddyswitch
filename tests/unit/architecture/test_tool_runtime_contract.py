@@ -32,7 +32,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
         "revise",
     },
     "evidence": {"approve_downgrade", "issue_browser"},
-    "message": {"contacts", "conversation", "get", "list", "mark", "send"},
+    "message": {"contacts", "conversation", "get", "list", "send"},
     "search": {"request", "status"},
     "task_sys": {"create", "list", "get", "close", "cancel", "need_parent"},
     "track": {

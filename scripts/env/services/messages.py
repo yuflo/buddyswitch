@@ -227,23 +227,6 @@ def _im_reply_target_error(message: str) -> dict[str, Any]:
     return {"ok": False, "error": {"code": "E_IM_REPLY_TARGET", "message": message}}
 
 
-def _reply_source_state(
-    *,
-    message_repo: Any,
-    sender: dict[str, str],
-    message_id: str,
-) -> dict[str, Any]:
-    state = message_repo.get_im_message_state(message_id, sender["id"])
-    if not isinstance(state, dict):
-        return _im_reply_target_error("reply_to message is not processable for the sender identity")
-    disposition = state.get("disposition")
-    if disposition not in {"unseen", "needs_parent"}:
-        return _im_reply_target_error(
-            f"reply_to message must be a processable inbound message; current disposition is {disposition}"
-        )
-    return {"ok": True, "state": state}
-
-
 def _resolve_reply_target_identity_id(
     *,
     message_repo: Any,
@@ -263,34 +246,11 @@ def _resolve_reply_target_identity_id(
     original_id = original_message.get("id")
     if not isinstance(original_id, str) or not original_id.strip():
         return _im_reply_target_error("reply_to message id is invalid")
-    source_state = _reply_source_state(
-        message_repo=message_repo,
-        sender=sender,
-        message_id=original_id.strip(),
-    )
-    if source_state.get("ok") is not True:
-        return source_state
     return {
         "ok": True,
         "target_identity_id": original_sender["id"],
         "reply_to": original_id.strip(),
     }
-
-
-def _mark_reply_source_replied(
-    *,
-    message_repo: Any,
-    identity: dict[str, Any],
-    message_id: str,
-) -> dict[str, Any] | None:
-    current = message_repo.get_im_message_state(message_id, _identity_id(identity))
-    if current is None:
-        return None
-    updated = dict(current)
-    updated["disposition"] = "replied"
-    updated["reason"] = None
-    updated["updated_at"] = message_repo.runtime_files.now_iso()
-    return message_repo.save_im_message_state(updated)
 
 
 def send_im_message(
@@ -351,16 +311,6 @@ def send_im_message(
             "reply_to": reply_to_id,
             "created_at": now,
             "sequence": sequence,
-        }
-    )
-    message_repo.save_im_message_state(
-        {
-            "message_id": message_id,
-            "owner_identity_id": target["id"],
-            "disposition": "unseen",
-            "reason": None,
-            "processed_by": None,
-            "updated_at": now,
         }
     )
     for visible_identity in (sender, target):
@@ -432,16 +382,8 @@ def send_im_reply(
     )
     if result.get("ok") is not True:
         return result
-    original_reply_state = _mark_reply_source_replied(
-        message_repo=message_repo,
-        identity=sender,
-        message_id=reply_target["reply_to"],
-    )
     response = dict(result)
     response["original_message_id"] = reply_target["reply_to"]
-    response["original_final_disposition"] = (
-        original_reply_state.get("disposition") if isinstance(original_reply_state, dict) else None
-    )
     return response
 
 
@@ -825,37 +767,4 @@ def get_im_direct_conversation(
         "conversation": conversation,
         "messages": messages[-normalized_limit:],
         "count": min(len(messages), normalized_limit),
-    }
-
-
-def update_im_disposition(
-    *,
-    identity: dict[str, Any],
-    message_id: str,
-    disposition: str,
-    reason: str | None = None,
-) -> dict[str, Any]:
-    from env.repos import messages as message_repo
-
-    identity_ref = _identity_ref(identity)
-    message_response = get_im_message(identity=identity_ref, message_id=message_id)
-    if message_response.get("ok") is not True:
-        return message_response
-    if disposition not in {"absorbed", "replied", "needs_parent"}:
-        return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "invalid disposition"}}
-    current = message_repo.get_im_message_state(message_id, identity_ref["id"])
-    if current is None:
-        return _im_scope_error("identity has no state for this message")
-    previous = current.get("disposition")
-    updated = dict(current)
-    updated["disposition"] = disposition
-    updated["reason"] = reason.strip() if isinstance(reason, str) and reason.strip() else None
-    updated["updated_at"] = message_repo.runtime_files.now_iso()
-    message_repo.save_im_message_state(updated)
-    return {
-        "ok": True,
-        "message_id": message_id,
-        "identity": identity_ref,
-        "disposition": disposition,
-        "state_changed": previous != disposition or current.get("reason") != updated["reason"],
     }

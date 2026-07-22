@@ -14,7 +14,6 @@ _ACTION_METHODS = {
     "conversation": "conversation",
     "get": "get",
     "list": "list",
-    "mark": "mark",
     "send": "send",
 }
 _ACTION_ALLOWED_FIELDS = {
@@ -58,16 +57,11 @@ def conversation_messages(*, args: dict[str, Any], context: Any) -> dict[str, An
     return _client_for(context).conversation(args)
 
 
-def mark_message(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
-    return _client_for(context).mark(args)
-
-
 _ACTION_HANDLERS = {
     "contacts": contacts_message,
     "conversation": conversation_messages,
     "get": get_message,
     "list": list_messages,
-    "mark": mark_message,
     "send": send_message,
 }
 

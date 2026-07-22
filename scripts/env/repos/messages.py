@@ -11,7 +11,6 @@ from env.domain.identity import external_identity
 from . import runtime_files
 
 
-_VALID_DISPOSITIONS = {"unseen", "absorbed", "replied", "needs_parent"}
 INITIAL_IM_EVENT_CURSOR = "imev-000000000000"
 _CONVERSATION_FIELDS = frozenset(
     {
@@ -34,16 +33,6 @@ _MESSAGE_FIELDS = frozenset(
         "reply_to",
         "created_at",
         "sequence",
-    }
-)
-_MESSAGE_STATE_FIELDS = frozenset(
-    {
-        "message_id",
-        "owner_identity_id",
-        "disposition",
-        "reason",
-        "processed_by",
-        "updated_at",
     }
 )
 _EVENT_FIELDS = frozenset(
@@ -260,40 +249,6 @@ def list_im_messages() -> list[dict[str, Any]]:
             rows.append(runtime_files.read_json_object(path))
     rows.sort(key=lambda row: (str(row.get("created_at") or ""), _im_sequence_value(row), str(row.get("id") or "")))
     return rows
-
-
-def save_im_message_state(state: dict[str, Any]) -> dict[str, Any]:
-    _reject_unknown_fields(state, _MESSAGE_STATE_FIELDS, "state")
-    message_id = runtime_files.require_id(str(state.get("message_id") or ""), "state.message_id")
-    disposition = state.get("disposition")
-    if disposition not in _VALID_DISPOSITIONS:
-        raise ValueError("state.disposition must be one of absorbed, needs_parent, replied, unseen")
-    normalized = {
-        "message_id": message_id,
-        "owner_identity_id": runtime_files.require_id(
-            str(state.get("owner_identity_id") or ""),
-            "state.owner_identity_id",
-        ),
-        "disposition": disposition,
-        "reason": state.get("reason"),
-        "processed_by": state.get("processed_by"),
-        "updated_at": _require_non_empty_text(state.get("updated_at"), "state.updated_at"),
-    }
-    _require_im_write_root()
-    runtime_files.write_json_object(
-        _im_dir("message_states") / f"{message_id}--{_identity_filename_key(normalized['owner_identity_id'])}.json",
-        normalized,
-    )
-    return normalized
-
-
-def get_im_message_state(message_id: str, identity: dict[str, Any] | str) -> dict[str, Any] | None:
-    normalized_id = runtime_files.require_id(message_id, "message_id")
-    identity_id = im_identity_id_for_row(identity, "state.owner_identity_id")
-    path = _im_dir("message_states") / f"{normalized_id}--{_identity_filename_key(identity_id)}.json"
-    if not path.exists():
-        return None
-    return runtime_files.read_json_object(path)
 
 
 def save_im_event(event: dict[str, Any]) -> dict[str, Any]:

@@ -108,6 +108,31 @@ class CommandImsgClientTests(unittest.TestCase):
         self.assertEqual(calls[0]["command"], ["imsg", "status"])
         self.assertEqual(calls[0]["timeout"], imessage_channel.IMSG_STATUS_TIMEOUT_SECONDS)
 
+    def test_send_uses_bounded_timeout_and_wraps_expiry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            db_path = Path(temp_root) / "chat.db"
+            _create_chat_db(db_path, chat_id=3212)
+            calls: list[dict[str, Any]] = []
+
+            def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+                calls.append({"command": command, **kwargs})
+                raise subprocess.TimeoutExpired(command, timeout=kwargs.get("timeout"))
+
+            client = imessage_channel.CommandImsgClient(
+                imsg_bin="imsg",
+                messages_db_path=db_path,
+                subprocess_run=fake_run,
+            )
+
+            try:
+                with self.assertRaisesRegex(imessage_channel.ChannelError, "iMessage send command timed out"):
+                    client.send(route={"chat_id": "3212", "sender": "hblouis@icloud.com"}, text="hello")
+            except subprocess.TimeoutExpired as exc:
+                self.fail(f"send timeout was not wrapped as ChannelError: {exc}")
+
+        self.assertEqual(calls[0]["command"][:4], ["imsg", "send", "--text", "hello"])
+        self.assertEqual(calls[0]["timeout"], imessage_channel.IMSG_SEND_COMMAND_TIMEOUT_SECONDS)
+
     def test_send_accepts_route_scoped_successful_message_row(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             db_path = Path(temp_root) / "chat.db"

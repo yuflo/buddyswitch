@@ -145,24 +145,6 @@ class ExternalImSession:
             message_id=message_id,
         )
 
-    def update_disposition(
-        self,
-        *,
-        external_session: dict[str, Any],
-        message_id: str,
-        disposition: str,
-        reason: str | None = None,
-    ) -> dict[str, Any]:
-        identity_response = _external_identity_from_session(external_session)
-        if identity_response.get("ok") is not True:
-            return identity_response
-        return message_service.update_im_disposition(
-            identity=identity_response["identity"],
-            message_id=message_id,
-            disposition=disposition,
-            reason=reason,
-        )
-
     def _send_target_identity(self, external_session: dict[str, Any], value: Any) -> dict[str, Any]:
         identity_response = _external_identity_from_session(external_session)
         if identity_response.get("ok") is not True:

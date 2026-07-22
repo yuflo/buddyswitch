@@ -26,8 +26,6 @@ SCRIPTS = ROOT / "scripts"
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
 from env.domain import task_sys  # noqa: E402
-from env.repos import messages as message_repo  # noqa: E402
-from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from env.tool_runtime import results as tool_results  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
@@ -249,46 +247,6 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 self._assert_rejection_contract(response)
                 self.assertEqual(task_sys.get_task(task_id), before)
                 task_sys.record_task_cancel(task_id, {"reason": "Release foreign fixture."})
-
-    def test_message_mark_needs_parent_rejects_without_parent_submit(self) -> None:
-        dev_actor_id = self._runtime_actor_id(role="dev", label="act-dev-parent-submit-contract")
-        pm_actor_id = self._runtime_actor_id(role="pm", label="act-pm-parent-submit-contract")
-        instance_json = self._instance_json(role="dev", actor_id="act-dev-parent-submit-contract")
-        seed_response = message_service.send_im_message(
-            sender_identity={"id": pm_actor_id, "type": "actor"},
-            target_identity={"id": dev_actor_id, "type": "actor"},
-            content="This needs parent handling.",
-        )
-        self.assertTrue(seed_response.get("ok"), msg=seed_response)
-        message_id = seed_response["message"]["id"]
-
-        with patch.object(
-            runtime_context.TaskSysRuntimeAccess,
-            "execute_instruction",
-            autospec=True,
-            side_effect=AssertionError("message.mark must not execute parent handoff"),
-        ):
-            response = self._dispatch(
-                instance_json=instance_json,
-                actor_id="act-dev-parent-submit-contract",
-                role="dev",
-                tool="message",
-                action="mark",
-                args={
-                    "message_id": message_id,
-                    "disposition": "needs_parent",
-                    "reason": "This changes the active parent-thread objective.",
-                },
-            )
-
-        self._assert_rejection_contract(response)
-        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
-        self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
-        self.assertIn("message.get", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
-        state = message_repo.get_im_message_state(message_id, dev_actor_id)
-        self.assertIsInstance(state, dict, msg=response)
-        assert isinstance(state, dict)
-        self.assertEqual(state["disposition"], "unseen")
 
     def test_task_sys_close_response_exposes_side_cleanup_contract(self) -> None:
         actor_label = "act-dev-task-sys-feedback"

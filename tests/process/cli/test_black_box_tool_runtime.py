@@ -24,7 +24,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
     "artifact": {"attach_file", "create_revision", "get", "get_attachment", "list", "list_attachments", "update_metadata"},
     "context": {"get", "list_sources", "summarize"},
     "evidence": {"approve_downgrade", "issue_browser"},
-    "message": {"contacts", "conversation", "get", "list", "mark", "send"},
+    "message": {"contacts", "conversation", "get", "list", "send"},
     "search": {"request", "status"},
     "task_sys": {"list", "get", "close", "cancel", "need_parent"},
     "track": {

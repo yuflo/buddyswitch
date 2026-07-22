@@ -17,7 +17,7 @@ from tests.integration.im._imessage_fakes import (
 
 USAGE_PROMPT = "Use /actors, @actor-id <message>, or Reply to an actor message."
 REPLY_UNAVAILABLE_PROMPT = "This message cannot be replied to."
-REPLY_FAILED_PROMPT = "Reply failed. Reply to a newer actor message or use @actor-id."
+REPLY_FAILED_PROMPT = "Reply failed. Try again or use @actor-id."
 
 
 class ImessageRoutingTests(unittest.TestCase):
@@ -255,14 +255,46 @@ class ImessageRoutingTests(unittest.TestCase):
         self.assertEqual(imsg.sent[-1]["text"], REPLY_UNAVAILABLE_PROMPT)
         self.assertEqual(api.replies, [])
 
-    def test_second_reply_rejection_has_no_target_send_fallback(self) -> None:
+    def test_multiple_native_replies_share_one_anchor_without_target_send_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            controller, api, imsg = _controller(Path(temp_root))
+            controller.state_store.save(_current_state())
+
+            first = controller.handle_inbound_message(
+                _row(
+                    text="FIRST",
+                    guid="guid-first",
+                    thread_originator_guid="ACTOR-BUBBLE-GUID",
+                )
+            )
+            second = controller.handle_inbound_message(
+                _row(
+                    text="SECOND",
+                    guid="guid-second",
+                    thread_originator_guid="ACTOR-BUBBLE-GUID",
+                )
+            )
+            state = controller.state_store.load()
+
+        self.assertEqual(first["status"], "replied")
+        self.assertEqual(second["status"], "replied")
+        self.assertEqual([call["reply_to"] for call in api.replies], ["msg-actor-1", "msg-actor-1"])
+        self.assertEqual([call["content"] for call in api.replies], ["FIRST", "SECOND"])
+        self.assertEqual(api.sent_to_actor, [])
+        self.assertEqual(imsg.sent, [])
+        self.assertEqual(
+            state["contacts"]["sender:user-a@example.com"]["message_links"]["ACTOR-BUBBLE-GUID"],
+            {"message_id": "msg-actor-1", "event_id": "imev-actor-1"},
+        )
+
+    def test_native_reply_api_failure_has_no_target_send_fallback_or_one_shot_guidance(self) -> None:
         api = _FakeBuddySwitchImApi()
         api.reply_results.append(
             {
                 "ok": False,
                 "error": {
-                    "code": "E_IM_REPLY_TARGET",
-                    "message": "reply_to message must be a processable inbound message; current disposition is replied",
+                    "code": "E_IM_TARGET",
+                    "message": "target actor is not currently reachable",
                 },
             }
         )
@@ -272,21 +304,16 @@ class ImessageRoutingTests(unittest.TestCase):
 
             result = controller.handle_inbound_message(
                 _row(
-                    text="second reply",
-                    guid="guid-second",
+                    text="retryable reply",
+                    guid="guid-reply-failed",
                     thread_originator_guid="ACTOR-BUBBLE-GUID",
                 )
             )
-            state = controller.state_store.load()
 
         self.assertEqual(result["status"], "reply_failed")
         self.assertEqual(imsg.sent[-1]["text"], REPLY_FAILED_PROMPT)
         self.assertEqual(len(api.replies), 1)
         self.assertEqual(api.sent_to_actor, [])
-        self.assertEqual(
-            state["contacts"]["sender:user-a@example.com"]["message_links"]["ACTOR-BUBBLE-GUID"],
-            {"message_id": "msg-actor-1", "event_id": "imev-actor-1"},
-        )
 
     def test_from_me_and_empty_rows_are_ignored_without_session_creation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

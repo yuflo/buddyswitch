@@ -176,12 +176,11 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         message_contacts_action = catalog.get_action_definition("message", "contacts")
         message_get_action = catalog.get_action_definition("message", "get")
         message_get = message_get_action.input_schema
-        message_mark_action = catalog.get_action_definition("message", "mark")
-        message_mark = message_mark_action.input_schema
         message_list_action = catalog.get_action_definition("message", "list")
         message_list = message_list_action.input_schema
         message_conversation_action = catalog.get_action_definition("message", "conversation")
         message_conversation = message_conversation_action.input_schema
+        self.assertEqual(set(catalog.supported_actions("message")), {"contacts", "conversation", "get", "list", "send"})
         self.assertNotIn("comment", catalog.supported_tools())
 
         create_now = track_create["properties"]["now"]
@@ -327,15 +326,6 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("role", message_list_properties)
         self.assertNotIn("q", message_list_properties)
 
-        self.assertEqual(message_mark_action.kind, "write")
-        self.assertEqual(message_mark_action.mutates, "runtime_objects")
-        self.assertEqual(message_mark_action.required_permission, "message.mark")
-        self.assertEqual(message_mark_action.durability, "durable")
-        self.assertEqual(set(message_mark.get("required", [])), {"message_id", "disposition"})
-        self.assertEqual(set(message_mark.get("properties", {})), {"message_id", "disposition", "reason"})
-        self.assertEqual(message_mark["properties"]["message_id"].get("type"), "string")
-        self.assertEqual(message_mark["properties"]["disposition"].get("enum"), ["absorbed"])
-        self.assertEqual(message_mark["properties"]["reason"].get("type"), "string")
         send_contract_text = " ".join(
             str(row)
             for row in (
@@ -363,14 +353,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             "actor runtime reachability",
             "identity profiles",
             "reply_to",
-            "processable inbound",
             "external",
             "active actor",
-            "replied",
-            "disposition save failure",
-            "previous disposition",
-            "message.mark(absorbed)",
-            "task_sys.need_parent",
+            "new immutable message",
+            "original_message_id",
             "actor_handling_status",
             "target actor local inbound event",
             "target_identity",
@@ -382,26 +368,14 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("central im derives the other " + "direct identity", send_contract_text)
         self.assertNotIn("reply inside the existing " + "direct conversation", send_contract_text)
         self.assertNotIn("target_identity_id is only required for a new " + "target-identity message", send_contract_text)
+        self.assertNotIn("processable", send_contract_text)
+        self.assertNotIn("disposition", send_contract_text)
         self.assertNotIn("tasks", message_send_action.does_not_write)
-        mark_contract_text = " ".join(
-            str(row)
-            for row in (
-                message_mark_action.description,
-                message_mark["properties"]["disposition"].get("description"),
-                message_mark["properties"]["reason"].get("description"),
-                message_mark_action.success_effect,
-                message_mark_action.failure_state_guarantee,
-                message_mark_action.do_not_use_when,
-            )
-        ).lower()
-        for snippet in (
-            "absorbed",
-            "task_sys.need_parent",
-            "message.send(reply_to=...)",
-            "generic disposition editor",
-        ):
-            self.assertIn(snippet, mark_contract_text)
-        self.assertNotIn("parent prompt first", mark_contract_text)
+        get_contract_text = json.dumps(asdict(message_get_action), ensure_ascii=True, sort_keys=True).lower()
+        self.assertIn("exact message", get_contract_text)
+        self.assertIn("visible", get_contract_text)
+        self.assertNotIn("processable", get_contract_text)
+        self.assertNotIn("disposition", get_contract_text)
         self.assertIn("identity", str(message_contacts_action.description).lower())
         self.assertIn("self", str(message_contacts_action.description).lower())
         message_contacts_contract = json.dumps(asdict(message_contacts_action), ensure_ascii=True, sort_keys=True).lower()

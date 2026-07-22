@@ -29,7 +29,7 @@ class ImHttpRouterTests(RuntimeWorkspaceTestCase):
         )
         return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": "market"}
 
-    def test_external_http_contract_send_events_get_and_mark(self) -> None:
+    def test_external_http_contract_send_events_get_and_removed_state_route(self) -> None:
         actor_identity = self._actor_identity()
         handling_calls: list[dict[str, object]] = []
         router = im_http_router.ImHttpRouter(
@@ -217,14 +217,14 @@ class ImHttpRouterTests(RuntimeWorkspaceTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(after_ack["events"], [])
 
-        status, mark = router.handle(
+        status, removed_state_route = router.handle(
             "PATCH",
             f"/api/im/messages/{reply_id}/disposition",
             json.dumps({"disposition": "absorbed", "reason": "consumed"}).encode("utf-8"),
             {"Authorization": f"Bearer {key}"},
         )
-        self.assertEqual(status, 200)
-        self.assertEqual(mark["disposition"], "absorbed")
+        self.assertEqual(status, 404)
+        self.assertEqual(removed_state_route["error"]["code"], "NOT_FOUND")
 
         status, conversation = router.handle(
             "GET",
