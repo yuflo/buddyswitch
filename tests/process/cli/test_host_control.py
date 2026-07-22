@@ -38,6 +38,7 @@ def valid_instance_row() -> dict[str, object]:
         "app_server_health": "healthy",
         "thread_id": "thread-main",
         "browser_port": 9222,
+        "last_failure": None,
         "updated_at": "2026-07-13T00:00:00Z",
         "workspace_dir": "/tmp/workspace",
     }
@@ -86,19 +87,313 @@ class FakePrivateRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[str, ...], float]] = []
         self.responses: dict[tuple[str, tuple[str, ...]], dict[str, object]] = {}
+        self.errors: dict[tuple[str, tuple[str, ...]], HOST_CONTROL.HostControlError] = {}
 
     def add(self, operation: str, args: list[str], payload: dict[str, object]) -> None:
         self.responses[(operation, tuple(args))] = payload
 
+    def add_error(self, operation: str, args: list[str], error: HOST_CONTROL.HostControlError) -> None:
+        self.errors[(operation, tuple(args))] = error
+
     def run(self, operation: str, args: list[str], *, timeout_seconds: float) -> dict[str, object]:
         self.calls.append((operation, tuple(args), timeout_seconds))
         key = (operation, tuple(args))
+        if key in self.errors:
+            raise self.errors[key]
         if key not in self.responses:
             raise AssertionError(f"unexpected host control call: {key!r}")
         return self.responses[key]
 
 
 class HostControlTests(unittest.TestCase):
+    @staticmethod
+    def _failed_status(actor_id: str = "act-pm-failed") -> dict[str, object]:
+        return {
+            "actor_id": actor_id,
+            "role": "pm",
+            "status": "inactive",
+            "workspace_dir": f"/tmp/instances/{actor_id}/workspace",
+            "browser_port": None,
+            "updated_at": "2026-07-18T00:00:00Z",
+            "thread_id": None,
+            "codex_runtime": TEST_RUNTIME.to_record(),
+            "last_failure": {
+                "phase": "daemon_start",
+                "message": "Daemon start failed.",
+                "failed_at": "2026-07-18T00:00:00Z",
+            },
+            "app_server": {},
+            "daemon": {},
+            "runtime_broker": {},
+            "thread": {},
+        }
+
+    def test_instance_list_skips_record_removed_after_enumeration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / "shared"
+            missing_instance_json = shared_root / "instances" / "act-pm-gone" / "instance.json"
+            env = os.environ.copy()
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            completed = run_process(
+                [
+                    "bash",
+                    "-c",
+                    "\n".join(
+                        [
+                            'source "$1"',
+                            'missing_instance_json="$2"',
+                            'buddyswitch_instance_json_files() { printf \'%s\\n\' "${missing_instance_json}"; }',
+                            "buddyswitch_instance_list",
+                        ]
+                    ),
+                    "bash",
+                    str(ROOT / "tools" / "launcher" / "host_control.sh"),
+                    str(missing_instance_json),
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), {"instances": []})
+
+    def test_start_uses_owner_allocated_actor_id_at_every_private_boundary(self) -> None:
+        runner = FakePrivateRunner()
+        runtime = codex_runtime.CodexRuntime(
+            executable=Path("/opt/buddyswitch/codex"),
+            version="codex-cli test-runtime",
+        )
+        control = HOST_CONTROL.HostControl(
+            repo_root=ROOT,
+            runner=runner,
+            runtime_resolver=lambda: runtime,
+        )
+
+        self.assertTrue(
+            hasattr(control, "allocate_actor_id"),
+            "Host Control must allocate the actor id before Start is enqueued.",
+        )
+        with mock.patch.object(
+            HOST_CONTROL,
+            "uuid4",
+            return_value=mock.Mock(hex="0123456789abcdef0123456789abcdef"),
+        ):
+            actor_id = control.allocate_actor_id("pm")
+        runner.add(
+            "start",
+            ["pm", str(runtime.executable), runtime.version, actor_id],
+            {
+                "actor_id": actor_id,
+                "role": "pm",
+                "workspace_dir": "/tmp/workspace",
+                "project_workspace_dir": "/tmp/project/workspace",
+                "instance_record": f"/tmp/instances/{actor_id}/instance.json",
+            },
+        )
+
+        payload = control.start("pm", actor_id=actor_id)
+
+        self.assertEqual(actor_id, "act-pm-0123456789ab")
+        self.assertEqual(payload["actor_id"], actor_id)
+        self.assertEqual(
+            [(operation, args) for operation, args, _timeout in runner.calls],
+            [
+                (
+                    "start",
+                    ("pm", "/opt/buddyswitch/codex", "codex-cli test-runtime", actor_id),
+                )
+            ],
+        )
+
+    def test_start_rejects_private_result_with_different_actor_id(self) -> None:
+        runner = FakePrivateRunner()
+        runtime = codex_runtime.CodexRuntime(
+            executable=Path("/opt/buddyswitch/codex"),
+            version="codex-cli test-runtime",
+        )
+        control = HOST_CONTROL.HostControl(
+            repo_root=ROOT,
+            runner=runner,
+            runtime_resolver=lambda: runtime,
+        )
+        self.assertIn(
+            "actor_id",
+            inspect.signature(control.start).parameters,
+            "Start must accept the owner-issued actor id.",
+        )
+        runner.add(
+            "start",
+            [
+                "pm",
+                str(runtime.executable),
+                runtime.version,
+                "act-pm-expected",
+            ],
+            {
+                "actor_id": "act-pm-different",
+                "role": "pm",
+                "workspace_dir": "/tmp/workspace",
+                "project_workspace_dir": "/tmp/project/workspace",
+                "instance_record": "/tmp/instances/act-pm-different/instance.json",
+            },
+        )
+
+        with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+            control.start("pm", actor_id="act-pm-expected")
+
+        self.assertEqual(raised.exception.code, "COMMAND_FAILED")
+        self.assertIn("actor id mismatch", raised.exception.message.lower())
+
+    def test_prepare_retry_requires_inactive_start_failure_and_allocates_same_role_replacement(self) -> None:
+        accepted_runner = FakePrivateRunner()
+        accepted_runner.add("status", ["act-pm-failed"], self._failed_status())
+        control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=accepted_runner)
+        self.assertTrue(hasattr(control, "prepare_retry"), "Host Control must own Retry preparation.")
+        with mock.patch.object(
+            HOST_CONTROL,
+            "uuid4",
+            return_value=mock.Mock(hex="abcdef0123456789abcdef0123456789"),
+        ):
+            prepared = control.prepare_retry("act-pm-failed")
+
+        self.assertEqual(
+            prepared,
+            {
+                "actor_id": "act-pm-failed",
+                "replacement_actor_id": "act-pm-abcdef012345",
+                "role": "pm",
+            },
+        )
+
+        for name, status, failure in (
+            ("active", "active", self._failed_status()["last_failure"]),
+            ("stopped", "inactive", None),
+        ):
+            with self.subTest(name=name):
+                runner = FakePrivateRunner()
+                runner.add(
+                    "status",
+                    ["act-pm-failed"],
+                    dict(self._failed_status(), status=status, last_failure=failure),
+                )
+                with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+                    HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner).prepare_retry("act-pm-failed")
+                self.assertEqual(raised.exception.code, "LIFECYCLE_BLOCKED")
+
+        missing_runner = FakePrivateRunner()
+        missing_runner.add_error(
+            "status",
+            ["act-pm-missing"],
+            HOST_CONTROL.HostControlError("NOT_FOUND", "actor instance not found: act-pm-missing"),
+        )
+        with self.assertRaises(HOST_CONTROL.HostControlError) as missing:
+            HOST_CONTROL.HostControl(repo_root=ROOT, runner=missing_runner).prepare_retry("act-pm-missing")
+        self.assertEqual(missing.exception.code, "NOT_FOUND")
+
+        malformed_runner = FakePrivateRunner()
+        malformed_runner.add(
+            "status",
+            ["act-pm-failed"],
+            dict(self._failed_status(), role="../pm"),
+        )
+        with self.assertRaises(HOST_CONTROL.HostControlError) as malformed:
+            HOST_CONTROL.HostControl(repo_root=ROOT, runner=malformed_runner).prepare_retry("act-pm-failed")
+        self.assertEqual(malformed.exception.code, "COMMAND_FAILED")
+        self.assertIn("role", malformed.exception.message)
+
+    def test_retry_revalidates_then_deletes_before_starting_same_role_with_replacement_id(self) -> None:
+        runner = FakePrivateRunner()
+        replacement_actor_id = "act-pm-replacement"
+        runner.add("status", ["act-pm-failed"], self._failed_status())
+        runner.add("delete", ["act-pm-failed"], {"actor_id": "act-pm-failed", "deleted": True})
+        runner.add(
+            "start",
+            ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version, replacement_actor_id],
+            {
+                "actor_id": replacement_actor_id,
+                "role": "pm",
+                "workspace_dir": f"/tmp/instances/{replacement_actor_id}/workspace",
+                "project_workspace_dir": "/tmp/project/workspace",
+                "instance_record": f"/tmp/instances/{replacement_actor_id}/instance.json",
+            },
+        )
+        control = HOST_CONTROL.HostControl(
+            repo_root=ROOT,
+            runner=runner,
+            runtime_resolver=lambda: TEST_RUNTIME,
+        )
+        self.assertTrue(hasattr(control, "retry"), "Host Control must compose Retry.")
+
+        payload = control.retry("act-pm-failed", replacement_actor_id)
+
+        self.assertEqual(payload["previous_actor_id"], "act-pm-failed")
+        self.assertEqual(payload["actor_id"], replacement_actor_id)
+        self.assertEqual(
+            [(operation, args) for operation, args, _timeout in runner.calls],
+            [
+                ("status", ("act-pm-failed",)),
+                ("delete", ("act-pm-failed",)),
+                (
+                    "start",
+                    ("pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version, replacement_actor_id),
+                ),
+            ],
+        )
+
+    def test_retry_delete_failure_does_not_start(self) -> None:
+        runner = FakePrivateRunner()
+        runner.add("status", ["act-pm-failed"], self._failed_status())
+        runner.add_error(
+            "delete",
+            ["act-pm-failed"],
+            HOST_CONTROL.HostControlError("COMMAND_FAILED", "Delete failed."),
+        )
+        control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
+
+        with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+            control.retry("act-pm-failed", "act-pm-replacement")
+
+        self.assertEqual(raised.exception.message, "Delete failed.")
+        self.assertEqual([call[0] for call in runner.calls], ["status", "delete"])
+
+    def test_retry_rejects_nonfresh_or_wrong_role_replacement_before_delete(self) -> None:
+        for replacement_actor_id in ("act-pm-failed", "act-dev-replacement"):
+            with self.subTest(replacement_actor_id=replacement_actor_id):
+                runner = FakePrivateRunner()
+                runner.add("status", ["act-pm-failed"], self._failed_status())
+                control = HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner)
+
+                with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+                    control.retry("act-pm-failed", replacement_actor_id)
+
+                self.assertEqual(raised.exception.code, "INVALID_REQUEST")
+                self.assertEqual([call[0] for call in runner.calls], ["status"])
+
+    def test_retry_start_failure_keeps_delete_effect_without_restoring_old_actor(self) -> None:
+        runner = FakePrivateRunner()
+        replacement_actor_id = "act-pm-replacement"
+        runner.add("status", ["act-pm-failed"], self._failed_status())
+        runner.add("delete", ["act-pm-failed"], {"actor_id": "act-pm-failed", "deleted": True})
+        runner.add_error(
+            "start",
+            ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version, replacement_actor_id],
+            HOST_CONTROL.HostControlError("COMMAND_FAILED", "Replacement start failed."),
+        )
+        control = HOST_CONTROL.HostControl(
+            repo_root=ROOT,
+            runner=runner,
+            runtime_resolver=lambda: TEST_RUNTIME,
+        )
+
+        with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+            control.retry("act-pm-failed", replacement_actor_id)
+
+        self.assertEqual(raised.exception.message, "Replacement start failed.")
+        self.assertEqual([call[0] for call in runner.calls], ["status", "delete", "start"])
+
     def test_start_resolves_runtime_once_and_passes_descriptor_to_private_owner(self) -> None:
         runner = FakePrivateRunner()
         runtime = codex_runtime.CodexRuntime(
@@ -107,7 +402,7 @@ class HostControlTests(unittest.TestCase):
         )
         runner.add(
             "start",
-            ["pm", str(runtime.executable), runtime.version],
+            ["pm", str(runtime.executable), runtime.version, "act-pm-demo"],
             {
                 "actor_id": "act-pm-demo",
                 "role": "pm",
@@ -128,13 +423,13 @@ class HostControlTests(unittest.TestCase):
             runtime_resolver=resolve_runtime,
         )
 
-        payload = control.start("pm")
+        payload = control.start("pm", actor_id="act-pm-demo")
 
         self.assertEqual(payload["actor_id"], "act-pm-demo")
         self.assertEqual(resolutions, [True])
         self.assertEqual(
             [(operation, args) for operation, args, _timeout in runner.calls],
-            [("start", ("pm", "/opt/buddyswitch/codex", "codex-cli test-runtime"))],
+            [("start", ("pm", "/opt/buddyswitch/codex", "codex-cli test-runtime", "act-pm-demo"))],
         )
 
     def test_resume_uses_recorded_runtime_and_ignores_current_selection(self) -> None:
@@ -222,10 +517,81 @@ class HostControlTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         self.assertIsNone(json.loads(completed.stdout)["codex_runtime"])
 
+    def test_status_and_list_require_nullable_start_failure_fact(self) -> None:
+        status_payload = {
+            "actor_id": "act-pm-demo",
+            "role": "pm",
+            "status": "inactive",
+            "workspace_dir": "/tmp/workspace",
+            "browser_port": None,
+            "updated_at": "2026-07-13T00:00:00Z",
+            "thread_id": None,
+            "codex_runtime": TEST_RUNTIME.to_record(),
+            "app_server": {},
+            "daemon": {},
+            "runtime_broker": {},
+            "thread": {},
+        }
+        list_row = valid_instance_row()
+        list_row["status"] = "inactive"
+        list_row.pop("last_failure")
+
+        for operation, payload in (("status", status_payload), ("list", list_row)):
+            with self.subTest(operation=operation):
+                runner = FakePrivateRunner()
+                if operation == "status":
+                    runner.add("status", ["act-pm-demo"], payload)
+                    action = lambda: HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner).status("act-pm-demo")
+                else:
+                    runner.add("list", [], {"instances": [payload]})
+                    action = lambda: HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner).list_instances()
+                with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
+                    action()
+                self.assertEqual(raised.exception.code, "COMMAND_FAILED")
+                self.assertIn("last_failure", raised.exception.message)
+
+        for last_failure in (None, {"phase": "daemon_start", "message": "Daemon start failed.", "failed_at": "2026-07-18T00:00:00Z"}):
+            with self.subTest(valid_last_failure=last_failure):
+                runner = FakePrivateRunner()
+                valid_status = dict(status_payload, last_failure=last_failure)
+                runner.add("status", ["act-pm-demo"], valid_status)
+                self.assertEqual(
+                    HOST_CONTROL.HostControl(repo_root=ROOT, runner=runner).status("act-pm-demo")["last_failure"],
+                    last_failure,
+                )
+
+    def test_host_control_start_routes_every_published_phase_through_one_cleanup_owner(self) -> None:
+        source = (ROOT / "tools" / "launcher" / "host_control.sh").read_text(encoding="utf-8")
+        start_block = source.split("start_locked_bootstrap() {", 1)[1].split(
+            "instance_set_inactive_locked() {",
+            1,
+        )[0]
+        phases = (
+            "capability_seed",
+            "runtime_broker_ensure",
+            "codex_config_patch",
+            "env_mcp_ensure",
+            "browser_register",
+            "app_server_ensure",
+            "thread_start",
+            "thread_bootstrap",
+            "daemon_start",
+        )
+
+        self.assertIn("buddyswitch_run_published_start_phase", source)
+        self.assertEqual(source.count("buddyswitch_start_failure_cleanup()"), 1)
+        for phase in phases:
+            with self.subTest(phase=phase):
+                self.assertIn(f'"{phase}"', start_block)
+        self.assertNotIn("buddyswitch_start_failure_cleanup \\\n", start_block)
+
     def test_public_facade_exposes_exact_host_control_operations(self) -> None:
         expected = {
             "roles": ["self"],
-            "start": ["self", "role_id"],
+            "allocate_actor_id": ["self", "role_id"],
+            "start": ["self", "role_id", "actor_id"],
+            "prepare_retry": ["self", "actor_id"],
+            "retry": ["self", "actor_id", "replacement_actor_id"],
             "list_instances": ["self", "role_id"],
             "status": ["self", "actor_id"],
             "clear": ["self", "actor_id"],
@@ -249,7 +615,7 @@ class HostControlTests(unittest.TestCase):
         runner.add("roles", [], {"roles": [role_row]})
         runner.add(
             "start",
-            ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version],
+            ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version, "act-pm-demo"],
             {
                 "actor_id": "act-pm-demo",
                 "role": "pm",
@@ -272,6 +638,7 @@ class HostControlTests(unittest.TestCase):
                 "updated_at": "2026-07-13T00:00:00Z",
                 "thread_id": "thread-main",
                 "codex_runtime": TEST_RUNTIME.to_record(),
+                "last_failure": None,
                 "app_server": {},
                 "daemon": {},
                 "runtime_broker": {},
@@ -296,7 +663,7 @@ class HostControlTests(unittest.TestCase):
 
         with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
             roles = control.roles()
-            started = control.start("pm")
+            started = control.start("pm", actor_id="act-pm-demo")
             instances = control.list_instances()
             self.assertEqual(roles, [role_row])
             self.assertEqual(started["actor_id"], "act-pm-demo")
@@ -316,7 +683,7 @@ class HostControlTests(unittest.TestCase):
             [(operation, args) for operation, args, _timeout in runner.calls],
             [
                 ("roles", ()),
-                ("start", ("pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version)),
+                ("start", ("pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version, "act-pm-demo")),
                 ("list", ()),
                 ("list", ("pm",)),
                 ("status", ("act-pm-demo",)),
@@ -408,8 +775,8 @@ class HostControlTests(unittest.TestCase):
     def test_facade_rejects_malformed_lifecycle_payloads(self) -> None:
         valid_payloads = {
             "start": (
-                lambda control: control.start("pm"),
-                ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version],
+                lambda control: control.start("pm", actor_id="act-pm-demo"),
+                ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version, "act-pm-demo"],
                 {
                     "actor_id": "act-pm-demo",
                     "role": "pm",
@@ -432,6 +799,7 @@ class HostControlTests(unittest.TestCase):
                     "updated_at": "2026-07-13T00:00:00Z",
                     "thread_id": "thread-main",
                     "codex_runtime": TEST_RUNTIME.to_record(),
+                    "last_failure": None,
                     "app_server": {},
                     "daemon": {},
                     "runtime_broker": {},
@@ -710,7 +1078,14 @@ host_control_emit_error_for_output "$2" "$3"
 
     def test_host_control_script_start_uses_positional_private_role(self) -> None:
         completed = run_process(
-            [str(ROOT / "tools" / "launcher" / "host_control.sh"), "start", "--bad", "/bin/sh", "test-version"],
+            [
+                str(ROOT / "tools" / "launcher" / "host_control.sh"),
+                "start",
+                "--bad",
+                "/bin/sh",
+                "test-version",
+                "act-bad-demo",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,

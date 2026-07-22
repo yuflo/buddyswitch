@@ -94,7 +94,7 @@ test('manual refresh renders tracks list before selected conversation completes'
     if (requestUrl === '/api/actors') {
       return Promise.resolve(okResponse({
         actors: [
-          { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+          { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
         ],
       }));
     }
@@ -133,7 +133,7 @@ test('manual refresh renders tracks list before selected conversation completes'
     const elements = createRenderElements();
     state.selectedActorId = 'act-old';
     state.actors = [
-      { actor_id: 'act-old', role: 'market', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-old', role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ];
 
     refresh = app.refreshVisibleRegionsWithFeedback(state, elements);

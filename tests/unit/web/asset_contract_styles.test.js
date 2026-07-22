@@ -165,6 +165,16 @@ test('production stylesheet keeps the new reply chip collapsed while hidden', ()
   ]);
 });
 
+test('empty state heading and detail remain visually separated', () => {
+  assertCssDeclarations('.empty-state > strong', [
+    'display: block;',
+  ]);
+  assertCssDeclarations('.empty-state > span', [
+    'display: block;',
+    'margin-top: 4px;',
+  ]);
+});
+
 test('production stylesheet keeps long direct-thread message content inside bubbles', () => {
   assertCssDeclarations('.room-thread', [
     'min-width: 0;',

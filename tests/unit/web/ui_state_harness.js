@@ -195,6 +195,7 @@ function createRenderElements() {
     deleteButton: node(),
     clearButton: node(),
     resumeButton: node(),
+    retryButton: node(),
     lifecycleOperationStatus: node(),
     actionAvailabilityStatus: node(),
     openTuiButton: node(),

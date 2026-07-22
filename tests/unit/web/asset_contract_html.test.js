@@ -23,6 +23,7 @@ test('production html keeps all real control ids used by the web UI', () => {
     'stop-button',
     'clear-button',
     'resume-button',
+    'retry-button',
     'delete-button',
     'lifecycle-operation-status',
     'action-availability-status',
@@ -45,11 +46,37 @@ test('production html keeps all real control ids used by the web UI', () => {
   });
 });
 
-test('task sys panel uses canonical external lifecycle fields only', () => {
-  assertIncludes(appJs, 'active.status');
+test('B2 task ledger uses terminal projection and canonical external fields only', () => {
+  [
+    'taskSys.terminal_tasks',
+    'taskSys.terminal_count',
+    'task.status',
+    'task.task_id',
+    'task.updated_at',
+    'name="actor-task-row-detail"',
+  ].forEach((marker) => {
+    assertIncludes(appJs, marker);
+  });
+  ['<span>Active</span>', '<span>Recoverable</span>'].forEach((marker) => {
+    assertExcludes(appJs, marker);
+  });
   ['task_desc', 'relation', 'execution', 'task_relation', 'active_processor', 'failure_result'].forEach((marker) => {
     assertExcludes(appJs, marker);
   });
+});
+
+test('B2 task ledger keeps its approved width while the right rail remains scrollable', () => {
+  assertCssDeclarations('.person-panel', ['scrollbar-width: none;']);
+  assertIncludes(stylesCss, '.person-panel::-webkit-scrollbar');
+  assertCssDeclarations('.task-ledger-card', ['width: calc(100% + 1px);']);
+});
+
+test('B2 task ledger explicitly supports keyboard disclosure activation', () => {
+  assertIncludes(appJs, "elements.actorTaskSummary.addEventListener('keydown'");
+  assertIncludes(appJs, "event.key !== 'Enter' && event.key !== ' '");
+  assertIncludes(appJs, 'taskToggle.click()');
+  assertIncludes(stylesCss, '.task-ledger-row:focus-visible');
+  assertIncludes(stylesCss, '.task-ledger-recent-toggle:focus-visible');
 });
 
 test('production html removes the old management shell completely', () => {
@@ -98,12 +125,13 @@ test('production roster exposes grouped lifecycle hierarchy and unmistakable sel
     'aria-selected',
     'aria-expanded',
     'rosterStoppedExpanded',
-    'rosterPendingActors',
+    'lifecycle_state',
+    'needs-attention',
   ].forEach((marker) => {
     assertIncludes(appJs, marker);
   });
-  assertExcludes(appJs, 'rosterPendingActorId');
-  assertExcludes(appJs, 'rosterReconcileActorId');
+  assertExcludes(appJs, 'rosterPendingActors');
+  assertExcludes(appJs, 'data-operation-id');
   assertCssDeclarations('.person-row.is-selected', [
     'border-color: var(--teal);',
     'background: var(--teal-soft);',
@@ -175,7 +203,7 @@ test('production assets expose scoped skeleton and aria busy states', () => {
     "aria-busy",
     'actorCardLoading',
     'conversationLoading',
-    'rosterPendingActors',
+    'actorSelectionPendingId',
   ].forEach((marker) => {
     assertIncludes(appJs, marker);
   });
@@ -215,6 +243,7 @@ test('Team room binds selected actor actions to a compact thread header', () => 
     'id="selected-context-health"',
     'id="stop-button"',
     'id="resume-button"',
+    'id="retry-button"',
     'id="delete-button"',
     'id="lifecycle-operation-status"',
     'id="action-availability-status"',
@@ -257,13 +286,14 @@ test('Team room binds selected actor actions to a compact thread header', () => 
     assertExcludes(teammateRail[0], forbidden);
   });
 
-  ['stop-button', 'resume-button', 'delete-button'].forEach((id) => {
+  ['stop-button', 'resume-button', 'retry-button', 'delete-button'].forEach((id) => {
     const matches = indexHtml.match(new RegExp('id="' + id + '"', 'g')) || [];
     assert.equal(matches.length, 1, `Expected one production control for ${id}`);
   });
   [
     'id="stop-button"',
     'id="resume-button"',
+    'id="retry-button"',
     'id="delete-button"',
     'id="lifecycle-operation-status"',
     'id="action-availability-status"',

@@ -10,6 +10,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 
 HELPER_DIR = Path(__file__).resolve().parent
@@ -116,24 +117,58 @@ class HostControl:
         payload = self._run("roles", [], timeout_seconds=10)
         return _expect_role_rows(payload)
 
-    def start(self, role_id: str) -> dict[str, object]:
+    def allocate_actor_id(self, role_id: str) -> str:
         role = validate_role_id(role_id)
+        return f"act-{role}-{uuid4().hex[:12]}"
+
+    def start(self, role_id: str, actor_id: str | None = None) -> dict[str, object]:
+        role = validate_role_id(role_id)
+        requested_actor_id = self.allocate_actor_id(role) if actor_id is None else validate_actor_id(actor_id)
         try:
             runtime = self._runtime_resolver()
         except codex_runtime.CodexRuntimeError as exc:
             raise HostControlError(exc.code, str(exc), returncode=5) from exc
         payload = self._run(
             "start",
-            [role, str(runtime.executable), runtime.version],
+            [role, str(runtime.executable), runtime.version, requested_actor_id],
             timeout_seconds=120,
         )
         _require_str_fields(payload, "start", ("actor_id", "role", "workspace_dir", "project_workspace_dir", "instance_record"))
+        if payload["actor_id"] != requested_actor_id:
+            raise HostControlError(
+                "COMMAND_FAILED",
+                f"Host Control start actor id mismatch: expected {requested_actor_id}, got {payload['actor_id']}.",
+                returncode=1,
+            )
         diagnostics = payload.get("diagnostics")
         if diagnostics is not None and (
             not isinstance(diagnostics, list) or not all(isinstance(item, str) for item in diagnostics)
         ):
             raise HostControlError("COMMAND_FAILED", "Invalid Host Control start payload: diagnostics must be a list of strings.", returncode=1)
         return payload
+
+    def prepare_retry(self, actor_id: str) -> dict[str, object]:
+        normalized, role = self._retryable_start_failure(actor_id)
+        return {
+            "actor_id": normalized,
+            "replacement_actor_id": self.allocate_actor_id(role),
+            "role": role,
+        }
+
+    def retry(self, actor_id: str, replacement_actor_id: str) -> dict[str, object]:
+        normalized, role = self._retryable_start_failure(actor_id)
+        replacement = validate_actor_id(replacement_actor_id)
+        if replacement == normalized or not replacement.startswith(f"act-{role}-"):
+            raise HostControlError(
+                "INVALID_REQUEST",
+                "Retry replacement actor id must be a fresh id for the failed actor role.",
+                returncode=2,
+            )
+
+        self.delete(normalized)
+        started = dict(self.start(role, actor_id=replacement))
+        started["previous_actor_id"] = normalized
+        return started
 
     def list_instances(self, role_id: str | None = None) -> list[dict[str, object]]:
         args: list[str] = []
@@ -148,6 +183,7 @@ class HostControl:
         _require_nullable_str(payload, "status", "thread_id")
         _require_nullable_int(payload, "status", "browser_port")
         _require_nullable_dict(payload, "status", "codex_runtime")
+        _require_nullable_dict(payload, "status", "last_failure")
         _require_dict_fields(payload, "status", ("app_server", "daemon", "runtime_broker", "thread"))
         return payload
 
@@ -222,6 +258,25 @@ class HostControl:
 
     def _run(self, operation: str, args: list[str], *, timeout_seconds: float) -> dict[str, object]:
         return self._runner.run(operation, args, timeout_seconds=timeout_seconds)
+
+    def _retryable_start_failure(self, actor_id: str) -> tuple[str, str]:
+        normalized = validate_actor_id(actor_id)
+        instance = self.status(normalized)
+        if instance["status"] != "inactive" or not isinstance(instance["last_failure"], dict):
+            raise HostControlError(
+                "LIFECYCLE_BLOCKED",
+                f"Retry requires an inactive actor with a recorded start failure: {normalized}.",
+                returncode=3,
+            )
+        try:
+            role = validate_role_id(instance["role"])  # type: ignore[arg-type]
+        except HostControlError as exc:
+            raise HostControlError(
+                "COMMAND_FAILED",
+                "Invalid Host Control status payload: role must be a valid role id.",
+                returncode=1,
+            ) from exc
+        return normalized, role
 
     @staticmethod
     def _resolve_runtime() -> codex_runtime.CodexRuntime:
@@ -391,6 +446,7 @@ def _expect_instance_rows(payload: dict[str, object]) -> list[dict[str, object]]
         _require_valid_role_id_field(row, "instances row", "role")
         _require_nullable_str(row, "instances row", "thread_id")
         _require_nullable_int(row, "instances row", "browser_port")
+        _require_nullable_dict(row, "instances row", "last_failure")
     return rows
 
 

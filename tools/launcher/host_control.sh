@@ -128,6 +128,8 @@ role_filter = sys.argv[2]
 
 try:
     payload = json.loads(instance_json.read_text(encoding="utf-8"))
+except FileNotFoundError:
+    raise SystemExit(0)
 except Exception as exc:
     print(f"invalid\t{instance_json.parent.name}\tinvalid-json:{exc}")
     raise SystemExit(0)
@@ -158,6 +160,7 @@ payload = {
     "browser_port": None,
     "updated_at": "",
     "workspace_dir": sys.argv[2],
+    "last_failure": None,
 }
 print(json.dumps(payload, ensure_ascii=True))
 PY
@@ -188,6 +191,7 @@ row = {
     "browser_port": browser_port if isinstance(browser_port, int) else None,
     "updated_at": payload.get("updated_at", ""),
     "workspace_dir": payload.get("workspace_dir", ""),
+    "last_failure": payload.get("last_failure"),
 }
 print(json.dumps(row, ensure_ascii=True))
 PY
@@ -303,13 +307,13 @@ buddyswitch_instance_require_safe_delete_root() {
 }
 
 start_codex() {
-  local role="${1:-}" codex_bin="${2:-}" codex_version="${3:-}"
+  local role="${1:-}" codex_bin="${2:-}" codex_version="${3:-}" requested_actor_id="${4:-}"
   local actor_id instance_json bootstrap_stdout bootstrap_status diagnostics_file
 
   actor_id=""
   instance_json=""
-  if [[ $# -ne 3 ]]; then
-    echo "start requires <role-id> <codex-executable> <codex-version>" >&2
+  if [[ $# -ne 4 ]]; then
+    echo "start requires <role-id> <codex-executable> <codex-version> <actor-id>" >&2
     return 2
   fi
   if [[ -z "${role}" || "${role}" == -* ]]; then
@@ -322,7 +326,8 @@ start_codex() {
     echo "start requires a valid Codex runtime descriptor" >&2
     return 2
   fi
-  actor_id="$(buddyswitch_generate_actor_id "${role}")"
+  buddyswitch_validate_actor_id "${requested_actor_id}" || return $?
+  actor_id="${requested_actor_id}"
   buddyswitch_env_bind_instance "${actor_id}" || return $?
   instance_json="$(buddyswitch_instance_json_path "${actor_id}")"
 
@@ -384,14 +389,69 @@ buddyswitch_start_failure_cleanup() {
   local browser_port="${5:-}"
   local stop_output=""
 
+  stop_output="$(buddyswitch_daemon_stop 2>&1)" || {
+    echo "Warning: daemon stop failed during ${phase} cleanup for ${actor_id}." >&2
+    [[ -n "${stop_output}" ]] && echo "${stop_output}" >&2
+  }
   stop_output="$(buddyswitch_app_server_stop 2>&1)" || {
     echo "Warning: app-server stop failed during ${phase} cleanup for ${actor_id}." >&2
     [[ -n "${stop_output}" ]] && echo "${stop_output}" >&2
   }
-  buddyswitch_runtime_broker_stop || true
-  buddyswitch_browser_manager_stop_instance "${actor_id}" || true
-  buddyswitch_instance_clear_app_server "${actor_id}" "inactive"
+  stop_output="$(buddyswitch_runtime_broker_stop 2>&1)" || {
+    echo "Warning: runtime broker stop failed during ${phase} cleanup for ${actor_id}." >&2
+    [[ -n "${stop_output}" ]] && echo "${stop_output}" >&2
+  }
+  stop_output="$(buddyswitch_browser_manager_stop_instance "${actor_id}" 2>&1)" || {
+    echo "Warning: browser stop failed during ${phase} cleanup for ${actor_id}." >&2
+    [[ -n "${stop_output}" ]] && echo "${stop_output}" >&2
+  }
   buddyswitch_instance_record_failure "${actor_id}" "${phase}" "${message}" "${thread_id}" "${browser_port}"
+}
+
+BUDDYSWITCH_START_PHASE_OUTPUT=""
+
+buddyswitch_run_published_start_phase() {
+  local actor_id="$1" phase="$2" fallback_message="$3" thread_id="$4" browser_port="$5"
+  local phase_status message output_file
+  shift 5
+
+  BUDDYSWITCH_START_PHASE_OUTPUT=""
+  output_file="$(mktemp "${TMPDIR:-/tmp}/buddyswitch-start-phase.XXXXXX")" || return $?
+  set +e
+  "$@" >"${output_file}" 2>&1
+  phase_status=$?
+  set -e
+  BUDDYSWITCH_START_PHASE_OUTPUT="$(cat "${output_file}")"
+  rm -f "${output_file}"
+  if [[ "${phase_status}" -eq 0 ]]; then
+    return 0
+  fi
+
+  message="${BUDDYSWITCH_START_PHASE_OUTPUT:-${fallback_message}}"
+  [[ -n "${BUDDYSWITCH_START_PHASE_OUTPUT}" ]] && printf '%s\n' "${BUDDYSWITCH_START_PHASE_OUTPUT}" >&2
+  buddyswitch_start_failure_cleanup \
+    "${actor_id}" \
+    "${phase}" \
+    "${message}" \
+    "${thread_id}" \
+    "${browser_port}"
+  return "${phase_status}"
+}
+
+host_control_started_thread_id() {
+  local thread_json="$1"
+  "${BUDDYSWITCH_PYTHON}" - "${thread_json}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+thread = payload.get("thread")
+thread_id = thread.get("id") if isinstance(thread, dict) else None
+if not isinstance(thread_id, str) or not thread_id:
+    print("App-server thread start did not return thread.id.", file=sys.stderr)
+    raise SystemExit(1)
+print(thread_id)
+PY
 }
 
 buddyswitch_thread_bootstrap_failure_is_timeout_like() {
@@ -479,18 +539,22 @@ for field, value in expected.items():
         raise SystemExit(1)
 PY
   buddyswitch_instance_activate "${requested_actor_id}" "${requested_role}" "inactive" >/dev/null || return $?
-  host_control_seed_actor_capabilities "$(buddyswitch_instance_json_path "${requested_actor_id}")" >/dev/null || return $?
-  buddyswitch_runtime_broker_ensure || return $?
-  buddyswitch_patch_codex_config || return $?
-  if ! buddyswitch_env_mcp_ensure; then
-    buddyswitch_runtime_broker_stop
-    return 1
-  fi
-  browser_output="$(buddyswitch_browser_register_cockpit_mcp 2>&1)" || {
-    [[ -n "${browser_output}" ]] && echo "${browser_output}" >&2
-    buddyswitch_runtime_broker_stop
-    return 1
-  }
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "capability_seed" "Capability seed failed." "" "" \
+    host_control_seed_actor_capabilities "$(buddyswitch_instance_json_path "${requested_actor_id}")" || return $?
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "runtime_broker_ensure" "Runtime broker ensure failed." "" "" \
+    buddyswitch_runtime_broker_ensure || return $?
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "codex_config_patch" "Codex config patch failed." "" "" \
+    buddyswitch_patch_codex_config || return $?
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "env_mcp_ensure" "Environment MCP ensure failed." "" "" \
+    buddyswitch_env_mcp_ensure || return $?
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "browser_register" "Browser cockpit registration failed." "" "" \
+    buddyswitch_browser_register_cockpit_mcp || return $?
+  browser_output="${BUDDYSWITCH_START_PHASE_OUTPUT}"
   if [[ -n "${browser_output}" ]]; then
     if [[ -n "${BUDDYSWITCH_START_DIAGNOSTICS_FILE:-}" ]]; then
       printf '%s\n' "${browser_output}" >>"${BUDDYSWITCH_START_DIAGNOSTICS_FILE}" || return $?
@@ -498,73 +562,33 @@ PY
       printf '%s\n' "${browser_output}" >&2
     fi
   fi
-  app_server_json="$(buddyswitch_app_server_ensure)" || {
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "app_server_ensure" \
-      "App-server ensure failed." \
-      "" \
-      ""
-    return 1
-  }
-  thread_json="$(buddyswitch_app_server_thread_start)" || {
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "thread_start" \
-      "${thread_json:-thread/start failed.}" \
-      "" \
-      ""
-    return 1
-  }
-  thread_id="$(
-    "${BUDDYSWITCH_PYTHON}" - "${thread_json}" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-thread = payload.get("thread")
-if isinstance(thread, dict):
-    thread_id = thread.get("id")
-    if isinstance(thread_id, str):
-        print(thread_id)
-PY
-  )"
-  if [[ -z "${thread_id}" ]]; then
-    echo "App-server thread start did not return thread.id." >&2
-    echo "${thread_json}" >&2
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "thread_start" \
-      "App-server thread start did not return thread.id." \
-      "" \
-      ""
-    return 1
-  fi
-  if ! buddyswitch_start_thread_bootstrap_with_retry "${thread_id}"; then
-    echo "Thread bootstrap failed for ${thread_id}." >&2
-    buddyswitch_start_failure_cleanup \
-      "${requested_actor_id}" \
-      "thread_bootstrap" \
-      "${BUDDYSWITCH_LAST_THREAD_BOOTSTRAP_ERROR:-Thread bootstrap failed for ${thread_id}.}" \
-      "${thread_id}" \
-      ""
-    return 1
-  fi
-  buddyswitch_instance_set_app_server \
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "app_server_ensure" "App-server ensure failed." "" "" \
+    buddyswitch_app_server_ensure || return $?
+  app_server_json="${BUDDYSWITCH_START_PHASE_OUTPUT}"
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "thread_start" "thread/start failed." "" "" \
+    buddyswitch_app_server_thread_start || return $?
+  thread_json="${BUDDYSWITCH_START_PHASE_OUTPUT}"
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "thread_start" "App-server thread start did not return thread.id." "" "" \
+    host_control_started_thread_id "${thread_json}" || return $?
+  thread_id="${BUDDYSWITCH_START_PHASE_OUTPUT}"
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "thread_bootstrap" "Thread bootstrap failed for ${thread_id}." "${thread_id}" "" \
+    buddyswitch_start_thread_bootstrap_with_retry "${thread_id}" || return $?
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "runtime_record" "Instance runtime record failed." "${thread_id}" "" \
+    buddyswitch_instance_set_app_server \
     "${requested_actor_id}" \
     "${thread_id}" \
     "$(_buddyswitch_app_server_json_field "${app_server_json}" "pid")" \
     "$(_buddyswitch_app_server_json_field "${app_server_json}" "socket_path")" \
     "$(_buddyswitch_app_server_json_field "${app_server_json}" "log_file")" \
-    "active"
-  if ! buddyswitch_daemon_start >/dev/null; then
-    echo "Daemon start failed for ${requested_actor_id}." >&2
-    buddyswitch_app_server_stop || true
-    buddyswitch_runtime_broker_stop
-    buddyswitch_browser_manager_stop_instance "${requested_actor_id}" || true
-    buddyswitch_instance_clear_app_server "${requested_actor_id}" "inactive"
-    return 1
-  fi
+    "active" || return $?
+  buddyswitch_run_published_start_phase \
+    "${requested_actor_id}" "daemon_start" "Daemon start failed for ${requested_actor_id}." "${thread_id}" "" \
+    buddyswitch_daemon_start || return $?
 }
 
 instance_set_inactive_locked() {
@@ -958,6 +982,7 @@ payload = {
     "updated_at": instance_payload.get("updated_at"),
     "thread_id": instance_payload.get("thread_id"),
     "codex_runtime": instance_payload.get("codex_runtime"),
+    "last_failure": instance_payload.get("last_failure"),
     "app_server": app_server,
     "daemon": daemon,
     "runtime_broker": runtime_broker,
@@ -1107,11 +1132,11 @@ host_control_roles() {
 }
 
 host_control_start() {
-  if [[ $# -ne 3 ]]; then
-    echo "start requires <role-id> <codex-executable> <codex-version>" >&2
+  if [[ $# -ne 4 ]]; then
+    echo "start requires <role-id> <codex-executable> <codex-version> <actor-id>" >&2
     return 2
   fi
-  start_codex "$1" "$2" "$3"
+  start_codex "$1" "$2" "$3" "$4"
 }
 
 host_control_list() {

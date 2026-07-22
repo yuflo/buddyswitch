@@ -36,8 +36,8 @@ test('actor roster payload exposes fallback facts without changing selection int
 
   const result = app.applyActorsPayload(state, {
     actors: [
-      { actor_id: 'act-pm-demo', role: 'pm', runtime: { status: 'active' } },
-      { actor_id: 'act-dev-demo', role: 'dev', runtime: { status: 'inactive' } },
+      { actor_id: 'act-pm-demo', role: 'pm', lifecycle_state: 'active', runtime: { status: 'active' } },
+      { actor_id: 'act-dev-demo', role: 'dev', lifecycle_state: 'stopped', runtime: { status: 'inactive' } },
     ],
   });
 
@@ -73,6 +73,7 @@ test('teammate roster renders prototype person rows from supported actor facts',
     {
       actor_id: 'act-dev-demo',
       role: 'dev',
+      lifecycle_state: 'active',
       runtime: { status: 'active', app_server_health: 'healthy' },
     },
   ];
@@ -97,19 +98,11 @@ test('actor roster groups starting active and stopped work with accurate counts'
     { id: 'pm', label: 'PM', scope: 'product' },
   ];
   state.actors = [
-    { actor_id: 'act-dev-active', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
-    { actor_id: 'act-pm-stopped', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+    { actor_id: 'act-market-starting', role: 'market', lifecycle_state: 'starting', runtime: { status: 'inactive', app_server_health: '' } },
+    { actor_id: 'act-dev-active', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+    { actor_id: 'act-pm-stopped', role: 'pm', lifecycle_state: 'stopped', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
   ];
-  state.lifecycleOperations = {
-    'op-start-market': lifecycleOperation({
-      id: 'op-start-market',
-      action: 'start',
-      status: 'running',
-      label: 'Starting Market',
-      target: { actor_id: '', role: 'market' },
-    }),
-  };
-  state.selectedLifecycleOperationId = 'op-start-market';
+  state.selectedActorId = 'act-market-starting';
 
   const collapsedHtml = app.renderActorRowsHtml(state);
 
@@ -121,7 +114,8 @@ test('actor roster groups starting active and stopped work with accurate counts'
   assert.match(collapsedHtml, />Stopped<[^]*>1</);
   assert.match(collapsedHtml, /act-dev-active/);
   assert.doesNotMatch(collapsedHtml, /act-pm-stopped/);
-  assert.match(collapsedHtml, /data-operation-id="op-start-market"[^>]*role="option"[^>]*aria-selected="true"/);
+  assert.match(collapsedHtml, /data-actor-id="act-market-starting"[^>]*role="option"[^>]*aria-selected="true"/);
+  assert.doesNotMatch(collapsedHtml, /data-operation-id|op-start-market/);
   assert.match(collapsedHtml, /data-roster-toggle="stopped"[^>]*aria-expanded="false"/);
 
   state.rosterStoppedExpanded = true;
@@ -137,8 +131,8 @@ test('roster fallback facts prefer active actor over stopped inventory', () => {
 
   const result = app.applyActorsPayload(state, {
     actors: [
-      { actor_id: 'act-stopped-first', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
-      { actor_id: 'act-active-second', role: 'dev', runtime: { status: 'active', app_server_health: 'healthy' } },
+      { actor_id: 'act-stopped-first', role: 'pm', lifecycle_state: 'stopped', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-active-second', role: 'dev', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
     ],
   });
 
@@ -153,7 +147,7 @@ test('stopped-only roster exposes fallback without changing selection state', ()
 
   const result = app.applyActorsPayload(state, {
     actors: [
-      { actor_id: 'act-stopped-only', role: 'pm', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
+      { actor_id: 'act-stopped-only', role: 'pm', lifecycle_state: 'stopped', runtime: { status: 'inactive', app_server_health: 'unhealthy' } },
     ],
   });
 
@@ -311,6 +305,7 @@ test('renderComposer updates the input and send button without actor list writes
     {
       actor_id: 'act-market-demo',
       role: 'market',
+      lifecycle_state: 'active',
       runtime: { status: 'active', app_server_health: 'healthy' },
     },
   ];
@@ -344,6 +339,7 @@ test('no selection disables all instance actions', () => {
       canDelete: false,
       canClear: false,
       canResume: false,
+      canRetry: false,
     }
   );
 });
@@ -352,6 +348,7 @@ test('send pending disables only send while preserving independent actor control
   assert.deepEqual(
     app.computeInstanceActionState(
       {
+        lifecycle_state: 'active',
         status: 'active',
         app_server_health: 'healthy',
         thread: { status: 'idle' },
@@ -369,6 +366,7 @@ test('send pending disables only send while preserving independent actor control
       canDelete: false,
       canClear: true,
       canResume: false,
+      canRetry: false,
     }
   );
 });
