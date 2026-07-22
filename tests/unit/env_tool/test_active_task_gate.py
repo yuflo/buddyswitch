@@ -81,12 +81,13 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
     def _seed_active_task(self, *, instance: dict[str, Any], task_id: str = "task-0001-active-gate") -> None:
         role = str(instance["role"])
         actor_id = str(instance["actor_id"])
-        task_sys.ingest(
-            {
-                "source": {"type": "test.active_gate", "ref": {"id": task_id}},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "active task gate"},
-            }
+        task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={"demand_id": f"demand-active-gate-{role}", "basis_revision": 1},
+            execution_brief={
+                "description": "Active Task gate fixture.",
+                "detail": f"Exercise the active Task gate for {task_id}.",
+            },
         )
 
     def _snapshot_runtime_files(self) -> dict[str, str]:

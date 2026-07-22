@@ -64,10 +64,31 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "message.send",
             "message.conversation",
             "message.get",
-            "message.mark",
             "message.list",
             "task_sys.cancel",
+            "task_sys.create",
         ):
+            with self.subTest(permission=permission):
+                self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
+
+    def test_every_demand_sys_permission_allows_every_manifest_role(self) -> None:
+        expected = {
+            "demand_sys.create",
+            "demand_sys.revise",
+            "demand_sys.list",
+            "demand_sys.get",
+            "demand_sys.get_many",
+            "demand_sys.check",
+            "demand_sys.complete_check",
+            "demand_sys.absorb_into",
+            "demand_sys.complete",
+            "demand_sys.cancel",
+        }
+        self.assertEqual(
+            {permission for permission in role_auth.COMMON_ROLE_PERMISSIONS if permission.startswith("demand_sys.")},
+            expected,
+        )
+        for permission in expected:
             with self.subTest(permission=permission):
                 self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
 
@@ -114,6 +135,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         self.assertIn("track.archive", summary["available_actions"])
         self.assertIn("track.resolve_comment_thread", summary["available_actions"])
         self.assertIn("task_sys.cancel", summary["available_actions"])
+        self.assertIn("task_sys.create", summary["available_actions"])
         self.assertEqual(summary["restricted_actions"], [])
         self.assertEqual(summary["restricted_action_details"], {})
 

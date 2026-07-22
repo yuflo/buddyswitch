@@ -26,7 +26,8 @@ The generic daemon owns:
 - host-control status for readiness, registered handlers, schedules, and errors.
 
 Generic daemon contracts, state, runtime, core, mailbox, and client modules do
-not import or branch on Task Sys, IM, Track, Browser, or Web product semantics.
+not import or branch on Demand, Task Sys, IM, Track, Browser, or Web product
+semantics.
 
 ## Product module responsibilities
 
@@ -34,16 +35,38 @@ Each product module owns its own business meaning and exposes a narrow adapter
 to generic daemon capabilities.
 
 - Task Sys owns task storage, lifecycle rules, actor task projection, runtime
-  command names, payload validation, timeout policy, and Task errors.
+  command names, payload validation, timeout policy, Task errors, and Task
+  completion attention frames.
+- Demand Sys owns Demand lifecycle, attention policy, actor-check prompt, and
+  persistence. The actor owns canonicalization judgment.
 - IM owns actor-directed message delivery, payload validation, identity and
   reachability decisions, and its trigger semantics.
-- Track owns comment delivery and the Task lifecycle requests caused by a
-  comment.
+- Track owns comment delivery, payload validation, and exact source-fact
+  materialization before Demand capture.
 - Browser owns page and cockpit lifecycle meaning and uses only public generic
   schedule operations.
 
 Product adapters may depend on generic daemon contracts and clients. Generic
 daemon modules may not depend on product adapters.
+
+Cross-product judgment remains outside daemon infrastructure. In the current
+Demand/Task flow, the Actor + installed task-management skill calls the two
+independent actor action catalogs. Daemon runtime only delivers the Demand
+Check text and Task frames supplied by their owning product adapters.
+
+IM and Track handlers may call the Demand daemon adapter after validating their
+own source fact. That adapter requests generic actor input; neither the generic
+daemon nor either inbound handler selects work or calls Task Sys.
+
+`DaemonRuntime` exposes only product-neutral host mechanics to handlers:
+
+- `parent_activity()` reads the current main-thread activity fact;
+- `input_actor(text)` delegates to the existing Actor Session input primitive,
+  which starts an idle actor turn or steers the active turn.
+
+The runtime does not interpret the input text or own a prompt, check policy,
+product id, schema, retry, or receipt. Those remain with the product adapter
+that requests actor input.
 
 ## Explicit runtime capabilities
 
@@ -146,6 +169,7 @@ Allowed:
 
 ```text
 product adapter -> generic daemon contracts/client
+product adapter -> generic DaemonRuntime host capability
 product adapter -> owning product domain/runtime/repo
 instance_daemon -> generic daemon + product adapters
 Web API -> host-control API + public product read model

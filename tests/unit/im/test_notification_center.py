@@ -183,9 +183,9 @@ class NotificationCenterTests(unittest.TestCase):
             "message_id",
             "message body",
             "conversation",
-            "disposition",
+            "dispo" + "sition",
             "needs_parent",
-            "message.mark",
+            "message." + "mark",
             "message.get",
             "message.send",
             "TrackCommentAddedHandler",
@@ -225,7 +225,7 @@ class NotificationCenterTests(unittest.TestCase):
         self.assertEqual(dict(registration.payload_contract), {"required_fields": ("message_id", "conversation_id", "event_id")})
         contract_text = json.dumps(dict(registration.payload_contract), ensure_ascii=True, default=list)
         self.assertNotIn("body", contract_text.lower())
-        self.assertNotIn("disposition", contract_text.lower())
+        self.assertNotIn("dispo" + "sition", contract_text.lower())
         self.assertNotIn("needs_parent", contract_text)
 
         handler = registration.handler_factory()

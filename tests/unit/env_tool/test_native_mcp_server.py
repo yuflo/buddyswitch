@@ -46,7 +46,7 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         by_name = {tool["name"]: tool for tool in tools}
         self.assertIn("message__get", by_name)
         self.assertIn("message__list", by_name)
-        self.assertIn("message__mark", by_name)
+        self.assertNotIn("message__mark", by_name)
         self.assertIn("message__send", by_name)
         self.assertIn("task_sys__list", by_name)
         self.assertIn("task_sys__get", by_name)

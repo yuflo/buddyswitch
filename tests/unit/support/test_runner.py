@@ -74,3 +74,9 @@ def test_public_bootstrap_disables_runner_bytecode_residue() -> None:
     export = 'export PYTHONDONTWRITEBYTECODE="1"'
     assert export in source
     assert source.index(export) < source.index('exec "${BUDDYSWITCH_PYTHON}"')
+
+
+def test_pytest_command_isolates_duplicate_test_module_basenames() -> None:
+    command = runner._pytest_command(["tests/unit"])
+
+    assert "--import-mode=importlib" in command

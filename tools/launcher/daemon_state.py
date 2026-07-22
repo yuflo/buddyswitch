@@ -27,6 +27,7 @@ HANDLER_STATE_FIELDS = (
     "last_result",
     "last_handled_at",
     "last_error",
+    "checkpoint",
 )
 SCHEDULE_STATE_KEYS = frozenset(
     {
@@ -103,7 +104,12 @@ def _normalize_handlers(value: Any) -> dict[str, dict[str, Any]]:
         unknown = set(raw) - set(HANDLER_STATE_FIELDS)
         if unknown:
             raise ValueError(f"daemon handler state for {name} contains unsupported fields: {sorted(unknown)}")
+        checkpoint = raw.get("checkpoint")
+        if checkpoint is not None and not isinstance(checkpoint, dict):
+            raise ValueError(f"daemon handler state for {name}.checkpoint must be an object or null")
         handlers[name] = {field: raw.get(field) for field in HANDLER_STATE_FIELDS if field in raw}
+        if isinstance(checkpoint, dict):
+            handlers[name]["checkpoint"] = dict(checkpoint)
     return handlers
 
 
@@ -240,7 +246,13 @@ class DaemonState:
         unknown = set(values) - set(HANDLER_STATE_FIELDS)
         if unknown:
             raise ValueError(f"daemon handler state for {handler_name} contains unsupported fields: {sorted(unknown)}")
-        self.handler_state(handler_name).update(values)
+        checkpoint = values.get("checkpoint")
+        if checkpoint is not None and not isinstance(checkpoint, dict):
+            raise ValueError(f"daemon handler state for {handler_name}.checkpoint must be an object or null")
+        normalized = dict(values)
+        if isinstance(checkpoint, dict):
+            normalized["checkpoint"] = dict(checkpoint)
+        self.handler_state(handler_name).update(normalized)
         self.save()
 
     def register_handlers(self, handler_names: list[str]) -> None:

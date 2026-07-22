@@ -298,7 +298,8 @@ class ExternalControlArchitectureTests(unittest.TestCase):
     def test_external_task_and_track_projections_have_exact_allowlists(self) -> None:
         task_record = {
             "id": "task-demo",
-            "source_type": "external",
+            "source_type": "demand",
+            "source_ref": {"demand_id": "demand-external-control", "basis_revision": 1},
             "status": "in_progress.side_processing",
             "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm", "secret": True},
             "updated_at": "2026-07-14T00:00:00Z",
@@ -361,12 +362,16 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             tracks = track_read.list_external_tracks()
             track = track_read.get_external_track("track-demo")
 
-        task_keys = ("task_id", "source_type", "status", "actor", "updated_at")
+        task_keys = ("task_id", "source_type", "demand_ref", "status", "actor", "updated_at")
         for row in (*tasks, task):
             self.assertIsNotNone(row)
             assert row is not None
             self.assertEqual(tuple(row), task_keys)
             self.assertEqual(tuple(row["actor"]), ("actor_id", "role_id"))
+            self.assertEqual(
+                row["demand_ref"],
+                {"demand_id": "demand-external-control", "basis_revision": 1},
+            )
 
         track_summary_keys = (
             "id",

@@ -28,20 +28,10 @@ class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestCase):
             "actor_id": self._runtime_actor_id(role="dev", label="act-dev-task-sys-checkpoint"),
         }
 
-    def test_turn_completed_source_is_not_task_sys_ingest_input(self) -> None:
+    def test_task_sys_has_no_generic_ingest_action(self) -> None:
         task_sys = _task_sys()
 
-        with self.assertRaisesRegex(ValueError, "app_server.turn_completed"):
-            task_sys.ingest(
-                {
-                    "source": {
-                        "type": "app_server.turn_completed",
-                        "ref": {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"},
-                    },
-                    "actor_target": self._actor_target(),
-                    "context": {"thread_id": "thr-main", "turn_id": "turn-user-1", "status": "completed"},
-                }
-            )
+        self.assertFalse(hasattr(task_sys, "ingest"))
 
     def test_checkpoint_update_domain_api_is_retired(self) -> None:
         task_sys = _task_sys()
@@ -53,5 +43,5 @@ class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(
             tool_registry.supported_actions("task_sys"),
-            {"list", "get", "close", "need_parent", "cancel"},
+            {"create", "list", "get", "close", "need_parent", "cancel"},
         )

@@ -45,16 +45,34 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
     ) -> dict[str, Any]:
         return {
             "id": task_id,
-            "source_type": "test.projection",
-            "source_ref": {"id": task_id},
+            "source_type": "demand",
+            "source_ref": {"demand_id": f"demand-{task_id}", "basis_revision": 1},
             "actor_target": {"actor_id": actor_id, "role_id": role_id},
-            "inbound_context": {"fixture": "projection"},
+            "inbound_context": {
+                "execution_brief": {
+                    "description": "Projection fixture.",
+                    "detail": f"Projection fixture for {task_id}.",
+                }
+            },
             "status": status,
             "execution": {"processor": "side" if result is None else None, "handoff": None, "result": result},
             "events": [{"type": "created", "at": "2026-07-12T00:00:00Z"}],
             "created_at": "2026-07-12T00:00:00Z",
             "updated_at": "2026-07-12T00:00:01Z",
         }
+
+    def test_task_summary_rejects_non_demand_source(self) -> None:
+        task_sys = _task_sys()
+        record = self._projection_record(
+            task_id="task-projection-retired-source",
+            actor_id=self._runtime_actor_id(role="dev", label="act-dev-task-sys"),
+            role_id="dev",
+        )
+        record["source_type"] = "track.comment.added"
+        record["source_ref"] = {"comment_id": "comment-retired"}
+
+        with self.assertRaisesRegex(ValueError, "source_type must be demand"):
+            task_sys.task_summary(record)
 
     def test_actor_task_projection_reads_once_and_builds_all_current_groups(self) -> None:
         task_sys = _task_sys()
@@ -124,19 +142,19 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             },
         )
 
-    def _envelope(self) -> dict[str, Any]:
+    def _create_args(self, *, source_id: str = "event-1") -> dict[str, Any]:
         return {
-            "source": {
-                "type": "user.input",
-                "ref": {"id": "input-1", "surface": "cli"},
-            },
             "actor_target": {
                 "role_id": "dev",
                 "actor_id": self._runtime_actor_id(role="dev", label="act-dev-task-sys"),
             },
-            "context": {
-                "text": "Draft brief",
-                "surface": "cli",
+            "demand_ref": {
+                "demand_id": f"demand-substrate-{source_id}",
+                "basis_revision": 1,
+            },
+            "execution_brief": {
+                "description": "Draft brief.",
+                "detail": f"Draft the exact fixture brief for {source_id}.",
             },
         }
 
@@ -179,26 +197,29 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             },
         )
 
-    def test_ingest_persists_task_record_and_returns_start_side_instruction(self) -> None:
+    def test_create_persists_task_record_and_returns_start_side_instruction(self) -> None:
         task_sys = _task_sys()
-        envelope = self._envelope()
+        create_args = self._create_args()
 
-        result = task_sys.ingest(envelope)
+        result = task_sys.create(**create_args)
 
         self.assertTrue(result.get("ok"), msg=result)
         task_id = result.get("task_id")
         self.assertIsInstance(task_id, str, msg=result)
         assert isinstance(task_id, str)
-        self.assertTrue(task_id.startswith("task-"), msg=task_id)
+        self.assertTrue(task_id.startswith("task-demand-"), msg=task_id)
         record_path = self._task_record_path(task_id)
         self.assertTrue(record_path.exists(), msg=record_path)
         persisted = json.loads(record_path.read_text(encoding="utf-8"))
         self.assertEqual(result.get("task"), persisted)
         self.assertEqual(persisted["id"], task_id)
-        self.assertEqual(persisted["source_type"], "user.input")
-        self.assertEqual(persisted["source_ref"], {"id": "input-1", "surface": "cli"})
-        self.assertEqual(persisted["actor_target"], envelope["actor_target"])
-        self.assertEqual(persisted["inbound_context"], envelope["context"])
+        self.assertEqual(persisted["source_type"], "demand")
+        self.assertEqual(persisted["source_ref"], create_args["demand_ref"])
+        self.assertEqual(persisted["actor_target"], create_args["actor_target"])
+        self.assertEqual(
+            persisted["inbound_context"],
+            {"execution_brief": create_args["execution_brief"]},
+        )
         self.assertEqual(persisted["status"], "in_progress.side_processing")
         self.assertNotIn("task_desc", persisted)
         self.assertNotIn("task_relation", persisted)
@@ -226,19 +247,25 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         assert isinstance(instruction, dict)
         self.assertEqual(instruction["type"], "start_side")
         self.assertEqual(instruction["task_id"], task_id)
-        self.assertEqual(instruction["actor_target"], envelope["actor_target"])
+        self.assertEqual(instruction["actor_target"], create_args["actor_target"])
         frame = instruction.get("frame")
         self.assertIsInstance(frame, dict, msg=instruction)
         assert isinstance(frame, dict)
         self.assertEqual(frame["kind"], "task_sys.side_frame")
         self.assertEqual(frame["task_id"], task_id)
-        self.assertEqual(frame["source"], {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}})
-        self.assertEqual(frame["actor_target"], envelope["actor_target"])
-        self.assertEqual(frame["context"], envelope["context"])
+        self.assertEqual(
+            frame["source"],
+            {"type": "demand", "ref": create_args["demand_ref"]},
+        )
+        self.assertEqual(frame["actor_target"], create_args["actor_target"])
+        self.assertEqual(
+            frame["context"],
+            {"execution_brief": create_args["execution_brief"]},
+        )
 
     def test_need_parent_moves_same_task_to_awaiting_parent_without_relation_analysis(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
 
         result = task_sys.record_side_need_parent(
             task_id,
@@ -255,14 +282,6 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(self._task_record(task_id)["status"], "in_progress.awaiting_parent")
         self.assertEqual([record["id"] for record in self._task_records()], [task_id])
 
-    def test_ingest_rejects_initial_processor_variants_without_creating_tasks(self) -> None:
-        task_sys = _task_sys()
-        for value in ("none", "checkpoint", "side"):
-            with self.subTest(initial_processor=value):
-                with self.assertRaisesRegex(ValueError, "initial_processor"):
-                    task_sys.ingest({**self._envelope(), "initial_processor": value})
-                self.assertEqual(self._task_records(), [])
-
     def test_task_analysis_domain_api_is_retired(self) -> None:
         task_sys = _task_sys()
 
@@ -271,22 +290,22 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_parent_runtime_instruction_shapes_are_task_traceable(self) -> None:
         task_sys = _task_sys()
-        actor_target = self._envelope()["actor_target"]
+        actor_target = self._create_args()["actor_target"]
         frame = {
             "kind": "task_sys.parent_frame",
-            "task_id": "task-user-input-123456abcdef",
+            "task_id": "task-controlled-inbound-123456abcdef",
             "context": {"text": "Draft brief"},
         }
 
         submit = task_sys.runtime_instruction(
             "submit_parent",
-            task_id="task-user-input-123456abcdef",
+            task_id="task-controlled-inbound-123456abcdef",
             actor_target=actor_target,
             frame=frame,
         )
         interrupt = task_sys.runtime_instruction(
             "interrupt_submit_parent",
-            task_id="task-user-input-123456abcdef",
+            task_id="task-controlled-inbound-123456abcdef",
             actor_target=actor_target,
             frame=frame,
         )
@@ -295,21 +314,21 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(interrupt["type"], "interrupt_submit_parent")
         for instruction in (submit, interrupt):
             with self.subTest(instruction=instruction["type"]):
-                self.assertEqual(instruction["task_id"], "task-user-input-123456abcdef")
+                self.assertEqual(instruction["task_id"], "task-controlled-inbound-123456abcdef")
                 self.assertEqual(instruction["actor_target"], actor_target)
                 self.assertEqual(instruction["frame"], frame)
 
         with self.assertRaisesRegex(ValueError, "runtime instruction"):
             task_sys.runtime_instruction(
                 "side_interrupt",
-                task_id="task-user-input-123456abcdef",
+                task_id="task-controlled-inbound-123456abcdef",
                 actor_target=actor_target,
                 frame=frame,
             )
 
     def test_parent_instruction_from_need_parent_task_stays_parent_ready_until_runtime_start(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         task_sys.record_side_need_parent(
             task_id,
             {
@@ -325,14 +344,20 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(instruction["type"], "interrupt_submit_parent")
         self.assertEqual(instruction["task_id"], task_id)
-        self.assertEqual(instruction["actor_target"], self._envelope()["actor_target"])
+        self.assertEqual(instruction["actor_target"], self._create_args()["actor_target"])
         frame = instruction.get("frame")
         self.assertIsInstance(frame, dict, msg=instruction)
         assert isinstance(frame, dict)
         self.assertEqual(frame["kind"], "task_sys.parent_frame")
         self.assertEqual(frame["task_id"], task_id)
-        self.assertEqual(frame["source"], {"type": "user.input", "ref": {"id": "input-1", "surface": "cli"}})
-        self.assertEqual(frame["inbound_context"], self._envelope()["context"])
+        self.assertEqual(
+            frame["source"],
+            {"type": "demand", "ref": self._create_args()["demand_ref"]},
+        )
+        self.assertEqual(
+            frame["inbound_context"],
+            {"execution_brief": self._create_args()["execution_brief"]},
+        )
         self.assertNotIn("task_desc", frame)
         self.assertNotIn("task_relation", frame)
         self.assertEqual(
@@ -354,7 +379,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_parent_handoff_started_marks_parent_processing(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         self._move_to_needs_parent(task_id)
 
         result = task_sys.record_parent_handoff_started(task_id)
@@ -370,7 +395,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_side_cleanup_updates_need_parent_execution_handoff(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         self._move_to_needs_parent(task_id)
 
         result = task_sys.record_side_cleanup(
@@ -396,7 +421,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_task_close_closes_side_processing_task(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
 
         result = task_sys.record_task_close(task_id, {"summary": "Handled in side."})
 
@@ -417,7 +442,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_side_cleanup_updates_side_completion_result(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         task_sys.record_task_close(task_id, {"summary": "Handled in side."})
 
         result = task_sys.record_side_cleanup(
@@ -444,7 +469,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_task_close_closes_parent_processing_task(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         self._move_to_needs_parent(task_id)
         task_sys.record_parent_handoff_started(task_id)
 
@@ -473,7 +498,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_task_close_rejects_needs_parent_task(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         self._move_to_needs_parent(task_id)
 
         with self.assertRaisesRegex(ValueError, "awaiting_parent.*close"):
@@ -514,7 +539,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_side_runtime_failure_stays_side_processing_and_is_recoverable(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         original = self._task_record(task_id)
 
         result = task_sys.record_side_runtime_failure(
@@ -567,7 +592,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_actor_close_uses_side_processing_status_after_runtime_failure(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         task_sys.record_side_runtime_failure(
             task_id,
             {
@@ -593,9 +618,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
     def test_record_task_cancel_moves_each_active_status_to_canceled(self) -> None:
         task_sys = _task_sys()
 
-        for start_status in task_sys.ACTIVE_TASK_STATUSES:
+        for index, start_status in enumerate(task_sys.ACTIVE_TASK_STATUSES):
             with self.subTest(start_status=start_status):
-                task_id = task_sys.ingest(self._envelope())["task_id"]
+                task_id = task_sys.create(
+                    **self._create_args(source_id=f"cancel-status-{index}")
+                )["task_id"]
                 if start_status in {task_sys.AWAITING_PARENT, task_sys.PARENT_PROCESSING}:
                     self._move_to_needs_parent(task_id)
                 if start_status == task_sys.PARENT_PROCESSING:
@@ -611,11 +638,15 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_task_cancel_is_retry_safe_but_rejects_completed(self) -> None:
         task_sys = _task_sys()
-        canceled_id = task_sys.ingest(self._envelope())["task_id"]
-        completed_id = task_sys.ingest(self._envelope())["task_id"]
+        canceled_id = task_sys.create(
+            **self._create_args(source_id="cancel-retry")
+        )["task_id"]
 
         first = task_sys.record_task_cancel(canceled_id, {"reason": "Superseded."})
         retry = task_sys.record_task_cancel(canceled_id, {"reason": "Retry."})
+        completed_id = task_sys.create(
+            **self._create_args(source_id="completed-before-cancel")
+        )["task_id"]
         task_sys.record_task_close(completed_id, {"summary": "Completed."})
 
         self.assertTrue(first["state_changed"])
@@ -627,7 +658,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_record_task_close_is_retry_safe_for_closed_task(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
         first = task_sys.record_task_close(task_id, {"summary": "Initial close."})
 
         second = task_sys.record_task_close(task_id, {"summary": "Retry close."})
@@ -642,30 +673,28 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
 
     def test_parent_instruction_rejects_non_parent_ready_task(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
 
         with self.assertRaisesRegex(ValueError, "parent handoff"):
             task_sys.parent_handoff_instruction(task_id)
 
-    def test_ingest_rejects_invalid_envelope_shapes(self) -> None:
+    def test_create_rejects_invalid_demand_shapes(self) -> None:
         task_sys = _task_sys()
-        valid = self._envelope()
+        valid = self._create_args()
         cases = (
-            ({}, "source"),
-            ({**valid, "source": "user.input"}, "source"),
-            ({**valid, "source": {"ref": {"id": "input-1"}}}, "source.type"),
-            ({**valid, "source": {"type": "user.input"}}, "source.ref"),
             ({**valid, "actor_target": {"role_id": "dev"}}, "actor_target.actor_id"),
             ({**valid, "actor_target": {"actor_id": valid["actor_target"]["actor_id"]}}, "actor_target.role_id"),
-            ({**valid, "context": "Draft brief"}, "context"),
-            ({**valid, "initial_processor": "parent"}, "initial_processor"),
-            ({**valid, "initial_processor": "side"}, "initial_processor"),
-            ({**valid, "initial_processor": "checkpoint"}, "initial_processor"),
+            ({**valid, "demand_ref": {"demand_id": "demand-invalid"}}, "exactly"),
+            ({**valid, "demand_ref": {"demand_id": "invalid", "basis_revision": 1}}, "Demand id"),
+            ({**valid, "demand_ref": {"demand_id": "demand-invalid", "basis_revision": 0}}, "positive integer"),
+            ({**valid, "execution_brief": "Draft brief"}, "execution_brief must be an object"),
+            ({**valid, "execution_brief": {"description": "Draft brief"}}, "exactly"),
         )
         for payload, expected in cases:
             with self.subTest(expected=expected):
                 with self.assertRaisesRegex(ValueError, expected):
-                    task_sys.ingest(payload)
+                    task_sys.create(**payload)
+        self.assertEqual(self._task_records(), [])
 
     def test_task_sys_substrate_has_no_daemon_or_taskbox_dependencies(self) -> None:
         source = (ROOT / "scripts" / "env" / "domain" / "task_sys.py").read_text(encoding="utf-8")

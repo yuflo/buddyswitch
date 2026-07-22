@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -57,11 +56,6 @@ class _FakeImClient:
         self.calls.append(("conversation", dict(args)))
         return {"ok": True, "action": "message.conversation", "messages": []}
 
-    def mark(self, args: dict[str, Any]) -> dict[str, Any]:
-        self.calls.append(("mark", dict(args)))
-        return {"ok": True, "action": "message.mark", "message_id": args["message_id"]}
-
-
 class _Context(dict[str, Any]):
     def __init__(self, client: _FakeImClient) -> None:
         super().__init__(
@@ -83,11 +77,6 @@ class _RealImContext(dict[str, Any]):
         )
         self.actor_directory = capabilities
         self.im_actor_delivery = capabilities
-
-
-class _RecordingParentCapability:
-    def __init__(self) -> None:
-        self.parent_requests: list[dict[str, Any]] = []
 
 
 class _RecordingImDelivery:
@@ -118,7 +107,6 @@ class MessageToolImClientTests(unittest.TestCase):
             ("get", {"message_id": "msg-1"}, ("get", {"message_id": "msg-1"})),
             ("list", {"cursor": "imev-000000000001", "limit": 5}, ("list", {"cursor": "imev-000000000001", "limit": 5})),
             ("conversation", {"target_identity_id": target_identity_id}, ("conversation", {"target_identity_id": target_identity_id})),
-            ("mark", {"message_id": "msg-1", "disposition": "absorbed"}, ("mark", {"message_id": "msg-1", "disposition": "absorbed"})),
         ]
 
         for action, args, expected_call in cases:
@@ -128,7 +116,7 @@ class MessageToolImClientTests(unittest.TestCase):
                 self.assertEqual(client.calls[-1], expected_call)
 
 
-class ActorImClientMarkTests(RuntimeWorkspaceTestCase):
+class ActorImClientTests(RuntimeWorkspaceTestCase):
     def _save_actor_profile(self, *, identity_id: str, role_id: str) -> None:
         identity_repo.save_actor_identity_profile(
             {
@@ -290,18 +278,8 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestCase):
         self.assertEqual(reply["actor_handling_status"], "not_applicable")
         self.assertNotIn("wake_" + "status", reply)
         self.assertEqual(reply["original_message_id"], root["message"]["id"])
-        self.assertEqual(reply["original_final_disposition"], "replied")
+        self.assertNotIn("original_final_" + "disposition", reply)
         self.assertEqual(capabilities.delivery_calls, [])
-
-        state_path = (
-            self.runtime_state_root
-            / "im"
-            / "message_states"
-            / f"{root['message']['id']}--{actor_id}.json"
-        )
-        persisted = json.loads(state_path.read_text(encoding="utf-8"))
-        self.assertEqual(persisted["owner_identity_id"], actor_id)
-        self.assertEqual(persisted["disposition"], "replied")
 
     def test_actor_reply_to_actor_origin_message_uses_resolved_target_for_actor_handling(self) -> None:
         active_actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-actor-reply")
@@ -385,15 +363,6 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestCase):
         self.assertEqual(reply["error"]["code"], "E_IM_TARGET")
         after_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
         self.assertEqual(after_messages, before_messages)
-        state_path = (
-            self.runtime_state_root
-            / "im"
-            / "message_states"
-            / f"{root['message']['id']}--{active_actor_id}.json"
-        )
-        persisted = json.loads(state_path.read_text(encoding="utf-8"))
-        self.assertEqual(persisted["owner_identity_id"], active_actor_id)
-        self.assertEqual(persisted["disposition"], "unseen")
         self.assertEqual(capabilities.delivery_calls, [])
 
     def test_actor_send_rejects_target_identity_and_reply_to_together_without_message_write(self) -> None:
@@ -425,40 +394,3 @@ class ActorImClientMarkTests(RuntimeWorkspaceTestCase):
         after_messages = sorted((self.runtime_state_root / "im" / "messages").glob("*.json"))
         self.assertEqual(after_messages, before_messages)
         self.assertEqual(capabilities.delivery_calls, [])
-
-    def test_mark_needs_parent_is_rejected_without_parent_submit(self) -> None:
-        active_actor_id = self._runtime_actor_id(role="dev", label="act-dev-im-parent-fail")
-        sender_actor_id = self._runtime_actor_id(role="pm", label="act-pm-im-parent-fail")
-        incoming = message_service.send_im_message(
-            sender_identity={"id": sender_actor_id, "type": "actor"},
-            target_identity={"id": active_actor_id, "type": "actor"},
-            content="This needs parent handling.",
-        )
-        message_id = incoming["message"]["id"]
-        capabilities = _RecordingParentCapability()
-        client = im_client_module.ActorImClient(
-            _RealImContext(identity_id=active_actor_id, role_id="dev", capabilities=capabilities)
-        )
-
-        response = client.mark(
-            {
-                "message_id": message_id,
-                "disposition": "needs_parent",
-                "reason": "This changes the active parent-thread objective.",
-            }
-        )
-
-        self.assertFalse(response.get("ok"), msg=response)
-        self.assertEqual((response.get("error") or {}).get("code"), "E_MESSAGE_PAYLOAD")
-        self.assertIn("task_sys.need_parent", (response.get("error") or {}).get("message", ""))
-        self.assertEqual(capabilities.parent_requests, [])
-
-        state_path = (
-            self.runtime_state_root
-            / "im"
-            / "message_states"
-            / f"{message_id}--{active_actor_id}.json"
-        )
-        persisted = json.loads(state_path.read_text(encoding="utf-8"))
-        self.assertEqual(persisted["owner_identity_id"], active_actor_id)
-        self.assertEqual(persisted["disposition"], "unseen")

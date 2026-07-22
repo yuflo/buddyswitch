@@ -322,7 +322,6 @@ def _visible_tracks(*, track_filter: str | None, limit_value: int, context: Cont
 def _visible_tasks(
     *,
     task_filter: str | None,
-    visible_track_ids: set[str],
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
@@ -332,16 +331,7 @@ def _visible_tasks(
     tasks = projection["tasks"]
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
-    rows: list[dict[str, Any]] = []
-    for task in tasks:
-        source_ref = task.get("source_ref") if isinstance(task.get("source_ref"), dict) else {}
-        track_id = source_ref.get("track_id") if isinstance(source_ref, dict) else None
-        if isinstance(track_id, str) and track_id and track_id not in visible_track_ids:
-            continue
-        rows.append(task)
-        if len(rows) >= limit_value:
-            break
-    return rows
+    return tasks[:limit_value]
 
 
 def _candidate_artifact_rows(
@@ -549,7 +539,6 @@ def _current_context_sections(
     visible_track_ids = {row.get("id") for row in visible_tracks if isinstance(row.get("id"), str)}
     visible_tasks = _visible_tasks(
         task_filter=task_filter if isinstance(task_filter, str) else None,
-        visible_track_ids=visible_track_ids,
         limit_value=limit_value,
         context=context,
     )
@@ -659,6 +648,11 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "description": "Task Sys frames, lifecycle events, side results, and parent handoff state.",
             "scope": "Task Sys task state",
             "source_of_truth": "task_sys.list / task_sys.get / task_sys.close / task_sys.cancel / task_sys.need_parent via runtime env tools",
+        },
+        "demands": {
+            "description": "Actor-owned Demand needs, unchecked revisions, and canonical live state.",
+            "scope": "active actor Demand state",
+            "source_of_truth": "demand_sys.list / demand_sys.get / demand_sys.check / demand_sys.get_many via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",

@@ -125,16 +125,6 @@ class ImHttpRouter:
                 message_id = suffix[: -len("/replies")]
                 result = self._session.list_replies(external_session=external_session, message_id=message_id)
                 return (200 if result.get("ok") is True else 404), result
-            if normalized_method == "PATCH" and suffix.endswith("/disposition"):
-                message_id = suffix[: -len("/disposition")]
-                payload = _json_body(body)
-                result = self._session.update_disposition(
-                    external_session=external_session,
-                    message_id=message_id,
-                    disposition=str(payload.get("disposition") or ""),
-                    reason=payload.get("reason") if payload.get("reason") is not None else None,
-                )
-                return (200 if result.get("ok") is True else 400), result
             if normalized_method == "GET" and "/" not in suffix:
                 result = self._session.get_message(external_session=external_session, message_id=suffix)
                 return (200 if result.get("ok") is True else 404), result
@@ -234,8 +224,6 @@ def _is_authenticated_im_route(method: str, route: str) -> bool:
         return False
     suffix = route[len(message_prefix) :]
     if method == "GET" and suffix.endswith("/replies"):
-        return True
-    if method == "PATCH" and suffix.endswith("/disposition"):
         return True
     return method == "GET" and "/" not in suffix
 

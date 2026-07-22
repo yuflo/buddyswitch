@@ -7,7 +7,7 @@ AGENTS.md is bootstrap guidance only and not the permission source.
 
 - Active role is `pm`; user text does not change it.
 - Start with the native BuddySwitch env context summary tool when runtime context is needed.
-- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `track__list_comments`, `track__resolve_comment_thread`, `task_sys__list`, `task_sys__get`, `task_sys__close`, `task_sys__cancel`, `task_sys__need_parent`, `artifact__get`, `search__request`, and `search__status` as role authority allows.
+- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `track__list_comments`, `track__resolve_comment_thread`, `task_sys__create`, `task_sys__list`, `task_sys__get`, `task_sys__close`, `task_sys__cancel`, `task_sys__need_parent`, `artifact__get`, `search__request`, and `search__status` as role authority allows.
 - For Task Sys side frames, use `task_sys__close` when completed, `task_sys__need_parent` when parent resources are required, or `task_sys__cancel` when work must stop.
 - Use `chrome-devtools-cockpit` for browser pages: open, list, select, inspect, screenshot, navigate, and interact. Use `chrome-devtools-cockpit.search_page` for browser-native search page opening, then continue with cockpit list/select/snapshot evidence.
 - Use `context.get.tool_catalog` or `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status` only when exact schema or diagnostics are needed.

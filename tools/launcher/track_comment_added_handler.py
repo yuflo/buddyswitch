@@ -14,8 +14,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import daemon_contracts  # noqa: E402
-import task_sys_ingress  # noqa: E402
-import task_sys_daemon_adapter  # noqa: E402
+import demand_sys_daemon_adapter  # noqa: E402
 from env.domain import track_comments as track_comment_rules  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from env.repos import track_comments as track_comment_repo  # noqa: E402
@@ -45,8 +44,7 @@ class TrackCommentAddedHandler:
         del state
         if getattr(trigger, "type", None) != "track.comment.added":
             return daemon_contracts.HandlerResult.ignored()
-        del runtime
-        return self._handle_track_comment_added(context, trigger)
+        return self._handle_track_comment_added(context, runtime, trigger)
 
     def _payload(self, trigger: Any) -> dict[str, str]:
         payload = getattr(trigger, "payload", None)
@@ -103,12 +101,19 @@ class TrackCommentAddedHandler:
         if track.get("archived_at") is not None:
             raise PermissionError(f"track '{track_id}' is archived and cannot receive Track comment attention")
 
-    def _handle_track_comment_added(self, context: Any, trigger: Any) -> daemon_contracts.HandlerResult:
+    def _handle_track_comment_added(
+        self,
+        context: Any,
+        runtime: Any,
+        trigger: Any,
+    ) -> daemon_contracts.HandlerResult:
         try:
             target_identity = self._ensure_target_identity(context, trigger)
             source_identity = self._source_identity_route(trigger)
             payload = self._payload(trigger)
             comment = self._comment(**payload)
+            if source_identity["identity_id"] != comment.get("by_identity_id"):
+                raise PermissionError("signal source identity does not match Track comment author")
             reply_to_comment = self._reply_to_comment(comment)
             if not track_comment_rules.target_is_intended_recipient(
                 target_identity,
@@ -119,16 +124,28 @@ class TrackCommentAddedHandler:
                 raise PermissionError("target identity is not an intended recipient for this Track comment")
             self._ensure_track_readable(payload["track_id"])
 
-            result = task_sys_ingress.ingest_track_comment(
-                actor_id=target_identity["identity_id"],
-                role_id=target_identity["role_id"],
-                track_id=payload["track_id"],
-                comment_id=payload["comment_id"],
-                thread_id=payload["thread_id"],
-                source_identity_id=source_identity["identity_id"],
-                source_role_id=source_identity["role_id"],
+            content = str(comment["content"]).strip()
+            track_id = payload["track_id"]
+            comment_id = payload["comment_id"]
+            thread_id = payload["thread_id"]
+            demand_sys_daemon_adapter.capture_inbound(
+                context,
+                runtime,
+                intake_key=f"track.comment.added:{track_id}:{comment_id}",
+                description=content,
+                detail=(
+                    f"Track comment on {track_id} "
+                    f"(comment {comment_id}, thread {thread_id}):\n{content}"
+                ),
+                source_refs=[{
+                    "type": "track.comment.added",
+                    "ref": {
+                        "track_id": track_id,
+                        "comment_id": comment_id,
+                        "thread_id": thread_id,
+                    },
+                }],
             )
-            task_sys_daemon_adapter.execute_instruction(context, result["instruction"])
             return daemon_contracts.HandlerResult.handled()
         except Exception as exc:
             return daemon_contracts.HandlerResult.failed(str(exc))

@@ -4,7 +4,7 @@ from tests.integration.browser.market_evidence_harness import *  # noqa: F401,F4
 class TestMarketEvidence(MarketEvidenceHarness):
     def test_market_evidence_requires_artifact_target(self) -> None:
         instance_json = self._instance_json(actor_id="act-market-target")
-        _, artifact_id = self._seed_market_task_and_artifact(actor_id="act-market-target")
+        artifact_id = self._seed_market_artifact(actor_id="act-market-target")
 
         missing_target = self._dispatch(
             instance_json=instance_json,
@@ -40,7 +40,7 @@ class TestMarketEvidence(MarketEvidenceHarness):
     def test_market_artifact_write_with_browser_evidence_is_runless(self) -> None:
         actor_id = "act-market-write"
         instance_json = self._instance_json(actor_id=actor_id)
-        _, artifact_id = self._seed_market_task_and_artifact(actor_id=actor_id)
+        artifact_id = self._seed_market_artifact(actor_id=actor_id)
 
         issued = self._dispatch(
             instance_json=instance_json,
@@ -80,7 +80,7 @@ class TestMarketEvidence(MarketEvidenceHarness):
         self.assertFalse(self._runtime_path("runs/raw").exists())
     def test_approved_downgrade_records_reason_on_target_token(self) -> None:
         instance_json = self._instance_json(actor_id="act-market-downgrade")
-        _, artifact_id = self._seed_market_task_and_artifact(actor_id="act-market-downgrade")
+        artifact_id = self._seed_market_artifact(actor_id="act-market-downgrade")
 
         approved = self._dispatch(
             instance_json=instance_json,

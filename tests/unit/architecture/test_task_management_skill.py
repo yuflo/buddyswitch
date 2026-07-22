@@ -16,7 +16,7 @@ import env_manifest  # noqa: E402
 from env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-TASK_SYS_OPERATIONS = {"list", "get", "close", "cancel", "need_parent"}
+TASK_SYS_OPERATIONS = {"create", "list", "get", "close", "cancel", "need_parent"}
 
 
 class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
@@ -56,6 +56,9 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         skill_text = skill_path.read_text(encoding="utf-8")
         lowered = skill_text.lower()
         self.assertIn("task sys", lowered)
+        self.assertIn("[demand check]", lowered)
+        self.assertIn("task_sys.outcome_frame", skill_text)
+        self.assertIn("task_sys.create", skill_text)
         self.assertIn("task_sys.list", skill_text)
         self.assertIn("task_sys.get", skill_text)
         self.assertIn("task_sys.close", skill_text)
@@ -81,18 +84,24 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
         skill_text = skill_path.read_text(encoding="utf-8")
 
-        self.assertIn("Use `task_sys.close` when a `task_sys.side_frame` is completed in side.", skill_text)
-        self.assertIn("When a `task_sys.parent_frame` completes required frame work, call `task_sys.close`.", skill_text)
-        self.assertIn("For IM source frames, use message tools for required message reads, sends, and disposition work.", skill_text)
-        self.assertIn(
-            "Use `message.send(target_identity_id=...)` when the IM task requires a new explicit actor or external target.",
-            skill_text,
-        )
-        self.assertIn(
-            "Use `message.send(reply_to=...)` when replying to a processable inbound IM message; the runtime resolves the original sender through the normal target-identity path.",
-            skill_text,
-        )
-        self.assertIn("Use `message.mark(..., disposition=absorbed)` only when no reply is needed.", skill_text)
+        self.assertIn("On `task_sys.side_frame`, call `task_sys.close`", skill_text)
+        self.assertIn("On `task_sys.parent_frame`, complete the requested parent work and call `task_sys.close`", skill_text)
+        self.assertIn("choose at most one", skill_text.lower())
+        self.assertIn("latest demand revision", skill_text.lower())
+        self.assertIn("task_sys.task", skill_text)
+        self.assertIn('{"type":"task_sys.task","ref":{"task_id":"<task_id>"}}', skill_text)
+        self.assertIn("pass the frame's `evidence_ref` unchanged", skill_text.lower())
+        self.assertIn("after any demand mutation", skill_text.lower())
+        self.assertIn("acknowledge its exact returned revision", skill_text.lower())
+        self.assertIn("continue now with the task selection rule", skill_text.lower())
+        self.assertIn("keep the demand live", skill_text.lower())
+        self.assertIn("call `demand_sys.get`", skill_text.lower())
+        self.assertIn("already terminal, do not mutate it", skill_text.lower())
+        self.assertIn("task cancellation does not imply demand cancellation", skill_text.lower())
+        self.assertIn("complete, cancel, revise, or keep", skill_text.lower())
+        self.assertNotIn("For IM source frames", skill_text)
+        self.assertNotIn("message.send(reply_to=...)", skill_text)
+        self.assertNotIn("message.mark(..., disposition=absorbed)", skill_text)
         self.assertNotIn("source-" + "bound", skill_text)
         self.assertIn("Use `task_sys.list` or `task_sys.get` to read ongoing Task Sys task state.", skill_text)
         self.assertIn("Task `status` is the only lifecycle truth", skill_text)
@@ -102,10 +111,36 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("task_relation", skill_text)
         self.assertNotIn("update_task_analysis", skill_text)
         self.assertNotIn("checkpoint", skill_text.lower())
+        self.assertNotIn("task_sys.completion_frame", skill_text)
         stale_finish = "finish with exactly one Task Sys side " + "result"
         stale_label = "Task Sys side " + "result"
         self.assertNotIn(stale_finish, skill_text)
         self.assertNotIn(stale_label, skill_text)
+
+    def test_demand_check_treats_track_provenance_as_context_not_relation_truth(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
+        skill_text = skill_path.read_text(encoding="utf-8")
+        normalized = " ".join(skill_text.split())
+
+        self.assertIn("Demand source refs are provenance and retrieval context, not Demand identity", skill_text)
+        self.assertIn("`track.comment.added`", skill_text)
+        self.assertIn("use the exact Track id with Track reads", normalized)
+        self.assertIn(
+            "Track thread structure alone never decides whether two Demand rows express the same need",
+            normalized,
+        )
+
+    def test_demand_check_teaches_two_pass_canonicalization_and_active_task_targeting(self) -> None:
+        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
+        normalized = " ".join(skill_path.read_text(encoding="utf-8").split())
+
+        self.assertIn("compare every pending description with the compact live index", normalized)
+        self.assertIn("Only for plausible candidates, call `demand_sys.get_many`", normalized)
+        self.assertIn("revise it, absorb it, keep it independent, or cancel it", normalized)
+        self.assertIn("Before calling `demand_sys.absorb_into`, call `task_sys.list(status=active)`", normalized)
+        self.assertIn("that active Task's Demand must remain the absorption target", normalized)
+        self.assertIn("Never update the active Task's `basis_revision` after absorption", normalized)
+        self.assertIn("reread the latest Demand during progress and outcome checks", normalized)
 
     def test_task_sys_close_surfaces_use_frame_work_not_source_bound_work(self) -> None:
         close_action = tool_router.get_action_definition("task_sys", "close")
@@ -122,6 +157,7 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
             text = path.read_text(encoding="utf-8")
             with self.subTest(role=path.parent.name):
                 self.assertIn("task_sys__list", text)
+                self.assertIn("task_sys__create", text)
                 self.assertIn("task_sys__get", text)
                 self.assertIn("task_sys__close", text)
                 self.assertIn("task_sys__cancel", text)
@@ -129,6 +165,8 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
                 self.assertNotIn("task_sys__update_task_analysis", text)
                 self.assertNotIn("task_sys__checkpoint_update", text)
                 self.assertNotIn("task__current", text)
+                self.assertNotIn("choose at most one", text.lower())
+                self.assertNotIn("latest demand revision", text.lower())
 
     def test_task_sys_is_the_only_actor_facing_task_tool(self) -> None:
         self.assertNotIn("task", tool_router.supported_tools())

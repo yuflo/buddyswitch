@@ -135,7 +135,7 @@ _RETIRED_OBJECT_APIS = frozenset(
 def __getattr__(name: str) -> Any:
     if name in _RETIRED_TASK_APIS:
         raise AttributeError(
-            f"env_store.{name} is retired; use env.repos.tasks with explicit instance context"
+            f"env_store.{name} is retired; use Task Sys through env.tool"
         )
     if name in _RETIRED_MESSAGE_APIS:
         raise AttributeError(

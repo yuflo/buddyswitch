@@ -161,6 +161,32 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             },
         )
 
+    def test_app_server_thread_idle_notification_normalizes_generic_thread_status(self) -> None:
+        notification = {
+            "method": "thread/status/changed",
+            "params": {
+                "threadId": "thr-side",
+                "status": {"type": "idle"},
+            },
+        }
+
+        trigger = self.triggers.normalize_app_server_notification(
+            notification,
+            target_identity_id="act-dev-daemon",
+            target_role_id="dev",
+        )
+
+        self.assertEqual(trigger.type, "app_server.thread_status_changed")
+        self.assertIsNone(trigger.origin_id)
+        self.assertEqual(
+            trigger.source_context,
+            {
+                "method": "thread/status/changed",
+                "thread_id": "thr-side",
+                "thread_status": "idle",
+            },
+        )
+
     def test_cross_actor_signal_normalizes_to_daemon_trigger(self) -> None:
         signal = {
             "signal_id": "sig-readable",

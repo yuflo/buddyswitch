@@ -194,6 +194,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
 
     def test_track_comment_handler_owns_track_signal_payload_semantics(self) -> None:
         handler_source = (ROOT / "tools" / "launcher" / "track_comment_added_handler.py").read_text(encoding="utf-8")
+        handler_imports = _imported_modules(ROOT / "tools" / "launcher" / "track_comment_added_handler.py")
         nc_source = (ROOT / "tools" / "launcher" / "notification_center.py").read_text(encoding="utf-8")
 
         self.assertIn("track.comment.added", handler_source)
@@ -201,6 +202,8 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertIn("comment_id", handler_source)
         self.assertIn("thread_id", handler_source)
         self.assertIn("def handle(", handler_source)
+        self.assertIn("demand_sys_daemon_adapter", handler_imports)
+        self.assertFalse(any("task_sys" in name for name in handler_imports), msg=handler_imports)
         self.assertNotIn("track_id", nc_source)
         self.assertNotIn("comment_id", nc_source)
         self.assertNotIn("env.repos.track_comments", nc_source)

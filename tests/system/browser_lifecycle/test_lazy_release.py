@@ -886,12 +886,13 @@ with calls_path.open("a", encoding="utf-8") as handle:
         self.fail(f"timed out waiting for proxy response; code={proc.poll()}; stderr:\n{stderr}")
 
     def _seed_active_task(self, *, actor_id: str, role: str) -> None:
-        task_sys.ingest(
-            {
-                "source": {"type": "test.browser_lazy_release", "ref": {"slug": "lazy-release-smoke"}},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "browser lazy release integration"},
-            }
+        task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={"demand_id": "demand-browser-lazy-release", "basis_revision": 1},
+            execution_brief={
+                "description": "Browser lazy release fixture.",
+                "detail": "Exercise browser lazy release integration.",
+            },
         )
 
     def _page_trigger(self, triggers: Any, *, actor_id: str, role: str, tab_target_id: str) -> Any:

@@ -53,50 +53,52 @@ def load_lifecycle(app_server: types.ModuleType, registry: Any) -> Any:
 class FakeAppServer(types.ModuleType):
     def __init__(self) -> None:
         super().__init__("app_server")
+        self.SIDE_DEVELOPER_INSTRUCTIONS = "isolated side instructions"
         self.calls: list[dict[str, Any]] = []
         self.thread_read_status: dict[str, object] = {"type": "active", "activeFlags": []}
+        self.thread_read_error: Exception | None = None
         self.interrupt_error: Exception | None = None
+        self.before_turn_start: Callable[[], None] | None = None
         self.AppServerProtocolError = RuntimeError
         self.AppServerUnavailableError = RuntimeError
 
-    def side_boundary_prompt_item(self) -> dict[str, object]:
-        return {"type": "message", "role": "system", "content": [{"type": "input_text", "text": "side boundary"}]}
-
-    def thread_fork(
+    def thread_start(
         self,
         socket_path: Path,
-        parent_thread_id: str,
-        *,
         workspace_dir: Path,
         shared_project_workspace_dir: Path,
         permissions: str,
+        *,
+        developer_instructions: str | None = None,
+        ephemeral: bool | None = None,
         model: str | None = None,
         model_reasoning_effort: str | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
-                "helper": "thread_fork",
+                "helper": "thread_start",
                 "socket_path": socket_path,
-                "parent_thread_id": parent_thread_id,
                 "workspace_dir": workspace_dir,
                 "shared_project_workspace_dir": shared_project_workspace_dir,
                 "permissions": permissions,
+                "developer_instructions": developer_instructions,
+                "ephemeral": ephemeral,
                 "model": model,
                 "model_reasoning_effort": model_reasoning_effort,
             }
         )
         return {"thread": {"id": "thr-side-1"}}
 
-    def thread_inject_items(self, socket_path: Path, thread_id: str, items: list[dict[str, object]]) -> dict[str, object]:
-        self.calls.append({"helper": "thread_inject_items", "socket_path": socket_path, "thread_id": thread_id, "items": items})
-        return {"ok": True}
-
     def thread_read(self, socket_path: Path, thread_id: str, *, include_turns: bool = False) -> dict[str, object]:
         self.calls.append({"helper": "thread_read", "socket_path": socket_path, "thread_id": thread_id, "include_turns": include_turns})
+        if self.thread_read_error is not None:
+            raise self.thread_read_error
         return {"thread": {"id": thread_id, "status": self.thread_read_status}}
 
     def turn_start(self, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
         self.calls.append({"helper": "turn_start", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+        if self.before_turn_start is not None:
+            self.before_turn_start()
         return {"action": "start", "turn": {"id": "turn-side-started"}, "turn_id": "turn-side-started"}
 
     def turn_steer(self, socket_path: Path, thread_id: str, turn_id: str, text: str) -> dict[str, object]:
@@ -113,7 +115,16 @@ class FakeAppServer(types.ModuleType):
         raise AssertionError("side_thread_lifecycle must not use old turn-discovery or composite app-server helpers")
 
 
-for _name in ("side_start", "side_close", "input_turn", "active_turn_id", "thread_turns_list"):
+for _name in (
+    "side_start",
+    "side_close",
+    "input_turn",
+    "active_turn_id",
+    "thread_turns_list",
+    "thread_fork",
+    "thread_inject_items",
+    "side_boundary_prompt_item",
+):
     setattr(FakeAppServer, _name, FakeAppServer._forbidden)
 
 
@@ -229,6 +240,15 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(temp_root)
 
+            def assert_starting_lease_is_visible() -> None:
+                rows = self._payload(instance_json)["side_threads"]
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["thread_id"], "thr-side-1")
+                self.assertEqual(rows[0]["turn_kind"], "starting")
+                self.assertNotIn("turn_id", rows[0])
+
+            self.app_server.before_turn_start = assert_starting_lease_is_visible
+
             result = self.lifecycle.start_side_thread(
                 socket_path=self.socket_path,
                 instance_json=instance_json,
@@ -239,16 +259,22 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 workspace_dir=self.workspace_dir,
                 shared_project_workspace_dir=self.project_workspace_dir,
                 permissions="buddyswitch-runtime",
-                task_id="task-user-input-abc123",
+                task_id="task-controlled-inbound-abc123",
             )
 
-            self.assertEqual([call["helper"] for call in self.app_server.calls], ["thread_fork", "thread_inject_items", "turn_start"])
+            self.assertEqual(
+                [call["helper"] for call in self.app_server.calls],
+                ["thread_start", "turn_start", "thread_read"],
+            )
+            self.assertEqual(self.app_server.calls[0]["developer_instructions"], "isolated side instructions")
+            self.assertIs(self.app_server.calls[0]["ephemeral"], True)
             self.assertEqual(result["action"], "start")
             self.assertEqual(result["purpose"], "task_sys.side_frame")
             self.assertEqual(result["parent_thread_id"], "thr-main")
             self.assertEqual(result["side_thread_id"], "thr-side-1")
             self.assertEqual(result["thread_action"], "start")
             self.assertEqual(result["turn_id"], "turn-side-started")
+            self.assertEqual(result["thread_status"], "active")
             self.assertEqual(result["lease_registered"], True)
 
             rows = self._payload(instance_json)["side_threads"]
@@ -256,10 +282,11 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertEqual(rows[0]["thread_id"], "thr-side-1")
             self.assertEqual(rows[0]["parent_thread_id"], "thr-main")
             self.assertEqual(rows[0]["purpose"], "task_sys.side_frame")
-            self.assertEqual(rows[0]["task_id"], "task-user-input-abc123")
+            self.assertEqual(rows[0]["task_id"], "task-controlled-inbound-abc123")
             self.assertEqual(rows[0]["turn_id"], "turn-side-started")
+            self.assertEqual(rows[0]["turn_kind"], "work")
 
-    def test_start_side_thread_passes_model_and_effort_to_fork_without_registry_persistence(self) -> None:
+    def test_start_side_thread_passes_model_and_effort_to_isolated_thread_without_registry_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(temp_root)
 
@@ -277,10 +304,10 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 model_reasoning_effort="high",
             )
 
-            fork_call = self.app_server.calls[0]
-            self.assertEqual(fork_call["helper"], "thread_fork")
-            self.assertEqual(fork_call["model"], "gpt-5.4")
-            self.assertEqual(fork_call["model_reasoning_effort"], "high")
+            start_call = self.app_server.calls[0]
+            self.assertEqual(start_call["helper"], "thread_start")
+            self.assertEqual(start_call["model"], "gpt-5.4")
+            self.assertEqual(start_call["model_reasoning_effort"], "high")
             self.assertEqual(result["model"], "gpt-5.4")
             self.assertEqual(result["model_reasoning_effort"], "high")
 
@@ -288,7 +315,107 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertNotIn("model", row)
             self.assertNotIn("model_reasoning_effort", row)
 
-    def test_start_side_thread_none_model_and_effort_mean_parent_inheritance(self) -> None:
+    def test_start_side_thread_accepts_lease_consumed_before_turn_start_returns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+
+            def consume_starting_lease() -> None:
+                removed = self.registry.unregister_side_thread(
+                    instance_json,
+                    actor_id="act-dev-side",
+                    parent_thread_id="thr-main",
+                    side_thread_id="thr-side-1",
+                )
+                self.assertTrue(removed)
+
+            self.app_server.before_turn_start = consume_starting_lease
+
+            result = self.lifecycle.start_side_thread(
+                socket_path=self.socket_path,
+                instance_json=instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                text="Finish immediately",
+                purpose="task_sys.side_frame",
+                workspace_dir=self.workspace_dir,
+                shared_project_workspace_dir=self.project_workspace_dir,
+                permissions="buddyswitch-runtime",
+                task_id="task-controlled-inbound-fast123",
+            )
+
+            self.assertEqual(result["turn_id"], "turn-side-started")
+            self.assertEqual(result["thread_status"], "consumed")
+            self.assertFalse(result["lease_registered"])
+            self.assertTrue(result["lease_consumed"])
+            self.assertEqual(self._payload(instance_json)["side_threads"], [])
+
+    def test_start_side_thread_interrupts_known_turn_before_retryable_setup_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            self.app_server.thread_read_error = RuntimeError("thread/read failed after turn start")
+
+            with self.assertRaisesRegex(
+                self.lifecycle.SideThreadLifecycleError,
+                "thread/read failed after turn start",
+            ) as raised:
+                self.lifecycle.start_side_thread(
+                    socket_path=self.socket_path,
+                    instance_json=instance_json,
+                    actor_id="act-dev-side",
+                    parent_thread_id="thr-main",
+                    text="Start side work",
+                    purpose="task_sys.side_frame",
+                    workspace_dir=self.workspace_dir,
+                    shared_project_workspace_dir=self.project_workspace_dir,
+                    permissions="buddyswitch-runtime",
+                    task_id="task-controlled-inbound-setup-failure",
+                )
+
+            self.assertTrue(raised.exception.retryable)
+            self.assertEqual(
+                [call["helper"] for call in self.app_server.calls],
+                ["thread_start", "turn_start", "thread_read", "turn_interrupt"],
+            )
+            self.assertEqual(self.app_server.calls[-1]["thread_id"], "thr-side-1")
+            self.assertEqual(self.app_server.calls[-1]["turn_id"], "turn-side-started")
+            self.assertEqual(
+                raised.exception.cleanup,
+                {
+                    "turn_interrupt_attempted": True,
+                    "turn_interrupt_ok": True,
+                    "lease_unregistered": True,
+                },
+            )
+            self.assertEqual(self._payload(instance_json)["side_threads"], [])
+
+    def test_start_side_thread_setup_failure_is_not_retryable_when_exact_turn_cannot_be_stopped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            self.app_server.thread_read_error = RuntimeError("thread/read failed after turn start")
+            self.app_server.interrupt_error = RuntimeError("turn interrupt failed")
+
+            with self.assertRaises(self.lifecycle.SideThreadLifecycleError) as raised:
+                self.lifecycle.start_side_thread(
+                    socket_path=self.socket_path,
+                    instance_json=instance_json,
+                    actor_id="act-dev-side",
+                    parent_thread_id="thr-main",
+                    text="Start side work",
+                    purpose="task_sys.side_frame",
+                    workspace_dir=self.workspace_dir,
+                    shared_project_workspace_dir=self.project_workspace_dir,
+                    permissions="buddyswitch-runtime",
+                    task_id="task-controlled-inbound-unsafe-retry",
+                )
+
+            self.assertFalse(raised.exception.retryable)
+            self.assertTrue(raised.exception.cleanup["turn_interrupt_attempted"])
+            self.assertFalse(raised.exception.cleanup["turn_interrupt_ok"])
+            self.assertEqual(raised.exception.cleanup["turn_interrupt_error"], "turn interrupt failed")
+            self.assertTrue(raised.exception.cleanup["lease_unregistered"])
+            self.assertEqual(self._payload(instance_json)["side_threads"], [])
+
+    def test_start_side_thread_none_model_and_effort_use_app_server_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(temp_root)
 
@@ -304,9 +431,9 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 permissions="buddyswitch-runtime",
             )
 
-            fork_call = self.app_server.calls[0]
-            self.assertIsNone(fork_call["model"])
-            self.assertIsNone(fork_call["model_reasoning_effort"])
+            start_call = self.app_server.calls[0]
+            self.assertIsNone(start_call["model"])
+            self.assertIsNone(start_call["model_reasoning_effort"])
             self.assertNotIn("model", result)
             self.assertNotIn("model_reasoning_effort", result)
 
@@ -357,6 +484,40 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertEqual(result["turn_id"], "turn-side-started")
             rows = self._payload(instance_json)["side_threads"]
             self.assertEqual(rows[0]["turn_id"], "turn-side-started")
+
+    def test_send_marks_external_submit_as_uncertain_when_lease_persistence_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            self._seed_side_thread(instance_json, turn_id="turn-side-old")
+            self.app_server.thread_read_status = {"type": "idle"}
+            original_update = self.registry.update_side_thread
+
+            def fail_update(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+                raise RuntimeError("lease persistence failed")
+
+            self.addCleanup(setattr, self.registry, "update_side_thread", original_update)
+            self.registry.update_side_thread = fail_update
+
+            with self.assertRaisesRegex(
+                self.lifecycle.SideThreadLifecycleError,
+                "lease persistence failed",
+            ) as raised:
+                self.lifecycle.send_to_side_thread(
+                    socket_path=self.socket_path,
+                    instance_json=instance_json,
+                    actor_id="act-dev-side",
+                    parent_thread_id="thr-main",
+                    side_thread_id="thr-side-1",
+                    text="Run Progress Check",
+                    permissions="buddyswitch-runtime",
+                    turn_kind="progress_check",
+                )
+
+            self.assertTrue(raised.exception.input_submitted)
+            self.assertEqual(
+                [call["helper"] for call in self.app_server.calls],
+                ["thread_read", "turn_start"],
+            )
 
     def test_cleanup_unregisters_lease_even_when_known_turn_interrupt_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

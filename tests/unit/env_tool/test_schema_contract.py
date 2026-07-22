@@ -112,6 +112,39 @@ class EnvToolSchemaContractTests(unittest.TestCase):
                         path=f"{tool}.{action}.{field_name}",
                     )
 
+    def test_demand_revision_and_absorb_keep_provenance_domain_owned(self) -> None:
+        revise = catalog.get_action_definition("demand_sys", "revise").input_schema
+        absorb = catalog.get_action_definition("demand_sys", "absorb_into").input_schema
+        merged_target = absorb["properties"]["merged_target"]
+
+        self.assertEqual(
+            set(revise["properties"]),
+            {"demand_id", "expected_revision", "description", "detail"},
+        )
+        self.assertEqual(
+            revise["required"],
+            ["demand_id", "expected_revision", "description", "detail"],
+        )
+        self.assertEqual(
+            set(merged_target["properties"]),
+            {"description", "detail"},
+        )
+        self.assertEqual(
+            merged_target["required"],
+            ["description", "detail"],
+        )
+
+    def test_demand_completion_schema_exposes_exact_task_evidence_identity(self) -> None:
+        create = catalog.get_action_definition("demand_sys", "create").input_schema
+        complete = catalog.get_action_definition("demand_sys", "complete").input_schema
+
+        source_ref = create["properties"]["source_refs"]["items"]["properties"]["ref"]
+        evidence_ref = complete["properties"]["evidence_refs"]["items"]["properties"]["ref"]
+
+        self.assertNotIn("task_id", source_ref["properties"])
+        self.assertIn("task_id", evidence_ref["properties"])
+        self.assertIn("task_sys.task", evidence_ref["properties"]["task_id"]["description"])
+
     def test_high_risk_schema_shapes_match_domain_contracts(self) -> None:
         self.assertIn("track", catalog.supported_tools())
 
@@ -123,7 +156,9 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_list_comments = catalog.get_action_definition("track", "list_comments").input_schema
         track_resolve_comment = catalog.get_action_definition("track", "resolve_comment_thread").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
-        self.assertEqual(set(catalog.supported_actions("task_sys")), {"list", "get", "close", "cancel", "need_parent"})
+        self.assertEqual(set(catalog.supported_actions("task_sys")), {"create", "list", "get", "close", "cancel", "need_parent"})
+        task_sys_create_action = catalog.get_action_definition("task_sys", "create")
+        task_sys_create = task_sys_create_action.input_schema
         task_sys_list = catalog.get_action_definition("task_sys", "list").input_schema
         task_sys_get = catalog.get_action_definition("task_sys", "get").input_schema
         task_sys_close = catalog.get_action_definition("task_sys", "close").input_schema
@@ -141,12 +176,11 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         message_contacts_action = catalog.get_action_definition("message", "contacts")
         message_get_action = catalog.get_action_definition("message", "get")
         message_get = message_get_action.input_schema
-        message_mark_action = catalog.get_action_definition("message", "mark")
-        message_mark = message_mark_action.input_schema
         message_list_action = catalog.get_action_definition("message", "list")
         message_list = message_list_action.input_schema
         message_conversation_action = catalog.get_action_definition("message", "conversation")
         message_conversation = message_conversation_action.input_schema
+        self.assertEqual(set(catalog.supported_actions("message")), {"contacts", "conversation", "get", "list", "send"})
         self.assertNotIn("comment", catalog.supported_tools())
 
         create_now = track_create["properties"]["now"]
@@ -222,6 +256,21 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("artifact_revision_id", track_add_comment["properties"])
         self.assertEqual(track_list_comments["properties"]["status"].get("enum"), ["open", "resolved", "all"])
 
+        self.assertEqual(task_sys_create.get("required"), ["demand_ref", "execution_brief"])
+        self.assertIs(task_sys_create.get("additionalProperties"), False)
+        self.assertEqual(set(task_sys_create["properties"]), {"demand_ref", "execution_brief"})
+        demand_ref = task_sys_create["properties"]["demand_ref"]
+        self.assertIs(demand_ref.get("additionalProperties"), False)
+        self.assertEqual(demand_ref.get("required"), ["demand_id", "basis_revision"])
+        self.assertEqual(set(demand_ref["properties"]), {"demand_id", "basis_revision"})
+        self.assertEqual(demand_ref["properties"]["basis_revision"].get("minimum"), 1)
+        execution_brief = task_sys_create["properties"]["execution_brief"]
+        self.assertIs(execution_brief.get("additionalProperties"), False)
+        self.assertEqual(execution_brief.get("required"), ["description", "detail"])
+        self.assertEqual(set(execution_brief["properties"]), {"description", "detail"})
+        self.assertEqual(task_sys_create_action.required_permission, "task_sys.create")
+        self.assertEqual(task_sys_create_action.task_requirement, "free")
+        self.assertEqual(task_sys_create_action.mutates, "runtime_objects")
         self.assertEqual(task_sys_list.get("required"), [])
         self.assertEqual(task_sys_list["properties"]["status"].get("enum"), ["active", "recoverable", "all"])
         self.assertEqual(task_sys_list["properties"]["limit"].get("type"), "integer")
@@ -277,15 +326,6 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("role", message_list_properties)
         self.assertNotIn("q", message_list_properties)
 
-        self.assertEqual(message_mark_action.kind, "write")
-        self.assertEqual(message_mark_action.mutates, "runtime_objects")
-        self.assertEqual(message_mark_action.required_permission, "message.mark")
-        self.assertEqual(message_mark_action.durability, "durable")
-        self.assertEqual(set(message_mark.get("required", [])), {"message_id", "disposition"})
-        self.assertEqual(set(message_mark.get("properties", {})), {"message_id", "disposition", "reason"})
-        self.assertEqual(message_mark["properties"]["message_id"].get("type"), "string")
-        self.assertEqual(message_mark["properties"]["disposition"].get("enum"), ["absorbed"])
-        self.assertEqual(message_mark["properties"]["reason"].get("type"), "string")
         send_contract_text = " ".join(
             str(row)
             for row in (
@@ -313,14 +353,10 @@ class EnvToolSchemaContractTests(unittest.TestCase):
             "actor runtime reachability",
             "identity profiles",
             "reply_to",
-            "processable inbound",
             "external",
             "active actor",
-            "replied",
-            "disposition save failure",
-            "previous disposition",
-            "message.mark(absorbed)",
-            "task_sys.need_parent",
+            "new immutable message",
+            "original_message_id",
             "actor_handling_status",
             "target actor local inbound event",
             "target_identity",
@@ -332,26 +368,14 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("central im derives the other " + "direct identity", send_contract_text)
         self.assertNotIn("reply inside the existing " + "direct conversation", send_contract_text)
         self.assertNotIn("target_identity_id is only required for a new " + "target-identity message", send_contract_text)
+        self.assertNotIn("processable", send_contract_text)
+        self.assertNotIn("disposition", send_contract_text)
         self.assertNotIn("tasks", message_send_action.does_not_write)
-        mark_contract_text = " ".join(
-            str(row)
-            for row in (
-                message_mark_action.description,
-                message_mark["properties"]["disposition"].get("description"),
-                message_mark["properties"]["reason"].get("description"),
-                message_mark_action.success_effect,
-                message_mark_action.failure_state_guarantee,
-                message_mark_action.do_not_use_when,
-            )
-        ).lower()
-        for snippet in (
-            "absorbed",
-            "task_sys.need_parent",
-            "message.send(reply_to=...)",
-            "generic disposition editor",
-        ):
-            self.assertIn(snippet, mark_contract_text)
-        self.assertNotIn("parent prompt first", mark_contract_text)
+        get_contract_text = json.dumps(asdict(message_get_action), ensure_ascii=True, sort_keys=True).lower()
+        self.assertIn("exact message", get_contract_text)
+        self.assertIn("visible", get_contract_text)
+        self.assertNotIn("processable", get_contract_text)
+        self.assertNotIn("disposition", get_contract_text)
         self.assertIn("identity", str(message_contacts_action.description).lower())
         self.assertIn("self", str(message_contacts_action.description).lower())
         message_contacts_contract = json.dumps(asdict(message_contacts_action), ensure_ascii=True, sort_keys=True).lower()

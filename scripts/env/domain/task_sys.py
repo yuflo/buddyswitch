@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import fcntl
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -31,6 +32,27 @@ RECOVERABLE_TASK_REASONS = ("runtime_failed", "side_no_result", "side_timed_out"
 RUNTIME_INSTRUCTION_TYPES = ("start_side", "submit_parent", "interrupt_submit_parent")
 
 
+class TaskSysError(ValueError):
+    code = "E_TASK_SYS"
+
+
+class TaskSourceConflict(TaskSysError):
+    code = "E_TASK_SYS_SOURCE_CONFLICT"
+
+    def __init__(self, task_id: str) -> None:
+        self.task_id = task_id
+        super().__init__(f"Task source already exists with different input: {task_id}")
+
+
+class TaskActiveConflict(TaskSysError):
+    code = "E_TASK_SYS_ACTIVE_CONFLICT"
+
+    def __init__(self, task_id: str, task_status: str) -> None:
+        self.task_id = task_id
+        self.task_status = task_status
+        super().__init__(f"Actor already has active Task {task_id} in status {task_status}")
+
+
 def _require_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
@@ -47,13 +69,6 @@ def _payload_copy(value: Mapping[str, Any]) -> dict[str, Any]:
     return deepcopy(dict(value))
 
 
-def _normalize_source(value: Any) -> dict[str, Any]:
-    source = _require_mapping(value, "source")
-    source_type = _require_text(source.get("type"), "source.type")
-    source_ref = _payload_copy(_require_mapping(source.get("ref"), "source.ref"))
-    return {"type": source_type, "ref": source_ref}
-
-
 def _normalize_actor_target(value: Any) -> dict[str, str]:
     target = _require_mapping(value, "actor_target")
     return {
@@ -62,8 +77,30 @@ def _normalize_actor_target(value: Any) -> dict[str, str]:
     }
 
 
-def _normalize_context(value: Any) -> dict[str, Any]:
-    return _payload_copy(_require_mapping(value, "context"))
+def _normalize_demand_ref(value: Any) -> dict[str, Any]:
+    demand_ref = _require_mapping(value, "demand_ref")
+    if set(demand_ref) != {"demand_id", "basis_revision"}:
+        raise ValueError("demand_ref must contain exactly demand_id and basis_revision")
+    demand_id = runtime_files.require_id(
+        _require_text(demand_ref.get("demand_id"), "demand_ref.demand_id"),
+        "demand_ref.demand_id",
+    )
+    if not demand_id.startswith("demand-"):
+        raise ValueError("demand_ref.demand_id must be a Demand id")
+    basis_revision = demand_ref.get("basis_revision")
+    if type(basis_revision) is not int or basis_revision < 1:
+        raise ValueError("demand_ref.basis_revision must be a positive integer")
+    return {"demand_id": demand_id, "basis_revision": basis_revision}
+
+
+def _normalize_execution_brief(value: Any) -> dict[str, str]:
+    execution_brief = _require_mapping(value, "execution_brief")
+    if set(execution_brief) != {"description", "detail"}:
+        raise ValueError("execution_brief must contain exactly description and detail")
+    return {
+        "description": _require_text(execution_brief.get("description"), "execution_brief.description"),
+        "detail": _require_text(execution_brief.get("detail"), "execution_brief.detail"),
+    }
 
 
 def _normalize_failure_reason(value: Any) -> str:
@@ -150,8 +187,17 @@ def _task_file(task_id: str) -> Any:
     return _task_sys_tasks_dir() / f"{runtime_files.require_id(task_id, 'task id')}.json"
 
 
-def _new_task_id(source_type: str) -> str:
-    return f"task-{runtime_files.slugify(source_type)}-{uuid4().hex[:12]}"
+def _actor_lock_file(actor_target: Mapping[str, str]) -> Any:
+    return (
+        runtime_files.LOCAL_ROOT
+        / "locks"
+        / "task-sys"
+        / f"{actor_target['actor_id']}-{actor_target['role_id']}.lock"
+    )
+
+
+def _new_task_id() -> str:
+    return f"task-demand-{uuid4().hex[:12]}"
 
 
 def _event(event_type: str, *, at: str, data: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -180,19 +226,6 @@ def _transition_status(record: dict[str, Any], action: str, *, at: str) -> str:
     return next_status
 
 
-def _reject_unsupported_ingest_fields(payload: Mapping[str, Any]) -> None:
-    allowed = {"source", "actor_target", "context"}
-    unsupported = sorted(key for key in payload if key not in allowed)
-    if unsupported:
-        raise ValueError(f"envelope has unsupported fields: {', '.join(unsupported)}")
-
-
-def _reject_retired_source(source_type: str) -> None:
-    retired_source = "{}_{}.{}".format("app", "server", "turn_completed")
-    if source_type == retired_source:
-        raise ValueError(f"{retired_source} is not a Task Sys ingest source")
-
-
 def _side_frame(*, task_id: str, source: Mapping[str, Any], actor_target: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "kind": "task_sys.side_frame",
@@ -205,14 +238,16 @@ def _side_frame(*, task_id: str, source: Mapping[str, Any], actor_target: Mappin
 
 def _parent_frame(record: Mapping[str, Any]) -> dict[str, Any]:
     task_id = runtime_files.require_id(_require_text(record.get("id"), "task.id"), "task id")
-    source_type = _require_text(record.get("source_type"), "task.source_type")
+    if record.get("source_type") != "demand":
+        raise ValueError("task.source_type must be demand")
+    demand_ref = _normalize_demand_ref(record.get("source_ref"))
     handoff = _payload_copy(_require_mapping(_execution_handoff(record), "task.execution.handoff"))
     return {
         "kind": "task_sys.parent_frame",
         "task_id": task_id,
         "source": {
-            "type": source_type,
-            "ref": _payload_copy(_require_mapping(record.get("source_ref"), "task.source_ref")),
+            "type": "demand",
+            "ref": demand_ref,
         },
         "actor_target": _normalize_actor_target(record.get("actor_target")),
         "inbound_context": _payload_copy(_require_mapping(record.get("inbound_context"), "task.inbound_context")),
@@ -281,14 +316,16 @@ def task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
     """Return the canonical actor-visible Task summary shape."""
 
     task_id = task.get("id")
-    source_ref = task.get("source_ref")
+    if task.get("source_type") != "demand":
+        raise ValueError("task.source_type must be demand")
+    source_ref = _normalize_demand_ref(task.get("source_ref"))
     execution = task.get("execution")
     events = task.get("events")
     return {
         "task_id": task_id,
         "id": task_id,
-        "source_type": task.get("source_type"),
-        "source_ref": _payload_copy(source_ref) if isinstance(source_ref, Mapping) else {},
+        "source_type": "demand",
+        "source_ref": source_ref,
         "status": task.get("status"),
         "execution": _payload_copy(execution) if isinstance(execution, Mapping) else {},
         "updated_at": task.get("updated_at"),
@@ -333,37 +370,100 @@ def actor_task_projection(*, actor_profile: ActorIdentityProfile) -> dict[str, o
     }
 
 
-def ingest(envelope: Mapping[str, Any]) -> dict[str, Any]:
-    payload = _require_mapping(envelope, "envelope")
-    _reject_unsupported_ingest_fields(payload)
-    source = _normalize_source(payload.get("source"))
-    _reject_retired_source(str(source["type"]))
-    actor_target = _normalize_actor_target(payload.get("actor_target"))
-    context = _normalize_context(payload.get("context"))
+def _create_task(
+    *,
+    actor_target: Mapping[str, str],
+    demand_ref: Mapping[str, Any],
+    execution_brief: Mapping[str, Any],
+) -> dict[str, Any]:
+    source = {"type": "demand", "ref": _payload_copy(demand_ref)}
+    context = {"execution_brief": _payload_copy(execution_brief)}
+    lock_path = _actor_lock_file(actor_target)
+    runtime_files.require_runtime_workspace_write_root()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-    task_id = _new_task_id(str(source["type"]))
-    now = runtime_files.now_iso()
-    record = {
-        "id": task_id,
-        "source_type": source["type"],
-        "source_ref": _payload_copy(source["ref"]),
-        "actor_target": actor_target,
-        "inbound_context": context,
-        "status": SIDE_PROCESSING,
-        "execution": _new_execution("side"),
-        "events": [
-            _event("created", at=now),
-            _event("side_frame_started", at=now, data={"instruction": "start_side"}),
-        ],
-        "created_at": now,
-        "updated_at": now,
-    }
-    persisted = _persist_task(record)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            actor_tasks = list_tasks(actor_target=actor_target)
+            for existing in actor_tasks:
+                if (
+                    existing.get("source_type") == source["type"]
+                    and existing.get("source_ref") == source["ref"]
+                ):
+                    task_id = runtime_files.require_id(existing.get("id"), "task id")
+                    if existing.get("inbound_context") != context:
+                        raise TaskSourceConflict(task_id)
+                    return {
+                        "ok": True,
+                        "task_id": task_id,
+                        "task": existing,
+                        "instruction": None,
+                        "outcome": "existing",
+                        "state_changed": False,
+                    }
 
-    frame = _side_frame(task_id=task_id, source=source, actor_target=actor_target, context=context)
-    instruction = runtime_instruction("start_side", task_id=task_id, actor_target=actor_target, frame=frame)
+            for existing in actor_tasks:
+                if _is_active_task(existing):
+                    task_id = runtime_files.require_id(existing.get("id"), "task id")
+                    task_status = _require_text(existing.get("status"), "task.status")
+                    raise TaskActiveConflict(task_id, task_status)
 
-    return {"ok": True, "task_id": task_id, "task": persisted, "instruction": instruction}
+            task_id = _new_task_id()
+            now = runtime_files.now_iso()
+            record = {
+                "id": task_id,
+                "source_type": source["type"],
+                "source_ref": _payload_copy(source["ref"]),
+                "actor_target": dict(actor_target),
+                "inbound_context": _payload_copy(context),
+                "status": SIDE_PROCESSING,
+                "execution": _new_execution("side"),
+                "events": [
+                    _event("created", at=now),
+                    _event("side_frame_started", at=now, data={"instruction": "start_side"}),
+                ],
+                "created_at": now,
+                "updated_at": now,
+            }
+            persisted = _persist_task(record)
+            frame = _side_frame(
+                task_id=task_id,
+                source=source,
+                actor_target=actor_target,
+                context=context,
+            )
+            instruction = runtime_instruction(
+                "start_side",
+                task_id=task_id,
+                actor_target=actor_target,
+                frame=frame,
+            )
+            return {
+                "ok": True,
+                "task_id": task_id,
+                "task": persisted,
+                "instruction": instruction,
+                "outcome": "created",
+                "state_changed": True,
+            }
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def create(
+    *,
+    actor_target: Mapping[str, Any],
+    demand_ref: Mapping[str, Any],
+    execution_brief: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Create one Demand-sourced Task through the canonical side lifecycle."""
+
+    return _create_task(
+        actor_target=_normalize_actor_target(actor_target),
+        demand_ref=_normalize_demand_ref(demand_ref),
+        execution_brief=_normalize_execution_brief(execution_brief),
+    )
 
 
 def record_task_close(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
@@ -411,7 +511,13 @@ def record_task_cancel(task_id: str, update: Mapping[str, Any]) -> dict[str, Any
         "previous_status": status,
         "updated_at": now,
     }
-    processor = "side" if status == SIDE_PROCESSING else "parent" if status == PARENT_PROCESSING else None
+    processor = (
+        "side"
+        if status in {SIDE_PROCESSING, AWAITING_PARENT}
+        else "parent"
+        if status == PARENT_PROCESSING
+        else None
+    )
     if processor is not None:
         cancellation_result["processor"] = processor
     reason = payload.get("reason")
@@ -555,6 +661,47 @@ def parent_handoff_instruction(task_id: str) -> dict[str, Any]:
         task_id=normalized_task_id,
         actor_target=_normalize_actor_target(record.get("actor_target")),
         frame=_parent_frame(record),
+    )
+
+
+def outcome_instruction(task_id: str) -> dict[str, Any]:
+    """Return parent attention for one terminal Task."""
+
+    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    record = _load_task(normalized_task_id)
+    if record.get("source_type") != "demand":
+        raise ValueError("task.source_type must be demand")
+    status = record.get("status")
+    expected_result_type = {
+        COMPLETED: "completion",
+        CANCELED: "cancellation",
+    }.get(status)
+    if expected_result_type is None:
+        raise ValueError("Demand-sourced Task must be completed or canceled before outcome attention")
+    outcome = _payload_copy(_require_mapping(_execution_result(record), "task.execution.result"))
+    if outcome.get("type") != expected_result_type:
+        raise ValueError(f"{status} Demand-sourced Task must have a {expected_result_type} result")
+    processor = outcome.get("processor")
+    if processor not in {"side", "parent"}:
+        raise ValueError("Task outcome processor must be side or parent")
+    _require_text(outcome.get("updated_at"), "task.execution.result.updated_at")
+    demand_ref = _normalize_demand_ref(record.get("source_ref"))
+    frame = {
+        "kind": "task_sys.outcome_frame",
+        "task_id": normalized_task_id,
+        "status": status,
+        "source": {"type": "demand", "ref": demand_ref},
+        "evidence_ref": {
+            "type": "task_sys.task",
+            "ref": {"task_id": normalized_task_id},
+        },
+        "outcome": outcome,
+    }
+    return runtime_instruction(
+        "submit_parent",
+        task_id=normalized_task_id,
+        actor_target=_normalize_actor_target(record.get("actor_target")),
+        frame=frame,
     )
 
 

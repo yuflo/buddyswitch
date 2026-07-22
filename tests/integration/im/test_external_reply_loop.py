@@ -18,7 +18,10 @@ SCRIPTS = ROOT / "scripts"
 from tools.launcher import daemon_mailbox  # noqa: E402
 from tools.launcher import im_http_router  # noqa: E402
 from tools.launcher import im_wake_handler  # noqa: E402
+from env.domain import demand_sys  # noqa: E402
 from env.repos import identities  # noqa: E402
+from env.repos import runtime_files  # noqa: E402
+from env.services import messages as message_service  # noqa: E402
 from env.tool_runtime import im_actor_delivery  # noqa: E402
 from env.tool_runtime import im_client as im_client_module  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
@@ -62,8 +65,12 @@ class _RecordingTriggerDispatcher:
 
 
 class _Runtime:
-    def parent_activity(self) -> dict[str, str]:
-        return {"status": "idle"}
+    def __init__(self) -> None:
+        self.inputs: list[str] = []
+
+    def input_actor(self, text: str) -> dict[str, str]:
+        self.inputs.append(text)
+        return {"action": "start", "turn_id": f"turn-demand-{len(self.inputs)}"}
 
 
 class _WakeHandlerDispatcher:
@@ -74,23 +81,10 @@ class _WakeHandlerDispatcher:
         self.runtime = _Runtime()
         self.handler = im_wake_handler.ImMessageCreatedHandler()
         self.triggers: list[Any] = []
-        self.task_sys_instructions: list[dict[str, Any]] = []
-
-    def _execute_instruction(self, _context: object, instruction: dict[str, Any]) -> dict[str, Any]:
-        expected = {"actor_id": self.identity_id, "role_id": self.role_id}
-        if instruction.get("actor_target") != expected:
-            raise AssertionError(f"wrong task sys target: {instruction.get('actor_target')!r}")
-        self.task_sys_instructions.append(instruction)
-        return {"action": instruction["type"], "task_id": instruction["task_id"]}
 
     def __call__(self, trigger: Any) -> dict[str, Any]:
         self.triggers.append(trigger)
-        original_execute = im_wake_handler.task_sys_daemon_adapter.execute_instruction
-        im_wake_handler.task_sys_daemon_adapter.execute_instruction = self._execute_instruction
-        try:
-            result = self.handler.handle(self.context, None, self.runtime, trigger)
-        finally:
-            im_wake_handler.task_sys_daemon_adapter.execute_instruction = original_execute
+        result = self.handler.handle(self.context, None, self.runtime, trigger)
         return {
             "accepted": True,
             "handled_count": 1 if result.status == "handled" else 0,
@@ -99,6 +93,9 @@ class _WakeHandlerDispatcher:
         }
 
 class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
+    def _task_records(self) -> list[Path]:
+        return sorted((runtime_files.OBJECTS_ROOT / "task-sys" / "tasks").glob("*.json"))
+
     def _create_external_session(self, router: im_http_router.ImHttpRouter) -> str:
         status, created = router.handle(
             "POST",
@@ -308,6 +305,20 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
                 "role_id": target_role_id,
             }
         )
+        external_session = message_service.create_external_session(
+            display_name="socket demand sender"
+        )
+        external_auth = message_service.authenticate_external_session_key(
+            external_session["external_session_key"]
+        )
+        sent = message_service.send_im_message(
+            sender_identity=external_auth["identity"],
+            target_identity={"id": target_identity_id, "type": "actor"},
+            content="socket demand probe",
+        )
+        message_id = sent["message"]["id"]
+        conversation_id = sent["message"]["conversation_id"]
+        event_id = sent["event_id"]
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = Path(temp_root) / "mailbox.sock"
             dispatcher = _WakeHandlerDispatcher(identity_id=target_identity_id, role_id=target_role_id)
@@ -328,9 +339,9 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
                     "type": "im.message.created",
                     "wake_id": "imwake-socket",
                     "target_identity_id": target_identity_id,
-                    "message_id": "msg-socket",
-                    "conversation_id": "conv-socket",
-                    "event_id": "imev-socket",
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "event_id": event_id,
                 },
                 check_reachability_fn=lambda **_kwargs: {
                     "reachability_status": "online",
@@ -349,21 +360,28 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
         self.assertEqual(len(dispatcher.triggers), 1)
         trigger = dispatcher.triggers[0]
         self.assertEqual(trigger.type, "im.message.created")
-        self.assertEqual(trigger.origin_id, "msg-socket")
+        self.assertEqual(trigger.origin_id, message_id)
         self.assertEqual(trigger.correlation_id, "imwake-socket")
-        self.assertEqual(trigger.payload, {"message_id": "msg-socket", "conversation_id": "conv-socket", "event_id": "imev-socket"})
-        self.assertEqual(trigger.source_context, {"source": "central_im"})
-        self.assertEqual(len(dispatcher.task_sys_instructions), 1)
-        instruction = dispatcher.task_sys_instructions[0]
-        self.assertEqual(instruction["type"], "start_side")
-        self.assertEqual(instruction["actor_target"], {"actor_id": target_identity_id, "role_id": target_role_id})
-        frame = instruction["frame"]
-        self.assertEqual(frame["kind"], "task_sys.side_frame")
-        self.assertEqual(frame["source"]["type"], "im.message.created")
         self.assertEqual(
-            frame["source"]["ref"],
-            {"message_id": "msg-socket", "conversation_id": "conv-socket", "event_id": "imev-socket"},
+            trigger.payload,
+            {
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "event_id": event_id,
+            },
         )
+        self.assertEqual(trigger.source_context, {"source": "central_im"})
+        demands = demand_sys.list_demands(
+            {"actor_id": target_identity_id, "role_id": target_role_id},
+            state="all",
+        )
+        self.assertEqual(len(demands), 1)
+        self.assertEqual(demands[0]["intake_key"], f"im.message.created:{message_id}")
+        self.assertEqual(demands[0]["description"], "socket demand probe")
+        self.assertEqual(demands[0]["checked_revision"], 0)
+        self.assertEqual(len(dispatcher.runtime.inputs), 1)
+        self.assertIn("[DEMAND CHECK]", dispatcher.runtime.inputs[0])
+        self.assertEqual(self._task_records(), [])
 
     def test_actor_to_actor_send_writes_refs_and_reaches_target_local_runtime(self) -> None:
         source_identity_id = self._runtime_actor_id(role="dev", label="act-dev-integrated-send")
@@ -463,13 +481,17 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
         self.assertEqual(trigger.target_identity_id, target_identity_id)
         self.assertEqual(trigger.target_role_id, target_role_id)
         self.assertEqual(trigger.payload, {"message_id": message_id, "conversation_id": conversation_id, "event_id": event_id})
-        self.assertEqual(len(dispatcher.task_sys_instructions), 1)
-        instruction = dispatcher.task_sys_instructions[0]
-        self.assertEqual(instruction["actor_target"], {"actor_id": target_identity_id, "role_id": target_role_id})
-        self.assertEqual(
-            instruction["frame"]["source"]["ref"],
-            {"message_id": message_id, "conversation_id": conversation_id, "event_id": event_id},
+        demands = demand_sys.list_demands(
+            {"actor_id": target_identity_id, "role_id": target_role_id},
+            state="all",
         )
+        self.assertEqual(len(demands), 1)
+        self.assertEqual(demands[0]["intake_key"], f"im.message.created:{message_id}")
+        self.assertEqual(demands[0]["description"], "integrated ping")
+        self.assertEqual(demands[0]["checked_revision"], 0)
+        self.assertEqual(len(dispatcher.runtime.inputs), 1)
+        self.assertIn("[DEMAND CHECK]", dispatcher.runtime.inputs[0])
+        self.assertEqual(self._task_records(), [])
 
     def test_wake_bridge_reports_offline_target_without_mailbox_request(self) -> None:
         mailbox_calls: list[dict[str, Any]] = []

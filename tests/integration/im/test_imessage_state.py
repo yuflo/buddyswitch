@@ -19,6 +19,95 @@ from tests.integration.im._imessage_fakes import (
 
 
 class ImessageStateTests(unittest.TestCase):
+    def test_schema_6_state_without_retry_fields_normalizes_to_current_empty_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            state_path = Path(temp_root) / "state.json"
+            store = imessage_channel.ImessageChannelStateStore(state_path)
+            store.save(
+                {
+                    "schema_version": imessage_channel.SCHEMA_VERSION,
+                    "contacts": {
+                        "sender:user@example.com": {
+                            "external_session_key": "imsk-1",
+                            "external_identity_id": "ext-1",
+                            "route": {"chat_id": "9", "sender": "user@example.com"},
+                            "seen_inbound_keys": [],
+                            "message_links": {},
+                        }
+                    },
+                }
+            )
+
+            contact = store.load()["contacts"]["sender:user@example.com"]
+
+        self.assertIsNone(contact["outbound_retry"])
+        self.assertIsNone(contact["last_delivery_failure"])
+
+    def test_invalid_retry_payload_is_discarded_not_executed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            state_path = Path(temp_root) / "state.json"
+            store = imessage_channel.ImessageChannelStateStore(state_path)
+            store.save(
+                {
+                    "schema_version": imessage_channel.SCHEMA_VERSION,
+                    "contacts": {
+                        "sender:user@example.com": {
+                            "external_session_key": "imsk-1",
+                            "external_identity_id": "ext-1",
+                            "route": {"chat_id": "9", "sender": "user@example.com"},
+                            "seen_inbound_keys": [],
+                            "message_links": {},
+                            "outbound_retry": {
+                                "event_id": "imev-1",
+                                "message_id": "msg-1",
+                                "first_failed_at": -1,
+                                "next_attempt_at": 0,
+                                "attempts": 0,
+                                "last_error": "bad",
+                            },
+                        }
+                    },
+                }
+            )
+
+            contact = store.load()["contacts"]["sender:user@example.com"]
+
+        self.assertIsNone(contact["outbound_retry"])
+
+    def test_retry_with_unrecognized_error_detail_is_discarded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            state_path = Path(temp_root) / "state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": imessage_channel.SCHEMA_VERSION,
+                        "contacts": {
+                            "sender:user@example.com": {
+                                "external_session_key": "imsk-1",
+                                "external_identity_id": "ext-1",
+                                "route": {"chat_id": "9", "sender": "user@example.com"},
+                                "seen_inbound_keys": [],
+                                "message_links": {},
+                                "outbound_retry": {
+                                    "event_id": "imev-1",
+                                    "message_id": "msg-1",
+                                    "first_failed_at": 1_000.0,
+                                    "next_attempt_at": 1_001.0,
+                                    "attempts": 1,
+                                    "last_error": "user@example.com secret content",
+                                },
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            contact = imessage_channel.ImessageChannelStateStore(state_path).load()["contacts"][
+                "sender:user@example.com"
+            ]
+
+        self.assertIsNone(contact["outbound_retry"])
     def test_default_state_path_uses_current_imessage_channel_schema(self) -> None:
         config = imessage_channel.ChannelConfig(server="http://127.0.0.1:8765")
         self.assertEqual(config.effective_state_path().parts[-2:], ("imessage-channel", "state.json"))
@@ -36,7 +125,7 @@ class ImessageStateTests(unittest.TestCase):
             with self.assertRaisesRegex(imessage_channel.ChannelStateError, "schema is retired"):
                 store.load()
 
-    def test_current_state_normalizes_only_binding_route_dedupe_and_message_links(self) -> None:
+    def test_current_state_normalizes_only_current_contact_transport_fields(self) -> None:
         payload = _current_state()
         contact = payload["contacts"]["sender:user-a@example.com"]
         contact.update(
@@ -67,6 +156,8 @@ class ImessageStateTests(unittest.TestCase):
                         "event_id": "imev-actor-1",
                     }
                 },
+                "outbound_retry": None,
+                "last_delivery_failure": None,
             },
         )
 
@@ -104,7 +195,10 @@ class ImessageStateTests(unittest.TestCase):
             state_path.write_text(json.dumps({"schema_version": 5, "contacts": {}}), encoding="utf-8")
             imsg = _QueueImsg()
             controller, _api, _imsg = _controller(Path(temp_root), imsg=imsg)
-            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=1)
+            worker = imessage_channel.ImessageChannelWorker(
+                controller,
+                outbound_scan_interval_seconds=0.001,
+            )
             self.addCleanup(worker.stop)
 
             with self.assertRaisesRegex(imessage_channel.ChannelError, "schema is retired"):
@@ -117,7 +211,10 @@ class ImessageStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             imsg = _UnavailableImsg()
             controller, _api, _imsg = _controller(Path(temp_root), imsg=imsg)
-            worker = imessage_channel.ImessageChannelWorker(controller, reply_wait_ms=1)
+            worker = imessage_channel.ImessageChannelWorker(
+                controller,
+                outbound_scan_interval_seconds=0.001,
+            )
             self.addCleanup(worker.stop)
 
             with self.assertRaisesRegex(imessage_channel.ChannelError, "imsg unavailable"):
@@ -140,6 +237,9 @@ class ImessageForwardResidueTests(unittest.TestCase):
             "_migrate_schema_v4_state",
             "sent_outbound_event_ids",
             "_is_numeric_choice",
+            "DEFAULT_REPLY_WAIT_MS",
+            "poll_outbound_once",
+            "reply_wait_ms",
         ):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, source)

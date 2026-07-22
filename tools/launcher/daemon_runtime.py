@@ -15,6 +15,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
         sys.path.insert(0, str(candidate))
 
 import app_server  # noqa: E402
+import actor_session  # noqa: E402
 import daemon_contracts  # noqa: E402
 
 
@@ -48,3 +49,14 @@ class DaemonRuntime:
             )
         except Exception as exc:
             return {"status": "unavailable", "error": str(exc)}
+
+    def input_actor(self, text: str) -> dict[str, Any]:
+        return dict(
+            actor_session.input_actor_turn(
+                socket_path=self.context.socket_path,
+                instance_json=self.context.instance_json,
+                thread_id=self.context.main_thread_id,
+                text=text,
+                permissions=self.context.permissions,
+            )
+        )

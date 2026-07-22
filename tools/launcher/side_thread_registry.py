@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 
 NowFn = Callable[[], str]
+_PROCESS_LOCKS: dict[Path, threading.Lock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
 
 
 class SideThreadRegistryError(RuntimeError):
@@ -55,6 +60,22 @@ def _write_payload(instance_json: Path, payload: dict[str, Any]) -> None:
     temp_path.replace(path)
 
 
+@contextmanager
+def _write_lock(instance_json: Path) -> Any:
+    path = Path(instance_json)
+    lock_path = path.with_name(f".{path.name}.side-threads.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with _PROCESS_LOCKS_GUARD:
+        process_lock = _PROCESS_LOCKS.setdefault(lock_path, threading.Lock())
+    with process_lock:
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _side_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     rows = payload.get("side_threads")
     if not isinstance(rows, list):
@@ -79,29 +100,33 @@ def register_side_thread(
     task_id: str | None = None,
     purpose: str | None = None,
     turn_id: str | None = None,
+    turn_kind: str | None = None,
     now: NowFn | None = None,
 ) -> dict[str, Any]:
     actor = _require_id(actor_id, "Actor id")
     parent, side = _validate_side_identity(parent_thread_id, side_thread_id)
-    payload = _load_payload(Path(instance_json), actor)
-    timestamp = _now_value(now)
-    row = {
-        "thread_id": side,
-        "parent_thread_id": parent,
-        "status": "open",
-        "created_at": timestamp,
-        "updated_at": timestamp,
-    }
-    if task_id is not None:
-        row["task_id"] = _require_id(task_id, "Task id")
-    if purpose is not None:
-        row["purpose"] = _require_id(purpose, "Side thread purpose")
-    if turn_id is not None:
-        row["turn_id"] = _require_id(turn_id, "Turn id")
-    payload["side_threads"] = [item for item in _side_rows(payload) if item.get("thread_id") != side]
-    payload["side_threads"].append(row)
-    payload["updated_at"] = timestamp
-    _write_payload(Path(instance_json), payload)
+    with _write_lock(Path(instance_json)):
+        payload = _load_payload(Path(instance_json), actor)
+        timestamp = _now_value(now)
+        row = {
+            "thread_id": side,
+            "parent_thread_id": parent,
+            "status": "open",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        if task_id is not None:
+            row["task_id"] = _require_id(task_id, "Task id")
+        if purpose is not None:
+            row["purpose"] = _require_id(purpose, "Side thread purpose")
+        if turn_id is not None:
+            row["turn_id"] = _require_id(turn_id, "Turn id")
+        if turn_kind is not None:
+            row["turn_kind"] = _require_id(turn_kind, "Turn kind")
+        payload["side_threads"] = [item for item in _side_rows(payload) if item.get("thread_id") != side]
+        payload["side_threads"].append(row)
+        payload["updated_at"] = timestamp
+        _write_payload(Path(instance_json), payload)
     return row
 
 
@@ -112,32 +137,84 @@ def update_side_thread(
     parent_thread_id: str,
     side_thread_id: str,
     turn_id: str | None = None,
+    turn_kind: str | None = None,
     status: str | None = None,
     now: NowFn | None = None,
 ) -> dict[str, Any]:
     actor = _require_id(actor_id, "Actor id")
     parent, side = _validate_side_identity(parent_thread_id, side_thread_id)
-    payload = _load_payload(Path(instance_json), actor)
-    timestamp = _now_value(now)
-    updated_row: dict[str, Any] | None = None
-    rows: list[dict[str, Any]] = []
-    for row in _side_rows(payload):
-        if row.get("thread_id") == side and row.get("parent_thread_id") == parent and row.get("status") == "open":
-            updated_row = dict(row)
-            if turn_id is not None:
-                updated_row["turn_id"] = _require_id(turn_id, "Turn id")
-            if status is not None:
-                updated_row["status"] = _require_id(status, "Side thread status")
-            updated_row["updated_at"] = timestamp
-            rows.append(updated_row)
-            continue
-        rows.append(row)
-    if updated_row is None:
-        raise SideThreadRegistryError(f"Side thread is not registered for this instance: {side}")
-    payload["side_threads"] = rows
-    payload["updated_at"] = timestamp
-    _write_payload(Path(instance_json), payload)
+    with _write_lock(Path(instance_json)):
+        payload = _load_payload(Path(instance_json), actor)
+        timestamp = _now_value(now)
+        updated_row: dict[str, Any] | None = None
+        rows: list[dict[str, Any]] = []
+        for row in _side_rows(payload):
+            if row.get("thread_id") == side and row.get("parent_thread_id") == parent and row.get("status") == "open":
+                updated_row = dict(row)
+                if turn_id is not None:
+                    updated_row["turn_id"] = _require_id(turn_id, "Turn id")
+                if turn_kind is not None:
+                    updated_row["turn_kind"] = _require_id(turn_kind, "Turn kind")
+                if status is not None:
+                    updated_row["status"] = _require_id(status, "Side thread status")
+                updated_row["updated_at"] = timestamp
+                rows.append(updated_row)
+                continue
+            rows.append(row)
+        if updated_row is None:
+            raise SideThreadRegistryError(f"Side thread is not registered for this instance: {side}")
+        payload["side_threads"] = rows
+        payload["updated_at"] = timestamp
+        _write_payload(Path(instance_json), payload)
     return updated_row
+
+
+def transition_side_thread_turn(
+    instance_json: Path,
+    *,
+    actor_id: str,
+    parent_thread_id: str,
+    side_thread_id: str,
+    expected_turn_id: str | None,
+    expected_turn_kind: str,
+    turn_kind: str,
+    turn_id: str | None = None,
+    now: NowFn | None = None,
+) -> dict[str, Any] | None:
+    actor = _require_id(actor_id, "Actor id")
+    parent, side = _validate_side_identity(parent_thread_id, side_thread_id)
+    expected_kind = _require_id(expected_turn_kind, "Expected turn kind")
+    next_kind = _require_id(turn_kind, "Turn kind")
+    normalized_expected_turn = (
+        _require_id(expected_turn_id, "Expected turn id") if expected_turn_id is not None else None
+    )
+    normalized_turn = _require_id(turn_id, "Turn id") if turn_id is not None else None
+    with _write_lock(Path(instance_json)):
+        payload = _load_payload(Path(instance_json), actor)
+        timestamp = _now_value(now)
+        found = False
+        transitioned: dict[str, Any] | None = None
+        rows: list[dict[str, Any]] = []
+        for row in _side_rows(payload):
+            if row.get("thread_id") == side and row.get("parent_thread_id") == parent and row.get("status") == "open":
+                found = True
+                if row.get("turn_id") == normalized_expected_turn and row.get("turn_kind") == expected_kind:
+                    transitioned = dict(row)
+                    transitioned["turn_kind"] = next_kind
+                    if normalized_turn is not None:
+                        transitioned["turn_id"] = normalized_turn
+                    transitioned["updated_at"] = timestamp
+                    rows.append(transitioned)
+                    continue
+            rows.append(row)
+        if not found:
+            raise SideThreadRegistryError(f"Side thread is not registered for this instance: {side}")
+        if transitioned is None:
+            return None
+        payload["side_threads"] = rows
+        payload["updated_at"] = timestamp
+        _write_payload(Path(instance_json), payload)
+        return transitioned
 
 
 def require_side_thread(
@@ -194,17 +271,18 @@ def unregister_side_thread(
 ) -> bool:
     actor = _require_id(actor_id, "Actor id")
     parent, side = _validate_side_identity(parent_thread_id, side_thread_id)
-    payload = _load_payload(Path(instance_json), actor)
-    before = _side_rows(payload)
-    after = [
-        row
-        for row in before
-        if not (row.get("thread_id") == side and row.get("parent_thread_id") == parent)
-    ]
-    removed = len(after) != len(before)
-    payload["side_threads"] = after
-    payload["updated_at"] = _now_value(now)
-    _write_payload(Path(instance_json), payload)
+    with _write_lock(Path(instance_json)):
+        payload = _load_payload(Path(instance_json), actor)
+        before = _side_rows(payload)
+        after = [
+            row
+            for row in before
+            if not (row.get("thread_id") == side and row.get("parent_thread_id") == parent)
+        ]
+        removed = len(after) != len(before)
+        payload["side_threads"] = after
+        payload["updated_at"] = _now_value(now)
+        _write_payload(Path(instance_json), payload)
     return removed
 
 

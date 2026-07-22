@@ -261,18 +261,26 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
         before = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
 
         instance_root = self._instance_root("act-task-track-hint")
-        result = task_sys.ingest(
-            {
-                "source": {"type": "test.fixture", "ref": {"title": "Task hint", "track_id": "track-task-hint"}},
-                "actor_target": {"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
-                "context": {"instance_root": str(instance_root)},
-            }
+        result = task_sys.create(
+            actor_target={"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
+            demand_ref={"demand_id": "demand-task-track-hint", "basis_revision": 1},
+            execution_brief={
+                "description": "Task hint fixture.",
+                "detail": f"Track context: track-task-hint. Instance: {instance_root}.",
+            },
         )
         task = result["task"]
 
         after = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
         self.assertEqual(after, before)
-        self.assertEqual(task["source_ref"]["track_id"], "track-task-hint")
+        self.assertEqual(
+            task["source_ref"],
+            {"demand_id": "demand-task-track-hint", "basis_revision": 1},
+        )
+        self.assertIn(
+            "Track context: track-task-hint",
+            task["inbound_context"]["execution_brief"]["detail"],
+        )
         self.assertNotIn("artifact_ids", task)
         self.assertNotIn("artifact_slots", task)
 

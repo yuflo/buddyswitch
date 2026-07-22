@@ -49,12 +49,13 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
 
     def _seed_active_task(self, *, instance_json: Path, role: str, actor_id: str) -> None:
         task_id = f"task-0001-{role}-payload-contract"
-        task_sys.ingest(
-            {
-                "source": {"type": "test.payload_contract", "ref": {"id": task_id}},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "payload contract"},
-            }
+        task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={"demand_id": f"demand-payload-contract-{role}", "basis_revision": 1},
+            execution_brief={
+                "description": "Payload contract fixture.",
+                "detail": f"Exercise payload contracts for {task_id}.",
+            },
         )
 
     def _dispatch(self, *, tool: str, action: str, args: dict[str, object], role: str = "dev") -> dict[str, object]:
@@ -130,5 +131,39 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
         message_domain = ROOT / "scripts" / "env" / "domain" / "messages.py"
         if message_domain.exists():
             violations.append(f"{message_domain.relative_to(ROOT)}: legacy actor-address message domain must stay retired")
+
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_current_im_surfaces_do_not_contain_retired_processing_model(self) -> None:
+        current_surfaces = (
+            "scripts/env/repos/messages.py",
+            "scripts/env/services/messages.py",
+            "scripts/env_legacy_store.py",
+            "scripts/env/tools/message/tool.py",
+            "scripts/env/tools/message/_impl.py",
+            "scripts/env/tool_runtime/im_client.py",
+            "scripts/env/tool_runtime/role_auth.py",
+            "tools/launcher/external_im_session.py",
+            "tools/launcher/im_http_router.py",
+            "tools/launcher/task_sys_runtime.py",
+            "buddyswitch/skills/shared/task-management/SKILL.md",
+            "docs/arch/web-interface-call-architecture.md",
+        )
+        retired = (
+            "message_" + "states",
+            "update_im_" + "disposition",
+            "message." + "mark",
+            "original_final_" + "disposition",
+            "processable " + "inbound",
+            "per-identity " + "dispositions",
+            "disposition " + "marking",
+            "disposition " + "behavior",
+        )
+        violations: list[str] = []
+        for relative_path in current_surfaces:
+            text = (ROOT / relative_path).read_text(encoding="utf-8").lower()
+            for token in retired:
+                if token in text:
+                    violations.append(f"{relative_path}: {token}")
 
         self.assertEqual(violations, [], msg="\n".join(violations))

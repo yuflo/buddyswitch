@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import queue
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from tools.launcher import imessage_channel  # noqa: E402
 
@@ -92,13 +92,14 @@ class _FakeBuddySwitchImApi:
 
     def read_events(self, *, external_session_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
         acked_ids = {row["event_id"] for row in self.acked if row["external_session_key"] == external_session_key}
+        available = [
+            dict(row)
+            for row in self.events_by_key.get(external_session_key, [])
+            if str(row.get("event_id") or "") not in acked_ids
+        ]
         return {
             "ok": True,
-            "events": [
-                dict(row)
-                for row in self.events_by_key.get(external_session_key, [])
-                if str(row.get("event_id") or "") not in acked_ids
-            ],
+            "events": available[:limit],
         }
 
     def get_message(self, *, external_session_key: str, message_id: str) -> dict[str, Any]:
@@ -116,15 +117,17 @@ class _FakeBuddySwitchImApi:
         return {"ok": True, "event_id": event_id}
 
 
-class _BlockingReadApi(_FakeBuddySwitchImApi):
-    def __init__(self) -> None:
+class _ControlledBlockingReadApi(_FakeBuddySwitchImApi):
+    def __init__(self, *, blocked_external_session_keys: set[str]) -> None:
         super().__init__()
+        self.blocked_external_session_keys = set(blocked_external_session_keys)
         self.read_started = threading.Event()
         self.release_read = threading.Event()
 
     def read_events(self, *, external_session_key: str, limit: int, wait_ms: int) -> dict[str, Any]:
-        self.read_started.set()
-        self.release_read.wait(timeout=2)
+        if external_session_key in self.blocked_external_session_keys:
+            self.read_started.set()
+            self.release_read.wait(timeout=2)
         return super().read_events(external_session_key=external_session_key, limit=limit, wait_ms=wait_ms)
 
 
@@ -140,6 +143,30 @@ class _LateReplyApi(_FakeBuddySwitchImApi):
             self.first_read.set()
             return {"ok": True, "events": []}
         return super().read_events(external_session_key=external_session_key, limit=limit, wait_ms=wait_ms)
+
+
+class _BlockingActorSendApi(_FakeBuddySwitchImApi):
+    def __init__(self, *, blocked_external_session_key: str) -> None:
+        super().__init__()
+        self.blocked_external_session_key = blocked_external_session_key
+        self.actor_send_started = threading.Event()
+        self.release_actor_send = threading.Event()
+
+    def send_to_actor(
+        self,
+        *,
+        external_session_key: str,
+        target_identity_id: str,
+        content: str,
+    ) -> dict[str, Any]:
+        if external_session_key == self.blocked_external_session_key:
+            self.actor_send_started.set()
+            self.release_actor_send.wait(timeout=2)
+        return super().send_to_actor(
+            external_session_key=external_session_key,
+            target_identity_id=target_identity_id,
+            content=content,
+        )
 
 
 class _FakeImsg:
@@ -183,6 +210,43 @@ class _QueueImsg(_FakeImsg):
         self.rows.put(None)
 
 
+class _ControlledSendImsg(_QueueImsg):
+    def __init__(self, *, blocked_chat_ids: set[str] | None = None) -> None:
+        super().__init__()
+        self.blocked_chat_ids = set(blocked_chat_ids or set())
+        self.release_by_chat_id = {
+            chat_id: threading.Event() for chat_id in self.blocked_chat_ids
+        }
+        self.send_started_by_chat_id: dict[str, threading.Event] = {}
+        self.started_sends: list[dict[str, Any]] = []
+        self.active_sends = 0
+        self.max_active_sends = 0
+        self._send_lock = threading.Lock()
+
+    def send(self, *, route: dict[str, Any], text: str) -> _FakeSendReceipt:
+        chat_id = str(route.get("chat_id") or "")
+        with self._send_lock:
+            started = self.send_started_by_chat_id.setdefault(chat_id, threading.Event())
+            self.started_sends.append({"route": dict(route), "text": text})
+            self.active_sends += 1
+            self.max_active_sends = max(self.max_active_sends, self.active_sends)
+        started.set()
+        try:
+            release = self.release_by_chat_id.get(chat_id)
+            if release is not None:
+                release.wait(timeout=2)
+            with self._send_lock:
+                self.sent.append({"route": dict(route), "text": text})
+                return _FakeSendReceipt(guid=f"out-guid-{len(self.sent)}")
+        finally:
+            with self._send_lock:
+                self.active_sends -= 1
+
+    def release_all(self) -> None:
+        for release in self.release_by_chat_id.values():
+            release.set()
+
+
 class _UnavailableImsg(_QueueImsg):
     def __init__(self) -> None:
         super().__init__()
@@ -194,15 +258,16 @@ class _UnavailableImsg(_QueueImsg):
 
 
 class _FailingImsg(_FakeImsg):
-    def __init__(self, *, fail_on_call: int) -> None:
+    def __init__(self, *, fail_on_call: int, error_message: str = "iMessage send status failed") -> None:
         super().__init__()
         self.fail_on_call = fail_on_call
+        self.error_message = error_message
 
     def send(self, *, route: dict[str, Any], text: str) -> _FakeSendReceipt:
         self.sent.append({"route": dict(route), "text": text})
         if len(self.sent) < self.fail_on_call:
             return _FakeSendReceipt(guid=f"out-guid-{len(self.sent)}")
-        raise imessage_channel.ChannelError("iMessage send status failed")
+        raise imessage_channel.ChannelError(self.error_message)
 
 
 def _actor(role_id: str, identity_id: str, *, status: str = "online") -> dict[str, Any]:
@@ -250,6 +315,7 @@ def _controller(
     *,
     api: _FakeBuddySwitchImApi | None = None,
     imsg: _FakeImsg | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> tuple[imessage_channel.ImessageChannelController, _FakeBuddySwitchImApi, _FakeImsg]:
     api = api or _FakeBuddySwitchImApi()
     imsg = imsg or _FakeImsg()
@@ -257,7 +323,16 @@ def _controller(
         server="http://127.0.0.1:8765",
         state_path=temp_root / "state.json",
     )
-    return imessage_channel.ImessageChannelController(config=config, api=api, imsg=imsg), api, imsg
+    return (
+        imessage_channel.ImessageChannelController(
+            config=config,
+            api=api,
+            imsg=imsg,
+            clock=clock,
+        ),
+        api,
+        imsg,
+    )
 
 
 def _current_state() -> dict[str, Any]:

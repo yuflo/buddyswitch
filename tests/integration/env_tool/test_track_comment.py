@@ -65,12 +65,13 @@ class TrackCommentEnvToolTests(RuntimeWorkspaceTestCase):
 
     def _seed_active_task(self, *, instance_root: Path, actor_id: str, role: str) -> None:
         task_id = f"task-0001-{role}-track-comment"
-        task_sys.ingest(
-            {
-                "source": {"type": "test.track_comment", "ref": {"id": task_id}},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "track comment"},
-            }
+        task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={"demand_id": f"demand-track-comment-{role}", "basis_revision": 1},
+            execution_brief={
+                "description": "Track comment fixture.",
+                "detail": f"Exercise Track comment tooling for {task_id}.",
+            },
         )
 
     def _dispatch(self, *, actor_id: str, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:

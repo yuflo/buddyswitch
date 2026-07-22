@@ -17,6 +17,11 @@ from env.repos import runtime_files
 RUNTIME_WORKSPACE_HEADER = "# BuddySwitch Runtime Workspace\n"
 
 
+def _fixture_demand_id(*parts: str) -> str:
+    digest = hashlib.sha1(":".join(parts).encode("utf-8")).hexdigest()[:12]
+    return f"demand-fixture-{digest}"
+
+
 class RuntimeTestWorkspace:
     """Bind production runtime environment inputs to isolated temporary state."""
 
@@ -79,20 +84,21 @@ class RuntimeTestWorkspace:
         summary: str = "",
         track_id: str | None = None,
     ) -> str:
-        source_ref: dict[str, object] = {
-            "slug": runtime_files.slugify(task_slug),
-            "title": title,
-        }
+        detail_parts = [title]
         if summary:
-            source_ref["summary"] = summary
+            detail_parts.append(summary)
         if track_id is not None:
-            source_ref["track_id"] = track_id
-        result = task_sys.ingest(
-            {
-                "source": {"type": "test.fixture", "ref": source_ref},
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "task sys test task"},
-            }
+            detail_parts.append(f"Track context: {track_id}")
+        result = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={
+                "demand_id": _fixture_demand_id(role, actor_id, task_slug),
+                "basis_revision": 1,
+            },
+            execution_brief={
+                "description": title,
+                "detail": "\n".join(detail_parts),
+            },
         )
         return str(result["task_id"])
 
@@ -105,15 +111,16 @@ class RuntimeTestWorkspace:
         task_slug: str = "active-task",
     ) -> str:
         del instance_json
-        result = task_sys.ingest(
-            {
-                "source": {
-                    "type": "test.fixture",
-                    "ref": {"slug": runtime_files.slugify(task_slug)},
-                },
-                "actor_target": {"actor_id": actor_id, "role_id": role},
-                "context": {"fixture": "active task"},
-            }
+        result = task_sys.create(
+            actor_target={"actor_id": actor_id, "role_id": role},
+            demand_ref={
+                "demand_id": _fixture_demand_id(role, actor_id, task_slug),
+                "basis_revision": 1,
+            },
+            execution_brief={
+                "description": "Active test Task.",
+                "detail": f"Active test Task fixture for {task_slug}.",
+            },
         )
         return str(result["task_id"])
 

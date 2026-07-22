@@ -401,22 +401,16 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         runner = RecordingHostControl()
         runner.set_response("status", ("act-pm-demo",), self._instance_status_payload())
         service = self._service(runner)
-        task_result = task_sys.ingest(
-            {
-                "source": {"type": "test.console", "ref": {"id": "console"}},
-                "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
-                "context": {"fixture": "web console"},
-            }
-        )
-        failed_result = task_sys.ingest(
-            {
-                "source": {"type": "test.console", "ref": {"id": "console-failed"}},
-                "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
-                "context": {"fixture": "web console recoverable"},
-            }
+        task_result = task_sys.create(
+            actor_target={"actor_id": "act-pm-demo", "role_id": "pm"},
+            demand_ref={"demand_id": "demand-web-console", "basis_revision": 1},
+            execution_brief={
+                "description": "Web console fixture.",
+                "detail": "Exercise the management console Task projection.",
+            },
         )
         task_sys.record_side_runtime_failure(
-            failed_result["task_id"],
+            task_result["task_id"],
             {
                 "reason": "runtime_failed",
                 "stage": "side_input",
@@ -446,9 +440,9 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         console = payload["console"]
         self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
         self.assertEqual(console["runtime"]["thread_status"], "idle")
-        self.assertEqual(console["task_sys"]["active_count"], 2)
+        self.assertEqual(console["task_sys"]["active_count"], 1)
         self.assertEqual(console["task_sys"]["recoverable_count"], 1)
-        external_task_keys = ("task_id", "source_type", "status", "actor", "updated_at")
+        external_task_keys = ("task_id", "source_type", "demand_ref", "status", "actor", "updated_at")
         active_task = next(
             row for row in console["task_sys"]["active_tasks"] if row["task_id"] == task_result["task_id"]
         )
@@ -458,7 +452,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         self.assertEqual(active_task["task_id"], task_result["task_id"])
         self.assertEqual(active_task["status"], "in_progress.side_processing")
         self.assertEqual(active_task["actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
-        self.assertEqual(recoverable_task["task_id"], failed_result["task_id"])
+        self.assertEqual(recoverable_task["task_id"], task_result["task_id"])
         self.assertEqual(recoverable_task["status"], "in_progress.side_processing")
         for row in (active_task, recoverable_task):
             self.assertNotIn("execution", row)

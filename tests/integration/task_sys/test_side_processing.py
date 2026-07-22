@@ -23,19 +23,19 @@ def _task_sys() -> Any:
 
 
 class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
-    def _envelope(self) -> dict[str, Any]:
+    def _create_args(self) -> dict[str, Any]:
         return {
-            "source": {
-                "type": "user.input",
-                "ref": {"id": "input-1", "surface": "cli"},
-            },
             "actor_target": {
                 "role_id": "dev",
                 "actor_id": self._runtime_actor_id(role="dev", label="act-dev-task-sys-side"),
             },
-            "context": {
-                "text": "Draft brief",
-                "surface": "cli",
+            "demand_ref": {
+                "demand_id": "demand-side-processing-fixture",
+                "basis_revision": 1,
+            },
+            "execution_brief": {
+                "description": "Draft brief.",
+                "detail": "Draft the exact side-processing fixture brief.",
             },
         }
 
@@ -63,7 +63,7 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
 
     def test_record_task_close_closes_side_processing_task_without_parent_handoff(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
 
         result = task_sys.record_task_close(
             task_id,
@@ -85,7 +85,7 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
 
     def test_side_need_parent_records_handoff_params_without_interrupt_outcome(self) -> None:
         task_sys = _task_sys()
-        task_id = task_sys.ingest(self._envelope())["task_id"]
+        task_id = task_sys.create(**self._create_args())["task_id"]
 
         result = task_sys.record_side_need_parent(
             task_id,

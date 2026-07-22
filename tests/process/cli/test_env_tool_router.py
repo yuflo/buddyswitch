@@ -21,12 +21,13 @@ from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-EXPECTED_TOOLS = {"track", "artifact", "context", "evidence", "search", "message", "task_sys"}
+EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestCase):
     _CHEAP_ACTION_CASES = (
         ("task_sys", "close", {"task_id": "missing-task"}, "dev"),
+        ("demand_sys", "list", {}, "dev"),
         ("track", "list", {}, "dev"),
         ("artifact", "get", {"artifact_id": "missing-artifact"}, "dev"),
         ("context", "list_sources", {}, "dev"),

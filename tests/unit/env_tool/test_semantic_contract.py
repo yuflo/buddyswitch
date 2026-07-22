@@ -19,7 +19,7 @@ from env.tool_runtime.definition import validate_definition  # noqa: E402
 from env.tool_runtime import registry as catalog  # noqa: E402
 from env.tool_runtime import role_auth  # noqa: E402
 
-_EXPECTED_TOOLS = {"track", "artifact", "context", "evidence", "search", "message", "task_sys"}
+_EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 _EXPECTED_ACTIONS_BY_TOOL = {
     "track": {
         "create",
@@ -37,10 +37,22 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     },
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
+    "demand_sys": {
+        "create",
+        "revise",
+        "list",
+        "get",
+        "get_many",
+        "check",
+        "complete_check",
+        "absorb_into",
+        "complete",
+        "cancel",
+    },
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request"},
-    "message": {"contacts", "send", "get", "mark", "list", "conversation"},
-    "task_sys": {"list", "get", "close", "cancel", "need_parent"},
+    "message": {"contacts", "send", "get", "list", "conversation"},
+    "task_sys": {"create", "list", "get", "close", "cancel", "need_parent"},
 }
 _TASK_REQUIREMENT_FREE = "free"
 _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
@@ -53,15 +65,25 @@ _EXPECTED_FREE_ACTIONS = {
     "context.summarize",
     "context.get",
     "context.list_sources",
+    "demand_sys.create",
+    "demand_sys.revise",
+    "demand_sys.list",
+    "demand_sys.get",
+    "demand_sys.get_many",
+    "demand_sys.check",
+    "demand_sys.complete_check",
+    "demand_sys.absorb_into",
+    "demand_sys.complete",
+    "demand_sys.cancel",
     "message.contacts",
     "message.send",
     "message.get",
-    "message.mark",
     "message.list",
     "message.conversation",
     "search.status",
     "task_sys.list",
     "task_sys.get",
+    "task_sys.create",
     "task_sys.close",
     "task_sys.cancel",
     "task_sys.need_parent",
@@ -200,8 +222,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("context", "list_sources", ("source", "descriptor", "catalog")),
             ("message", "contacts", ("contact", "actor", "send")),
             ("message", "send", ("central im", "actor identity", "track")),
-            ("message", "get", ("exact", "message_id", "disposition")),
-            ("message", "mark", ("absorbed", "task_sys.need_parent", "disposition")),
+            ("message", "get", ("exact", "message_id", "visible")),
             ("message", "list", ("event", "cursor", "track")),
             ("task_sys", "list", ("summaries", "status", "execution")),
             ("task_sys", "get", ("task_id", "detail", "events")),
@@ -275,6 +296,13 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertIsInstance(row["writes"], list)
                 self.assertIsInstance(row["does_not_write"], list)
                 self.assertIn(row["durability"], {"none", "transient", "durable"})
+
+    def test_demand_exact_replay_actions_advertise_idempotency(self) -> None:
+        operations = catalog.operation_semantics()
+
+        for action in ("absorb_into", "complete", "cancel"):
+            with self.subTest(action=action):
+                self.assertIs(operations[f"demand_sys.{action}"]["risk_hints"]["idempotent"], True)
 
     def test_task_requirement_contract_is_declared_for_every_action(self) -> None:
         expected_keys = {
@@ -420,17 +448,14 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertEqual(message_desc["title"], "Central IM Messages")
         self.assertEqual(message_rows["message.send"]["authority"], "message.central_im_channel")
         self.assertEqual(message_rows["message.get"]["authority"], "message.current_identity_exact_message")
-        self.assertEqual(message_rows["message.mark"]["authority"], "message.current_identity_message_disposition")
         self.assertEqual(message_rows["message.list"]["authority"], "message.central_im_identity_events")
         self.assertIn("active actor Central IM identity event feed", message_rows["message.list"]["visibility"])
 
         send_requires = "\n".join(message_rows["message.send"]["requires"]).lower()
         get_requires = "\n".join(message_rows["message.get"]["requires"]).lower()
-        mark_requires = "\n".join(message_rows["message.mark"]["requires"]).lower()
         conversation_requires = "\n".join(message_rows["message.conversation"]["requires"]).lower()
         self.assertIn("active actor", send_requires)
         self.assertIn("active actor", get_requires)
-        self.assertIn("active actor", mark_requires)
         self.assertNotIn("active role", send_requires)
         self.assertNotIn("active role", conversation_requires)
 
@@ -443,8 +468,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "optional actor discovery",
             "central im target-identity sends",
             "im target resolver",
-            "exact processable inbound reads",
-            "disposition marking",
+            "exact visible message reads",
             "reply_to",
             "reply wrapper",
             "original sender into target_identity_id",
@@ -452,12 +476,8 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             "unified send path",
             "external",
             "external identities are valid central im direct targets",
-            "replied",
-            "previous disposition",
-            "absorbed",
-            "needs_parent",
-            "message.send(reply_to=...)",
-            "generic disposition editor",
+            "new immutable message",
+            "original_message_id",
             "target_identity_id",
             "actor runtime presence",
             "identity profiles",
@@ -515,7 +535,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertTrue(str(row["required_permission"]).startswith("task_sys."))
                 self.assertIn("task sys task record", row["reads"])
                 self.assertEqual(row["writes"], [])
-        for action in ("task_sys.close", "task_sys.cancel", "task_sys.need_parent"):
+        for action in ("task_sys.create", "task_sys.close", "task_sys.cancel", "task_sys.need_parent"):
             self.assertIn(action, op)
             row = op[action]
             with self.subTest(action=action):
@@ -532,10 +552,15 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("task_sys.list", op)
         self.assertIn("task_sys.get", op)
         close_returns = set(op["task_sys.close"]["returns"])
+        create_returns = set(op["task_sys.create"]["returns"])
         cancel_returns = set(op["task_sys.cancel"]["returns"])
         need_parent_returns = set(op["task_sys.need_parent"]["returns"])
         list_returns = set(op["task_sys.list"]["returns"])
         get_returns = set(op["task_sys.get"]["returns"])
+
+        for field in ("outcome", "task_id", "task_status", "demand_ref", "execution", "runtime", "state_changed"):
+            with self.subTest(action="task_sys.create", field=field):
+                self.assertIn(field, create_returns)
 
         for field in ("tasks", "active_count", "recoverable_count"):
             with self.subTest(action="task_sys.list", field=field):
@@ -575,12 +600,24 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("collaboration facts", track_model)
         self.assertIn("comments are the only actor-attention", track_model)
         self.assertIn("task sys tasks", task_model)
-        self.assertIn("source refs", task_model)
+        self.assertIn("opaque demandref snapshot", task_model)
         self.assertIn("draft", artifact_model)
         self.assertIn("track.add_material", artifact_model)
 
         task_close = desc["task_sys"]["action_semantics"]["close"]
         task_side_effects = task_close["side_effects"]
+        self.assertIn("parent turn", " ".join(task_side_effects["writes"]).lower())
+        self.assertIn("demands", " ".join(task_side_effects["does_not_write"]).lower())
+        self.assertNotIn("parent turns", " ".join(task_side_effects["does_not_write"]).lower())
+        self.assertIn("outcome attention", task_close["success_means"].lower())
+
+        task_cancel = desc["task_sys"]["action_semantics"]["cancel"]
+        cancel_side_effects = task_cancel["side_effects"]
+        self.assertIn("parent turn", " ".join(cancel_side_effects["writes"]).lower())
+        self.assertIn("demands", " ".join(cancel_side_effects["does_not_write"]).lower())
+        self.assertNotIn("parent turns", " ".join(cancel_side_effects["does_not_write"]).lower())
+        self.assertIn("outcome attention", task_cancel["success_means"].lower())
+        self.assertIn("completed task", task_close["failure_state_guarantee"].lower())
         self.assertIn("tracks", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertIn("artifacts", " ".join(task_side_effects["does_not_write"]).lower())
 

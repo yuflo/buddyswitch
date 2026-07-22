@@ -120,9 +120,12 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             self.assertIn("buddyswitch-codex data cleanup (--role <role>|--all-data) --yes", help_result.stdout)
             self.assertIn("buddyswitch-codex env status", help_result.stdout)
             self.assertIn("buddyswitch-codex env reset --yes", help_result.stdout)
+            self.assertIn("buddyswitch-codex demand list --actor <actor-id>", help_result.stdout)
+            self.assertIn("buddyswitch-codex demand get <demand-id> --actor <actor-id>", help_result.stdout)
             self.assertIn("buddyswitch-codex help", help_result.stdout)
             self.assertIn("buddyswitch-codex web", help_result.stdout)
             self.assertIn("  instance", help_result.stdout)
+            self.assertIn("  demand", help_result.stdout)
             self.assertIn("  web", help_result.stdout)
             self.assertIn("  data", help_result.stdout)
             self.assertIn("  env", help_result.stdout)
@@ -422,7 +425,8 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                 json.dumps(
                     {
                         "id": "task-alpha",
-                        "source_type": "message",
+                        "source_type": "demand",
+                        "source_ref": {"demand_id": "demand-alpha", "basis_revision": 1},
                         "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
                         "status": "in_progress.side_processing",
                         "execution": {"processor": "side", "handoff": None, "result": None},

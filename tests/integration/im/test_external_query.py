@@ -22,7 +22,7 @@ from env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
 from env.domain import track_read  # noqa: E402
 
 
-TASK_KEYS = ("task_id", "source_type", "status", "actor", "updated_at")
+TASK_KEYS = ("task_id", "source_type", "demand_ref", "status", "actor", "updated_at")
 TASK_ACTOR_KEYS = ("actor_id", "role_id")
 TRACK_LIST_KEYS = (
     "id",
@@ -61,8 +61,8 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
     ) -> dict[str, Any]:
         return {
             "id": task_id,
-            "source_type": "test.external",
-            "source_ref": {"id": task_id, "repo_path": "/private/repo"},
+            "source_type": "demand",
+            "source_ref": {"demand_id": f"demand-{task_id}", "basis_revision": 1},
             "actor_target": {"actor_id": actor_id, "role_id": role_id, "internal_stack": "hidden"},
             "inbound_context": {"prompt": "secret prompt"},
             "status": "in_progress.side_processing",
@@ -197,6 +197,10 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                 self.assertEqual(tuple(row.keys()), TASK_KEYS)
                 self.assertEqual(tuple(row["actor"].keys()), TASK_ACTOR_KEYS)
                 self.assertEqual(row["actor"], {"actor_id": actor_id, "role_id": "pm"})
+                self.assertEqual(
+                    row["demand_ref"],
+                    {"demand_id": f"demand-{row['task_id']}", "basis_revision": 1},
+                )
                 for sensitive in (
                     "execution",
                     "events",
@@ -232,6 +236,34 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
 
         with mock.patch.object(task_read.task_sys, "get_task", side_effect=ValueError("task not found: task-missing")):
             self.assertIsNone(task_read.get_external_task("task-missing", actor_profile=self._actor_profile()))
+
+    def test_external_task_projection_requires_one_exact_demand_ref(self) -> None:
+        task_read = _task_read_module()
+        demand_record = self._task_record(
+            task_id="task-demand-external",
+            updated_at="2026-07-13T10:00:00Z",
+        )
+        demand_record["source_ref"] = {
+            "demand_id": "demand-external-safe",
+            "basis_revision": 7,
+        }
+
+        demand_row = task_read.external_task_projection(demand_record)
+
+        self.assertEqual(
+            demand_row["demand_ref"],
+            {"demand_id": "demand-external-safe", "basis_revision": 7},
+        )
+        self.assertEqual(tuple(demand_row), TASK_KEYS)
+
+        malformed = deepcopy(demand_record)
+        malformed["source_ref"]["detail"] = "must not leak"
+        non_demand = deepcopy(demand_record)
+        non_demand["source_type"] = "track.comment.added"
+        for record in (malformed, non_demand):
+            with self.subTest(record=record):
+                with self.assertRaises(ValueError):
+                    task_read.external_task_projection(record)
 
     def test_external_task_and_track_lists_return_empty_lists(self) -> None:
         task_read = _task_read_module()

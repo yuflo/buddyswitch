@@ -191,7 +191,7 @@ def apply_side_capability_metadata(
     result["model_reasoning_effort"] = resolved.effort
     result["capability_level"] = resolved.level
     result["capability_source"] = resolved.source
-    result["capability_durability"] = "thread_fork_only"
+    result["capability_durability"] = "new_side_thread_only"
     return result
 
 
