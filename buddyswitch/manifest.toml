@@ -177,10 +177,6 @@ id = "smoke-test"
 path = "buddyswitch/skills/test/smoke-test"
 
 [[skills]]
-id = "task-management"
-path = "buddyswitch/skills/shared/task-management"
-
-[[skills]]
 id = "demand-triage"
 path = "buddyswitch/skills/shared/demand-triage"
 
@@ -210,7 +206,6 @@ skills = [
   "experiment-design-reviewer",
   "track-tool",
   "artifact-tool",
-  "task-management",
   "demand-triage",
   "demand-orchestration",
 ]
@@ -233,7 +228,6 @@ skills = [
   "sequence-product-work",
   "track-tool",
   "artifact-tool",
-  "task-management",
   "demand-triage",
   "demand-orchestration",
 ]
@@ -243,7 +237,7 @@ artifact_templates = ["brief", "decision", "note"]
 id = "design"
 label = "Design"
 scope = "Shape UI/UX prototype direction and design artifact outcomes."
-skills = ["shape-prototype", "track-tool", "artifact-tool", "task-management", "demand-triage", "demand-orchestration"]
+skills = ["shape-prototype", "track-tool", "artifact-tool", "demand-triage", "demand-orchestration"]
 artifact_templates = ["design", "brief"]
 
 [[roles]]
@@ -267,7 +261,6 @@ skills = [
   "prepare-review-readiness",
   "track-tool",
   "artifact-tool",
-  "task-management",
   "demand-triage",
   "demand-orchestration",
 ]
@@ -277,5 +270,5 @@ artifact_templates = ["brief", "note"]
 id = "test"
 label = "Test"
 scope = "Validate behavior and report pass/fail/blocked outcomes."
-skills = ["smoke-test", "track-tool", "artifact-tool", "task-management", "demand-triage", "demand-orchestration"]
+skills = ["smoke-test", "track-tool", "artifact-tool", "demand-triage", "demand-orchestration"]
 artifact_templates = ["proof"]

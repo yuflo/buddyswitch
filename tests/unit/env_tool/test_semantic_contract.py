@@ -41,7 +41,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request"},
     "message": {"contacts", "send", "get", "list", "conversation"},
-    "task_sys": {"create", "list", "get", "close", "cancel", "need_parent"},
+    "task_sys": {"create", "list", "get", "cancel"},
 }
 _TASK_REQUIREMENT_FREE = "free"
 _TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
@@ -69,9 +69,7 @@ _EXPECTED_FREE_ACTIONS = {
     "task_sys.list",
     "task_sys.get",
     "task_sys.create",
-    "task_sys.close",
     "task_sys.cancel",
-    "task_sys.need_parent",
     "track.list",
     "track.list_comments",
     "track.open",
@@ -209,11 +207,10 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             ("message", "send", ("central im", "actor identity", "track")),
             ("message", "get", ("exact", "message_id", "visible")),
             ("message", "list", ("event", "cursor", "track")),
-            ("task_sys", "list", ("summaries", "status", "execution")),
-            ("task_sys", "get", ("task_id", "detail", "events")),
-            ("task_sys", "close", ("side", "completed", "parent")),
-            ("task_sys", "cancel", ("cancel", "active", "completion")),
-            ("task_sys", "need_parent", ("parent", "handoff", "interrupt")),
+            ("task_sys", "list", ("current task slot", "prior terminal", "task_sys.get")),
+            ("task_sys", "get", ("exact objective", "goal binding", "task slot")),
+            ("task_sys", "create", ("demand orchestration", "current demand", "task slot")),
+            ("task_sys", "cancel", ("explicitly", "active task", "goal completion")),
             ("track", "resolve_comment_thread", ("owner", "thread", "resolved")),
         ]
         for tool, action, snippets in checks:
@@ -505,30 +502,45 @@ class EnvToolSemanticContractTests(unittest.TestCase):
                 self.assertNotIn(token, task_text)
 
         self.assertIn("track-scoped", track_text)
-        self.assertIn("env.tool role-action policy allows this action for the active role", task_text)
+        self.assertIn("native goal", task_text)
+        self.assertIn("task sys never mutates a demand", task_text)
 
     def test_task_sys_operation_semantics_are_task_sys_only(self) -> None:
         op = catalog.operation_semantics()
         self.assertNotIn("task.current", op)
         self.assertNotIn("task_sys.checkpoint_update", op)
-        for action in ("task_sys.list", "task_sys.get"):
+        read_expectations = {
+            "task_sys.list": ["Task records"],
+            "task_sys.get": ["Task record"],
+        }
+        for action, expected_reads in read_expectations.items():
             with self.subTest(action=action):
                 self.assertIn(action, op)
                 row = op[action]
                 self.assertEqual(row["kind"], "read")
                 self.assertEqual(row["mutates"], "none")
                 self.assertTrue(str(row["required_permission"]).startswith("task_sys."))
-                self.assertIn("task sys task record", row["reads"])
+                self.assertEqual(row["reads"], expected_reads)
                 self.assertEqual(row["writes"], [])
-        for action in ("task_sys.create", "task_sys.close", "task_sys.cancel", "task_sys.need_parent"):
+        write_expectations = {
+            "task_sys.create": {
+                "reads": ["current Demand reference", "Actor Task slot"],
+                "writes": ["Task record", "native Goal reconciliation request"],
+            },
+            "task_sys.cancel": {
+                "reads": ["Task record"],
+                "writes": ["Task terminal result", "native Goal reconciliation request"],
+            },
+        }
+        for action, expected in write_expectations.items():
             self.assertIn(action, op)
             row = op[action]
             with self.subTest(action=action):
                 self.assertEqual(row["kind"], "write")
                 self.assertEqual(row["mutates"], "runtime_objects")
                 self.assertTrue(str(row["required_permission"]).startswith("task_sys."))
-                self.assertIn("task sys task record", row["reads"])
-                self.assertIn("task sys task record", row["writes"])
+                self.assertEqual(row["reads"], expected["reads"])
+                self.assertEqual(row["writes"], expected["writes"])
                 self.assertIn("tracks", " ".join(row["does_not_write"]).lower())
                 self.assertIn("artifacts", " ".join(row["does_not_write"]).lower())
 
@@ -536,44 +548,24 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         op = catalog.operation_semantics()
         self.assertIn("task_sys.list", op)
         self.assertIn("task_sys.get", op)
-        close_returns = set(op["task_sys.close"]["returns"])
         create_returns = set(op["task_sys.create"]["returns"])
         cancel_returns = set(op["task_sys.cancel"]["returns"])
-        need_parent_returns = set(op["task_sys.need_parent"]["returns"])
         list_returns = set(op["task_sys.list"]["returns"])
         get_returns = set(op["task_sys.get"]["returns"])
 
-        for field in ("outcome", "task_id", "task_status", "demand_ref", "execution", "runtime", "state_changed"):
+        for field in ("outcome", "task_id", "task_status", "demand_ref", "goal_reconciliation", "state_changed"):
             with self.subTest(action="task_sys.create", field=field):
                 self.assertIn(field, create_returns)
 
-        for field in ("tasks", "active_count", "recoverable_count"):
+        for field in ("tasks", "active_count", "terminal_count"):
             with self.subTest(action="task_sys.list", field=field):
                 self.assertIn(field, list_returns)
-        for field in ("task_id", "task", "events"):
+        for field in ("task_id", "task"):
             with self.subTest(action="task_sys.get", field=field):
                 self.assertIn(field, get_returns)
-        for field in ("task_id", "task_status", "state_changed", "processor", "side_thread_id", "side_cleanup"):
-            with self.subTest(action="task_sys.close", field=field):
-                self.assertIn(field, close_returns)
-        self.assertIn("execution_result", close_returns)
-        self.assertNotIn("close_result", close_returns)
-        for field in ("task_id", "task_status", "state_changed", "processor", "side_cleanup", "execution_result"):
+        for field in ("outcome", "task_id", "task_status", "goal_reconciliation", "state_changed"):
             with self.subTest(action="task_sys.cancel", field=field):
                 self.assertIn(field, cancel_returns)
-        for field in (
-            "task_id",
-            "task_status",
-            "state_changed",
-            "processor",
-            "side_thread_id",
-            "side_cleanup",
-            "execution_handoff",
-            "parent_runtime",
-        ):
-            with self.subTest(action="task_sys.need_parent", field=field):
-                self.assertIn(field, need_parent_returns)
-        self.assertNotIn("parent_handoff_params", need_parent_returns)
 
     def test_high_risk_object_boundaries_are_explicit(self) -> None:
         desc = self._desc()
@@ -584,25 +576,17 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         self.assertIn("owner_identity_id", track_model)
         self.assertIn("collaboration facts", track_model)
         self.assertIn("comments are the only actor-attention", track_model)
-        self.assertIn("task sys tasks", task_model)
-        self.assertIn("opaque demandref snapshot", task_model)
+        self.assertIn("demand snapshot reference", task_model)
+        self.assertIn("native goal binding", task_model)
         self.assertIn("draft", artifact_model)
         self.assertIn("track.add_material", artifact_model)
 
-        task_close = desc["task_sys"]["action_semantics"]["close"]
-        task_side_effects = task_close["side_effects"]
-        self.assertIn("parent turn", " ".join(task_side_effects["writes"]).lower())
+        task_cancel = desc["task_sys"]["action_semantics"]["cancel"]
+        task_side_effects = task_cancel["side_effects"]
+        self.assertIn("native goal", " ".join(task_side_effects["writes"]).lower())
         self.assertIn("demands", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertNotIn("parent turns", " ".join(task_side_effects["does_not_write"]).lower())
-        self.assertIn("outcome attention", task_close["success_means"].lower())
-
-        task_cancel = desc["task_sys"]["action_semantics"]["cancel"]
-        cancel_side_effects = task_cancel["side_effects"]
-        self.assertIn("parent turn", " ".join(cancel_side_effects["writes"]).lower())
-        self.assertIn("demands", " ".join(cancel_side_effects["does_not_write"]).lower())
-        self.assertNotIn("parent turns", " ".join(cancel_side_effects["does_not_write"]).lower())
-        self.assertIn("outcome attention", task_cancel["success_means"].lower())
-        self.assertIn("completed task", task_close["failure_state_guarantee"].lower())
+        self.assertIn("goal cleanup", task_cancel["success_means"].lower())
         self.assertIn("tracks", " ".join(task_side_effects["does_not_write"]).lower())
         self.assertIn("artifacts", " ".join(task_side_effects["does_not_write"]).lower())
 

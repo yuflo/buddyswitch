@@ -1,4 +1,4 @@
-"""Machine-enforced ownership boundaries for Task Sys."""
+"""Machine-enforced ownership boundaries for the native-Goal Task model."""
 
 from __future__ import annotations
 
@@ -7,17 +7,20 @@ from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
 
-
 DOMAIN = Path("scripts/env/domain/task_sys.py")
 READ_MODEL = Path("scripts/env/domain/task_read.py")
-TOOL_ROOT = Path("scripts/env/tools/task_sys")
-RUNTIME = Path("tools/launcher/task_sys_runtime.py")
-ARCH = Path("docs/arch/task-sys-architecture.md")
+TOOL = Path("scripts/env/tools/task_sys/tool.py")
+TOOL_IMPL = Path("scripts/env/tools/task_sys/_impl.py")
+PROTOCOL = Path("scripts/env/tool_runtime/task_goal_runtime_protocol.py")
+CLIENT = Path("scripts/env/tool_runtime/task_goal_runtime_client.py")
+
+
+def _source(relative: Path) -> str:
+    return (REPO_ROOT / relative).read_text(encoding="utf-8")
 
 
 def _imports(relative: Path) -> set[str]:
-    path = REPO_ROOT / relative
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = ast.parse(_source(relative), filename=str(relative))
     modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -26,92 +29,70 @@ def _imports(relative: Path) -> set[str]:
             module = node.module or ""
             if module:
                 modules.add(module)
-            modules.update(
-                f"{module}.{alias.name}" if module else alias.name
-                for alias in node.names
-            )
+            modules.update(f"{module}.{alias.name}" if module else alias.name for alias in node.names)
     return modules
 
 
-def _task_implementation_files() -> tuple[Path, ...]:
-    return (
-        DOMAIN,
-        READ_MODEL,
-        RUNTIME,
-        *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / TOOL_ROOT).glob("*.py"))),
-    )
+def test_task_owner_does_not_implement_or_import_demand_or_daemon_behavior() -> None:
+    imports = _imports(DOMAIN)
+    source = _source(DOMAIN)
+
+    assert not [name for name in imports if "demand_sys" in name or "daemon" in name or "app_server" in name]
+    assert "resolve_demand_ref" not in source
+    assert "request_mailbox" not in source
+    assert "goal_set" not in source
+    assert "goal_get" not in source
 
 
-def test_task_sys_has_no_demand_implementation_dependency() -> None:
-    for relative in (DOMAIN, READ_MODEL, RUNTIME):
-        imports = _imports(relative)
-        assert not [name for name in imports if "demand_sys" in name or "repos.demands" in name], relative
+def test_actor_tool_resolves_demand_at_boundary_and_exposes_exact_actions() -> None:
+    tool_source = _source(TOOL)
+    impl_source = _source(TOOL_IMPL)
 
-        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
-        assert "demand_sys." not in source, relative
-        assert "transact_actor_state" not in source, relative
-
-    tool_imports = _imports(TOOL_ROOT / "_impl.py")
-    assert not [name for name in tool_imports if "demand_sys" in name or "repos.demands" in name]
-    tool_source = (REPO_ROOT / TOOL_ROOT / "_impl.py").read_text(encoding="utf-8")
-    assert "context.rules.demand_sys" in tool_source
-    assert "resolve_demand_ref(" in tool_source
-
-
-def test_task_sys_has_one_actor_create_action_and_one_creation_owner() -> None:
-    tool_source = (REPO_ROOT / TOOL_ROOT / "tool.py").read_text(encoding="utf-8")
-    tool_impl_source = (REPO_ROOT / TOOL_ROOT / "_impl.py").read_text(encoding="utf-8")
-    domain_source = (REPO_ROOT / DOMAIN).read_text(encoding="utf-8")
-
-    assert tool_source.count('name="create"') == 1
-    assert 'name="start"' not in tool_source
-    assert 'name="begin"' not in tool_source
-    assert domain_source.count("def _create_task(") == 1
-    assert domain_source.count("_create_task(") == 2
-    assert "def ingest(" not in domain_source
-    assert "def _normalize_source(" not in domain_source
-    assert "def _normalize_context(" not in domain_source
-    assert not (REPO_ROOT / "tools/launcher/task_sys_ingress.py").exists()
-    assert '"demand_ref": source_ref.get("demand_ref")' in tool_impl_source
-    assert "if not isinstance(instruction, dict)" not in tool_impl_source
-    assert "buddyswitch/local/locks/task-sys" not in domain_source
-    assert not (REPO_ROOT / "scripts/env/domain/tasks.py").exists()
+    for action in ("list", "get", "create", "cancel"):
+        assert tool_source.count(f'name="{action}"') == 1
+    for retired in ("close", "need_parent"):
+        assert f'name="{retired}"' not in tool_source
+        assert f"def {retired}(" not in impl_source
+    assert "context.rules.demand_sys.resolve_demand_ref" in impl_source
+    assert "task_goal_runtime" in impl_source
+    assert "execution_brief" not in tool_source
+    assert "selection_reason" in tool_source
 
 
-def test_current_task_architecture_names_exact_owners_and_forward_only_boundary() -> None:
-    text = (REPO_ROOT / ARCH).read_text(encoding="utf-8")
-
-    for token in (
-        "one actor-scoped active Task",
-        "in_progress.side_processing",
-        "in_progress.awaiting_parent",
-        "in_progress.parent_processing",
-        "task_sys.create",
-        "task_sys.outcome_frame",
-        "processor-aware Task Progress Check",
-        "fresh isolated ephemeral App Server thread",
-        "idle registered `task_sys.side_frame` thread",
-        "`starting` lease",
-        "`work -> progress_check_pending -> progress_check`",
-        "opaque handler checkpoint",
-        "opaque current reference",
-        "Actor + installed task-management skill",
-        "Every Task is created from one current opaque Demand reference",
-        "`task_sys.create` is the sole Task creation path",
+def test_task_record_has_no_retired_execution_engine_vocabulary() -> None:
+    source = _source(DOMAIN)
+    for retired in (
+        "SIDE_PROCESSING",
+        "AWAITING_PARENT",
+        "PARENT_PROCESSING",
+        "record_task_close",
+        "record_side_need_parent",
+        "runtime_instruction",
+        "side_frame",
+        "parent_frame",
+        "recoverable",
+        "execution_brief",
     ):
-        assert token in text
-    for token in (
-        "task_sys.start",
-        "task_sys.begin",
-        "task_sys.completion_frame",
-        "completion attention",
-        "automatic Demand completion",
-        "compatibility",
-        "thread/fork",
-        "inherited parent conversation history",
-        "Track comment ingress",
-        "shared Task ingress",
-        "Non-Demand Tasks",
-        "null` for every other source",
-    ):
-        assert token not in text
+        assert retired not in source
+    for current in ("ACTIVE = \"active\"", "bind_goal", "record_goal_complete", "record_task_cancel"):
+        assert current in source
+
+
+def test_runtime_client_has_one_reconciliation_command_and_no_business_rules() -> None:
+    protocol = _source(PROTOCOL)
+    client = _source(CLIENT)
+
+    assert 'RECONCILE_TASK = "task_goal.reconcile_task"' in protocol
+    assert "COMMAND_KEYS = frozenset({RECONCILE_TASK})" in protocol
+    assert "request_mailbox" in client
+    for forbidden in ("demand_sys", "bind_goal", "record_goal_complete", "selection_reason"):
+        assert forbidden not in client
+
+
+def test_read_projection_has_only_active_and_terminal_groups() -> None:
+    source = _source(READ_MODEL)
+
+    assert '"active_tasks"' in source
+    assert '"terminal_tasks"' in source
+    assert "recoverable" not in source
+    assert "execution" not in source

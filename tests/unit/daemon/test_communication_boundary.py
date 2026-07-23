@@ -20,6 +20,9 @@ DAEMON_OWNED_FILES = [
     ROOT / "tools" / "launcher" / "daemon_mailbox.py",
     ROOT / "tools" / "launcher" / "im_wake_handler.py",
     ROOT / "tools" / "launcher" / "track_comment_added_handler.py",
+    ROOT / "tools" / "launcher" / "demand_triage_handler.py",
+    ROOT / "tools" / "launcher" / "task_goal_handler.py",
+    ROOT / "tools" / "launcher" / "demand_orchestration_handler.py",
     ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py",
     ROOT / "scripts" / "env" / "tool_runtime" / "context.py",
 ]
@@ -30,6 +33,9 @@ IM_ACTOR_DELIVERY_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "im_actor_d
 PRODUCT_HANDLER_PATHS = (
     ROOT / "tools" / "launcher" / "im_wake_handler.py",
     ROOT / "tools" / "launcher" / "track_comment_added_handler.py",
+    ROOT / "tools" / "launcher" / "demand_triage_handler.py",
+    ROOT / "tools" / "launcher" / "task_goal_handler.py",
+    ROOT / "tools" / "launcher" / "demand_orchestration_handler.py",
     ROOT / "tools" / "launcher" / "browser_page_expired_handler.py",
     ROOT / "tools" / "launcher" / "browser_release_handler.py",
 )
@@ -88,7 +94,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         for name in (
             "ActorDirectoryAccess",
             "SignalDeliveryAccess",
-            "TaskSysRuntimeAccess",
+            "TaskGoalRuntimeAccess",
             "ImActorDeliveryAccess",
         ):
             self.assertIn(name, class_names)

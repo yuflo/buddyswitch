@@ -1001,12 +1001,6 @@ button.track-row {
   box-shadow: inset 3px 0 0 var(--teal);
 }
 
-.task-ledger-row.is-current.needs-attention {
-  border-color: #ddc77f;
-  background: var(--yellow-soft);
-  box-shadow: inset 3px 0 0 var(--yellow);
-}
-
 .task-ledger-row:hover {
   border-color: var(--line-strong);
 }

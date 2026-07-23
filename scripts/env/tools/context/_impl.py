@@ -278,14 +278,18 @@ def _candidate_track_row(*, track: dict[str, Any], current_identity: dict[str, A
 
 
 def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
-    source_ref = task.get("source_ref")
-    execution = task.get("execution")
+    demand_ref = task.get("demand_ref")
+    selection = task.get("selection")
+    goal_binding = task.get("goal_binding")
+    result = task.get("result")
     return {
         "task_id": task.get("id"),
-        "source_type": task.get("source_type"),
-        "source_ref": source_ref if isinstance(source_ref, dict) else {},
+        "demand_ref": demand_ref if isinstance(demand_ref, dict) else {},
+        "objective": task.get("objective"),
+        "selection": dict(selection) if isinstance(selection, dict) else {},
+        "goal_binding": dict(goal_binding) if isinstance(goal_binding, dict) else None,
         "status": task.get("status"),
-        "execution": dict(execution) if isinstance(execution, dict) else {},
+        "result": dict(result) if isinstance(result, dict) else None,
         "updated_at": task.get("updated_at"),
     }
 
@@ -297,7 +301,7 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
     runtime_policy_preview = context.runtime_policy_preview(operation_semantics)
     return {
         "runtime_policy_preview": runtime_policy_preview,
-        "task_visibility": "Task Sys frames and task_sys tool actions",
+        "task_visibility": "Demand-bound Task objectives, native Goal bindings, and terminal Task results",
         "artifact_publication_path": " ".join(
             [
                 str(artifact_create["success_effect"]),
@@ -645,9 +649,9 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
             "source_of_truth": "track.open / track.list via runtime env tools",
         },
         "tasks": {
-            "description": "Task Sys frames, lifecycle events, side results, and parent handoff state.",
+            "description": "Demand-bound Task objectives, native Goal bindings, status, and terminal results.",
             "scope": "Task Sys task state",
-            "source_of_truth": "task_sys.list / task_sys.get / task_sys.close / task_sys.cancel / task_sys.need_parent via runtime env tools",
+            "source_of_truth": "task_sys.list / task_sys.get / task_sys.create / task_sys.cancel via runtime env tools",
         },
         "demands": {
             "description": "Actor-owned Demand needs, unchecked revisions, and canonical live state.",

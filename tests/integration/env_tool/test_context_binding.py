@@ -45,7 +45,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
 
         self.assertIsInstance(context.actor_directory, runtime_context.ActorDirectoryAccess)
         self.assertIsInstance(context.signal_delivery, runtime_context.SignalDeliveryAccess)
-        self.assertIsInstance(context.task_sys_runtime, runtime_context.TaskSysRuntimeAccess)
+        self.assertIsInstance(context.task_goal_runtime, runtime_context.TaskGoalRuntimeAccess)
+        self.assertFalse(hasattr(context, "task_sys_runtime"))
         self.assertIsInstance(context.im_actor_delivery, runtime_context.ImActorDeliveryAccess)
         self.assertIs(context.rules.demand_sys, runtime_context._demand_sys_domain)
         self.assertFalse(hasattr(context.repos, "demand"))
@@ -75,10 +76,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": f"dref-context-{runtime_files.slugify(source_type)}",
             },
-            execution_brief={
-                "description": "Context binding fixture.",
-                "detail": detail,
-            },
+            objective=detail,
+            selection_reason=f"Context fixture selected {source_type}.",
         )
         return str(result["task_id"])
 
@@ -240,9 +239,21 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             source_type="test.context.archived",
             track_id="track-context-archived",
         )
-        task_sys.record_task_close(
+        archived_task = task_sys.get_task(self.archived_task_id)
+        archived_goal = {
+            "threadId": "thread-context-archived",
+            "objective": archived_task["objective"],
+            "status": "complete",
+            "tokenBudget": None,
+            "tokensUsed": 1,
+            "timeUsedSeconds": 1,
+            "createdAt": 100,
+            "updatedAt": 101,
+        }
+        task_sys.bind_goal(self.archived_task_id, archived_goal)
+        task_sys.record_goal_complete(
             self.archived_task_id,
-            {"summary": "Archived Track fixture is terminal."},
+            archived_goal,
         )
         self.context_task_id = self._seed_task_sys_task(
             actor_id=actor_id,
@@ -377,7 +388,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(preview.get("restricted_actions"), [])
         self.assertEqual(preview.get("restricted_action_details"), {})
         self.assertNotIn("object_" + "permissions", json.dumps(snapshot, ensure_ascii=True))
-        self.assertIn("Task Sys frames", str(snapshot.get("task_visibility")))
+        self.assertIn("native Goal bindings", str(snapshot.get("task_visibility")))
         artifact_create = tool_registry.operation_semantics()["artifact.create_revision"]
         self.assertEqual(
             snapshot.get("artifact_publication_path"),
@@ -452,18 +463,19 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("task-legacy-shared", task_ids)
 
         candidate_task = next(row for row in candidate_tasks if isinstance(row, dict) and row.get("task_id") == self.context_task_id)
-        self.assertEqual(candidate_task.get("source_type"), "demand")
         self.assertEqual(
-            candidate_task.get("source_ref"),
+            candidate_task.get("demand_ref"),
             {
                 "demand_id": "demand-context-test-context-active",
                 "demand_ref": "dref-context-test-context-active",
             },
         )
-        self.assertEqual(candidate_task.get("status"), "in_progress.side_processing")
+        self.assertEqual(candidate_task.get("status"), "active")
         self.assertNotIn("task_desc", candidate_task)
         self.assertNotIn("task_relation", candidate_task)
-        self.assertEqual(candidate_task.get("execution", {}).get("processor"), "side")
+        self.assertIn("objective", candidate_task)
+        self.assertIn("selection", candidate_task)
+        self.assertNotIn("execution", candidate_task)
         self.assertNotIn("active_processor", candidate_task)
 
     def test_context_artifact_summaries_are_current_only(self) -> None:
@@ -677,8 +689,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         task_source_text = json.dumps(task_source, ensure_ascii=True, sort_keys=True)
         self.assertIn("task_sys.list", task_source_text)
         self.assertIn("task_sys.get", task_source_text)
-        self.assertIn("task_sys.close", task_source_text)
-        self.assertIn("task_sys.need_parent", task_source_text)
+        self.assertIn("task_sys.create", task_source_text)
+        self.assertIn("task_sys.cancel", task_source_text)
+        self.assertNotIn("task_sys.close", task_source_text)
+        self.assertNotIn("task_sys.need_parent", task_source_text)
         self.assertNotIn("checkpoint_update", task_source_text)
 
     def test_context_outputs_writable_surfaces_without_actor_private_tool_methods(self) -> None:

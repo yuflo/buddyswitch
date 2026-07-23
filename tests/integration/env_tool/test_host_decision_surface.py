@@ -55,10 +55,8 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
                 "basis_revision": 1,
                 "demand_ref": f"dref-decision-surface-{role}-{track_id or 'none'}",
             },
-            execution_brief={
-                "description": "Host decision surface fixture.",
-                "detail": detail,
-            },
+            objective=detail,
+            selection_reason="The host-decision fixture Demand is selected.",
         )
         return str(result["task_id"])
 

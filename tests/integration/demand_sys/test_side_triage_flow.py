@@ -14,7 +14,6 @@ import demand_triage_mcp_server
 import demand_triage_runtime
 import side_thread_registry
 from env.domain import demand_sys
-from env.domain import task_sys
 from env.repos import demands
 from env.services import messages as message_service
 import daemon_state
@@ -326,7 +325,7 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
     def test_capability_binding_rejects_invalid_authority(self) -> None:
         cases = (
             ("unknown", {}, "E_DEMAND_TRIAGE_CAPABILITY"),
-            ("purpose", {"purpose": "task_sys.side_frame"}, "E_DEMAND_TRIAGE_AUTHORITY"),
+            ("purpose", {"purpose": "unrelated-side-purpose"}, "E_DEMAND_TRIAGE_AUTHORITY"),
             ("parent", {"parent_thread_id": "thr-other"}, "E_DEMAND_TRIAGE_AUTHORITY"),
             ("side", {}, "E_DEMAND_TRIAGE_AUTHORITY"),
             (
@@ -648,7 +647,7 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
             "side_thread_unavailable",
         )
 
-    def test_reconcile_recovers_settled_pool_revision_and_is_duplicate_safe(self) -> None:
+    def test_reconcile_cleans_settled_side_without_parent_orchestration(self) -> None:
         token, _attempt = self._claim_and_bind()
         self._resolve(
             token,
@@ -678,16 +677,11 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(first.status, "handled")
         self.assertEqual(second.status, "ignored")
-        self.assertEqual(
-            runtime.inputs,
-            [demand_triage_handler.ORCHESTRATION_PROMPT],
-        )
+        self.assertEqual(runtime.inputs, [])
         self.assertEqual(self._read_instance()["side_threads"], [])
-        checkpoint = state.handler_state("demand_triage")["checkpoint"]
-        self.assertEqual(checkpoint["observed_demand_pool_revision"], 1)
-        self.assertIsNone(checkpoint["deferred_demand_pool_revision"])
+        self.assertNotIn("checkpoint", state.handler_state("demand_triage"))
 
-    def test_reconcile_defers_pool_attention_while_task_active(self) -> None:
+    def test_actor_created_demand_does_not_enter_triage_parent_path(self) -> None:
         demand_sys.create(
             self.actor_target,
             "actor-create:queued",
@@ -697,18 +691,6 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
                 "type": "actor.self_requested",
                 "ref": {"thread_id": "thr-main", "turn_id": "turn-create"},
             }],
-        )
-        task_sys.create(
-            actor_target=self.actor_target,
-            demand_ref={
-                "demand_id": "demand-current-task",
-                "basis_revision": 1,
-                "demand_ref": "dref-current-task",
-            },
-            execution_brief={
-                "description": "Current Task.",
-                "detail": "Remain active while another Demand waits.",
-            },
         )
         state = self._daemon_state()
         runtime = _Runtime()
@@ -727,8 +709,6 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
 
         result = handler.reconcile(context, state, runtime)
 
-        self.assertEqual(result.status, "handled")
+        self.assertEqual(result.status, "ignored")
         self.assertEqual(runtime.inputs, [])
-        checkpoint = state.handler_state("demand_triage")["checkpoint"]
-        self.assertEqual(checkpoint["deferred_demand_pool_revision"], 1)
-        self.assertEqual(checkpoint["observed_demand_pool_revision"], 0)
+        self.assertNotIn("checkpoint", state.handler_state("demand_triage"))

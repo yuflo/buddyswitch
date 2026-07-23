@@ -421,19 +421,26 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             track_dir = state_root / "buddyswitch" / "objects" / "tracks"
             task_dir.mkdir(parents=True, exist_ok=True)
             track_dir.mkdir(parents=True, exist_ok=True)
-            (task_dir / "task-alpha.json").write_text(
+            (task_dir / "task-demand-alpha.json").write_text(
                 json.dumps(
                     {
-                        "id": "task-alpha",
-                        "source_type": "demand",
-                        "source_ref": {
+                        "schema_version": 1,
+                        "id": "task-demand-alpha",
+                        "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
+                        "demand_ref": {
                             "demand_id": "demand-alpha",
                             "basis_revision": 1,
                             "demand_ref": "dref-alpha",
                         },
-                        "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm"},
-                        "status": "in_progress.side_processing",
-                        "execution": {"processor": "side", "handoff": None, "result": None},
+                        "objective": "Deliver the public CLI Task fixture.",
+                        "selection": {
+                            "reason": "Exercise the current external Task projection.",
+                            "selected_at": "2026-07-13T00:00:00Z",
+                        },
+                        "goal_binding": None,
+                        "status": "active",
+                        "result": None,
+                        "created_at": "2026-07-13T00:00:00Z",
                         "updated_at": "2026-07-13T00:00:00Z",
                     },
                     ensure_ascii=True,
@@ -480,7 +487,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                 check=False,
             )
             task_get = run_process(
-                [str(LAUNCHER), "task", "get", "task-alpha"],
+                [str(LAUNCHER), "task", "get", "task-demand-alpha"],
                 cwd=ROOT,
                 env=env,
                 text=True,
@@ -506,11 +513,14 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
 
             self.assertEqual(task_list.returncode, 0)
             task_list_data = self._cli_success_data(task_list, kind="task.list")
-            self.assertEqual(task_list_data["tasks"][0]["task_id"], "task-alpha")
+            self.assertEqual(task_list_data["tasks"][0]["task_id"], "task-demand-alpha")
             self.assertEqual(task_list_data["tasks"][0]["actor"]["actor_id"], "act-pm-demo")
 
             self.assertEqual(task_get.returncode, 0)
-            self.assertEqual(self._cli_success_data(task_get, kind="task.get")["task"]["task_id"], "task-alpha")
+            self.assertEqual(
+                self._cli_success_data(task_get, kind="task.get")["task"]["task_id"],
+                "task-demand-alpha",
+            )
 
             self.assertEqual(track_list.returncode, 0)
             self.assertEqual(self._cli_success_data(track_list, kind="track.list")["tracks"][0]["id"], "track-alpha")

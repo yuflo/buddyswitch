@@ -2,122 +2,111 @@
 
 ## Purpose
 
-This document defines the durable external control boundaries for BuddySwitch.
-Each interface calls the owner of the requested behavior directly. Web and the
-public CLI are peers; neither is a transport layer for the other.
+BuddySwitch external interfaces call the owner of requested behavior directly.
+Web and the public CLI are peer adapters; neither is the other's internal API.
 
-## External Interfaces
+## Public CLI
 
-### Public CLI
+The public CLI delegates:
 
-The public CLI is a peer adapter. It translates commands to machine-readable
-results and delegates directly to the owning callable:
+- instance lifecycle and capabilities to private Host Control;
+- instance input and attach to Actor Session;
+- Demand, Task, and Track reads to external-safe domain projections;
+- Web startup to the Web process launcher.
 
-- instance lifecycle and capabilities go to private Host Control;
-- instance input and attach go to Actor Session;
-- Task and Track reads go to external-safe domain projections;
-- Web startup launches the Web process.
+Web does not run the CLI as a subprocess or parse CLI output. Open TUI is the
+explicit user-visible exception: Web hands Terminal.app the same public
+`buddyswitch-codex instance attach` command shown by Copy command.
 
-The public CLI is not the Web interface's lower product API. Web does not run
-the CLI as a subprocess, parse its output, or route lifecycle/domain behavior
-through it. Open TUI is the one explicit human-terminal handoff: Web gives
-Terminal.app the same paste-ready `buddyswitch-codex instance attach` command
-shown by Copy command, and Terminal runs it as a user-visible CLI session.
+## Web interface
 
-### Web Interface
+Web owns browser routes and browser DTO composition. It may combine Host
+Control facts with external-safe product reads, but it does not own lifecycle
+mechanics, Actor input, Demand/Task mutation, or IM semantics.
 
-The Web interface owns browser routes and browser DTO composition. It may
-combine host-control facts with external-safe product reads, but it does not
-own lifecycle mechanics, Actor input, Task/Track mutation, or IM semantics.
+`/api/actors/{id}/console` composes one Actor Console read model. Its Task
+projection contains active and terminal Tasks only and uses the exact
+external-safe Task DTO. It has no raw repository fallback and no Task mutation
+subroute.
 
-`/api/actors/{id}/console` is the actor console read model, with no Task subroute.
-Instance routes delegate lifecycle work to private Host Control.
-Open TUI validates a local request and hands one short public attach command to
-Terminal.app. It does not resolve an attach descriptor or construct the Codex
-runtime environment.
+## Web Message
 
-### Web Message
-
-Web Message belongs to the IM API. `/api/im/*` is the single HTTP product
-contract for browser, local channel, and third-party message calls.
-`ExternalImSession` projects external identity, actor discovery, send, events,
+`/api/im/*` is the single browser-facing Message contract.
+`ExternalImSession` projects external identity, Actor discovery, send, events,
 reply, acknowledgement, and conversation calls onto Central IM. Central IM
-owns immutable messages, `reply_to` edges, identity-visible events and cursors,
-target resolution, and delivery results. Task Sys status is the sole processing
-lifecycle. Web supplies server-owned browser identity context and does not
-create another message contract.
+owns immutable Messages, `reply_to` edges, identity-visible cursors, target
+resolution, and delivery results.
+
+Inbound Actor delivery may create Demand triage attention through the owning
+IM delivery path. Web does not synthesize Demand or Task state and does not
+infer completion from a Message response.
 
 ## Owners
 
 ### Private Host Control
 
-Private Host Control is the sole host lifecycle owner. It owns role discovery,
-instance start/list/status/clear/resume/stop/delete, interrupt, compact,
-capabilities, daemon/app-server coordination, and host-control facts only.
-It does not return Task or Track product state.
+Private Host Control owns role discovery, instance
+start/list/status/clear/resume/stop/delete, interrupt, compact, capabilities,
+and daemon/App Server coordination. It returns host facts, not product state.
 
 ### Actor Session
 
-Actor Session Input/Attach owns direct parent-thread input and Codex remote
-attach resolution. These operations are outside Task Sys: they do not create a
-Task frame, Task relation, handoff frame, or Side runtime state. The public CLI
-calls Actor Session directly. The Web Open TUI path reaches that owner only
-after Terminal.app starts the public CLI attach command; Web itself owns only
-local request validation and Terminal handoff.
+Actor Session owns direct parent-thread input and attach resolution. Direct
+input is distinct from the Demand ingress pipeline and does not mutate Demand
+or Task state.
 
-### Product Domains
+### Product domains
 
-Task Sys remains the internal actor-runtime mutation and classification owner.
-Internal runtime tools may use `actor_task_projection` and explicit mutations
-such as `task_sys.close`, `task_sys.cancel`, and `task_sys.need_parent`.
+- Demand Sys owns canonical needs and their external-safe reads.
+- Task Sys owns minimal Demand-bound Task records.
+- Codex App Server owns native Goal execution.
+- Track owns Track state and projections.
+- Central IM owns Message state and delivery results.
 
-External interfaces use external-safe Task/Track projections only:
+Actor runtime Task tools expose exactly `list`, `get`, `create`, and `cancel`.
+Successful Task completion is host-recorded from the matching native Goal, not
+an external mutation.
 
-- Task rows use the exact allowlist produced by `external_task_projection`;
-- actor console classification uses `actor_external_task_projection`;
-- Track lists and details use `track_read.list_external_tracks` and
-  `track_read.get_external_track`;
-- external Task/Track exact allowlist projections construct fresh DTOs and do
-  not expose execution, events, runtime instructions, raw payloads, or repo
-  paths.
-
-Web and CLI must not mutate Task or Track state. Side/Goal mutations are not exposed
-by any external interface. Actor-bound Task Sys actions, internal Side runtime
-behavior, and internal Goal callables remain behind their owners.
-
-## Dependency Rules
-
-Valid direct paths are:
+External Task rows contain exactly:
 
 ```text
-Browser -> Web Interface -> private Host Control
-Browser -> Web Open-TUI route -> Terminal handoff -> public CLI instance attach -> Actor Session
-Browser -> Web Interface -> external-safe Task/Track projections
-Browser -> Web Interface -> IM API
+task_id
+demand_ref
+objective
+selection
+goal_binding
+status
+result
+actor
+updated_at
+```
+
+Web and CLI construct fresh DTOs and do not expose storage paths, internal
+revisions, raw payloads, or handler checkpoints.
+
+## Dependency rules
+
+Valid paths:
+
+```text
+Browser -> Web -> private Host Control
+Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session
+Browser -> Web -> external-safe product projections
+Browser -> Web -> IM API
 
 Public CLI -> private Host Control
 Public CLI -> Actor Session
-Public CLI -> external-safe Task/Track projections
+Public CLI -> external-safe product projections
 
-Actor runtime tools -> Task Sys / Track / Message domain owners
-Domain owners -> repositories
+Actor tools -> product owners
+Product owners -> repositories
 ```
 
-Forbidden paths are:
+Forbidden paths:
 
-- Web -> CLI subprocess execution or CLI output parsing as an internal product API;
-- Web -> Actor Session attach resolution or descriptor expansion;
-- Web -> raw repository rows for product semantics;
-- Web -> actor runtime tools for console reads;
-- Web or CLI -> external Side/Goal mutation routes;
-- Actor Session -> Task Sys runtime framing;
-- lower owners -> Web DTOs.
-
-## Change Rule
-
-Classify a change by owner before adding a call. Lifecycle belongs to private
-Host Control, direct input and attach resolution belong to Actor Session,
-Open-TUI launch belongs to the explicit Terminal handoff, messages belong to
-the IM API, external Task/Track reads belong to exact allowlist projections,
-and actor-runtime mutations remain internal. Add a new external surface only
-when none of these owners can express the required product behavior.
+- Web to CLI subprocess execution as an internal product API;
+- Web to raw product repository rows;
+- Web to Actor runtime mutation tools for console reads;
+- Web or CLI to native Goal mutation;
+- Actor Session to Demand or Task mutation;
+- lower owners to Web DTOs.

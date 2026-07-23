@@ -492,6 +492,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         service = self._service(runner)
         terminal_task_ids = []
         for index in range(6):
+            objective = f"Deliver Web console terminal fixture {index} through its native Goal."
             terminal_result = task_sys.create(
                 actor_target={"actor_id": "act-pm-demo", "role_id": "pm"},
                 demand_ref={
@@ -499,17 +500,27 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                     "basis_revision": 1,
                     "demand_ref": f"dref-web-console-terminal-{index}",
                 },
-                execution_brief={
-                    "description": f"Web console terminal fixture {index}.",
-                    "detail": "Exercise the management console recent Task projection.",
-                },
+                objective=objective,
+                selection_reason="Exercise the management console recent Task projection.",
             )
             terminal_task_ids.append(terminal_result["task_id"])
             if index % 2:
-                task_sys.record_task_cancel(terminal_result["task_id"], {"reason": "fixture cancellation"})
+                task_sys.record_task_cancel(terminal_result["task_id"], "Fixture cancellation.")
             else:
-                task_sys.record_task_close(terminal_result["task_id"], {"summary": "fixture completion"})
+                goal = {
+                    "threadId": "thread-main",
+                    "objective": objective,
+                    "status": "complete",
+                    "tokenBudget": None,
+                    "tokensUsed": 10 + index,
+                    "timeUsedSeconds": 2,
+                    "createdAt": 100 + index,
+                    "updatedAt": 200 + index,
+                }
+                task_sys.bind_goal(terminal_result["task_id"], goal)
+                task_sys.record_goal_complete(terminal_result["task_id"], goal)
 
+        active_objective = "Deliver the current Web console fixture through its native Goal."
         task_result = task_sys.create(
             actor_target={"actor_id": "act-pm-demo", "role_id": "pm"},
             demand_ref={
@@ -517,20 +528,20 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": "dref-web-console",
             },
-            execution_brief={
-                "description": "Web console fixture.",
-                "detail": "Exercise the management console Task projection.",
-            },
+            objective=active_objective,
+            selection_reason="The Task slot is empty and this Demand is the current priority.",
         )
-        task_sys.record_side_runtime_failure(
+        task_sys.bind_goal(
             task_result["task_id"],
             {
-                "reason": "runtime_failed",
-                "stage": "side_input",
-                "processor": "side",
-                "error": "thread not loaded",
-                "retryable": True,
-                "attempts": 2,
+                "threadId": "thread-main",
+                "objective": active_objective,
+                "status": "active",
+                "tokenBudget": None,
+                "tokensUsed": 3,
+                "timeUsedSeconds": 1,
+                "createdAt": 300,
+                "updatedAt": 301,
             },
         )
 
@@ -556,8 +567,9 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         self.assertEqual(console["actor"], {"actor_id": "act-pm-demo", "role": "pm"})
         self.assertEqual(console["runtime"]["thread_status"], "idle")
         self.assertEqual(console["task_sys"]["active_count"], 1)
-        self.assertEqual(console["task_sys"]["recoverable_count"], 1)
         self.assertEqual(console["task_sys"]["terminal_count"], 6)
+        self.assertNotIn("recoverable_count", console["task_sys"])
+        self.assertNotIn("recoverable_tasks", console["task_sys"])
         self.assertEqual(len(console["task_sys"]["terminal_tasks"]), 5)
         expected_terminal_tasks = task_read_module.actor_external_task_projection(
             actor_profile=projection_profile
@@ -567,24 +579,31 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
             {row["task_id"] for row in expected_terminal_tasks},
             set(terminal_task_ids),
         )
-        external_task_keys = ("task_id", "source_type", "demand_ref", "status", "actor", "updated_at")
+        external_task_keys = (
+            "task_id",
+            "demand_ref",
+            "objective",
+            "selection",
+            "goal_binding",
+            "status",
+            "result",
+            "actor",
+            "updated_at",
+        )
         active_task = next(
             row for row in console["task_sys"]["active_tasks"] if row["task_id"] == task_result["task_id"]
         )
-        recoverable_task = console["task_sys"]["recoverable_tasks"][0]
         self.assertEqual(tuple(active_task.keys()), external_task_keys)
-        self.assertEqual(tuple(recoverable_task.keys()), external_task_keys)
         self.assertEqual(active_task["task_id"], task_result["task_id"])
-        self.assertEqual(active_task["status"], "in_progress.side_processing")
+        self.assertEqual(active_task["objective"], active_objective)
+        self.assertEqual(active_task["status"], "active")
+        self.assertEqual(active_task["goal_binding"]["thread_id"], "thread-main")
         self.assertEqual(active_task["actor"], {"actor_id": "act-pm-demo", "role_id": "pm"})
-        self.assertEqual(recoverable_task["task_id"], task_result["task_id"])
-        self.assertEqual(recoverable_task["status"], "in_progress.side_processing")
-        for row in (active_task, recoverable_task, *console["task_sys"]["terminal_tasks"]):
+        for row in (active_task, *console["task_sys"]["terminal_tasks"]):
             self.assertEqual(tuple(row.keys()), external_task_keys)
+            self.assertNotIn("source_type", row)
             self.assertNotIn("execution", row)
-            self.assertNotIn("task_relation", row)
-            self.assertNotIn("active_processor", row)
-            self.assertNotIn("failure_result", row)
+            self.assertNotIn("events", row)
         self.assertEqual(console["im"]["target"]["identity"], {"id": "act-pm-demo", "type": "actor"})
         self.assertEqual(console["im"]["target"]["identity_id"], "act-pm-demo")
         self.assertEqual(console["im"]["target"]["role_id"], "pm")

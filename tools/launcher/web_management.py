@@ -870,10 +870,8 @@ class WebManagementService:
             "runtime": self._runtime_row(instance),
             "task_sys": {
                 "active_count": task_projection["active_count"],
-                "recoverable_count": task_projection["recoverable_count"],
                 "terminal_count": task_projection["terminal_count"],
                 "active_tasks": task_projection["active_tasks"][:10],
-                "recoverable_tasks": task_projection["recoverable_tasks"][:10],
                 "terminal_tasks": task_projection["terminal_tasks"][:5],
             },
             "tracks": {

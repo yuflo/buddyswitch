@@ -66,10 +66,8 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": "dref-identity-owned-task",
             },
-            execution_brief={
-                "description": "Identity-owned Task.",
-                "detail": "Verify Task ownership uses the actor identity route.",
-            },
+            objective="Verify Task ownership uses the actor identity route.",
+            selection_reason="The identity-owned fixture Demand is selected.",
         )
         task = result["task"]
 

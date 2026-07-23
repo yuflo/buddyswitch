@@ -1236,6 +1236,85 @@ class AppServerClientTests(unittest.TestCase):
         self.assertTrue(hasattr(APP_SERVER, "goal_set"))
         self.assertTrue(hasattr(APP_SERVER, "goal_clear"))
 
+    def test_goal_helpers_send_exact_app_server_protocol(self) -> None:
+        cases = (
+            (
+                "get",
+                lambda socket_path: APP_SERVER.goal_get(socket_path, "thread-goal-contract"),
+                "thread/goal/get",
+                {"threadId": "thread-goal-contract"},
+                {"goal": None},
+            ),
+            (
+                "set",
+                lambda socket_path: APP_SERVER.goal_set(
+                    socket_path,
+                    "thread-goal-contract",
+                    objective="Deliver the observable result.",
+                    status="active",
+                    token_budget=321,
+                ),
+                "thread/goal/set",
+                {
+                    "threadId": "thread-goal-contract",
+                    "objective": "Deliver the observable result.",
+                    "status": "active",
+                    "tokenBudget": 321,
+                },
+                {
+                    "goal": {
+                        "threadId": "thread-goal-contract",
+                        "objective": "Deliver the observable result.",
+                        "status": "active",
+                        "tokenBudget": 321,
+                        "tokensUsed": 0,
+                        "timeUsedSeconds": 0,
+                        "createdAt": 100,
+                        "updatedAt": 100,
+                    }
+                },
+            ),
+            (
+                "clear",
+                lambda socket_path: APP_SERVER.goal_clear(socket_path, "thread-goal-contract"),
+                "thread/goal/clear",
+                {"threadId": "thread-goal-contract"},
+                {"cleared": True},
+            ),
+        )
+
+        for name, invoke, method, params, response in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_root:
+                socket_path = self._socket_path(Path(temp_root))
+                server = FakeUnixWebSocketServer(socket_path)
+                server.start()
+                self.addCleanup(server.close)
+                results: list[dict[str, object]] = []
+                errors: list[BaseException] = []
+
+                def run_helper() -> None:
+                    try:
+                        results.append(invoke(socket_path))
+                    except BaseException as exc:  # pragma: no cover - failure detail
+                        errors.append(exc)
+
+                helper_thread = threading.Thread(target=run_helper, daemon=True)
+                helper_thread.start()
+                initialize = server.next_message()
+                self.assertEqual(initialize["method"], "initialize")
+                server.send_response(initialize["id"], {"userAgent": "codex/1.0.0"})
+                self.assertEqual(server.next_message()["method"], "initialized")
+                request = server.next_message()
+                self.assertEqual(request["method"], method)
+                self.assertEqual(request["params"], params)
+                server.send_response(request["id"], response)
+                helper_thread.join(timeout=2)
+
+                self.assertFalse(helper_thread.is_alive())
+                self.assertEqual(errors, [])
+                self.assertEqual(results, [response])
+                server.close()
+
     def test_server_error_is_reported_without_retrying_mutating_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))

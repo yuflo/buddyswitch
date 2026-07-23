@@ -160,15 +160,13 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         track_list_comments = catalog.get_action_definition("track", "list_comments").input_schema
         track_resolve_comment = catalog.get_action_definition("track", "resolve_comment_thread").input_schema
         artifact_create = catalog.get_action_definition("artifact", "create_revision").input_schema
-        self.assertEqual(set(catalog.supported_actions("task_sys")), {"create", "list", "get", "close", "cancel", "need_parent"})
+        self.assertEqual(set(catalog.supported_actions("task_sys")), {"create", "list", "get", "cancel"})
         task_sys_create_action = catalog.get_action_definition("task_sys", "create")
         task_sys_create = task_sys_create_action.input_schema
         task_sys_list = catalog.get_action_definition("task_sys", "list").input_schema
         task_sys_get = catalog.get_action_definition("task_sys", "get").input_schema
-        task_sys_close = catalog.get_action_definition("task_sys", "close").input_schema
         task_sys_cancel_action = catalog.get_action_definition("task_sys", "cancel")
         task_sys_cancel = task_sys_cancel_action.input_schema
-        task_sys_need_parent = catalog.get_action_definition("task_sys", "need_parent").input_schema
         context_get = catalog.get_action_definition("context", "get").input_schema
         context_summarize = catalog.get_action_definition("context", "summarize").input_schema
         evidence_issue = catalog.get_action_definition("evidence", "issue_browser").input_schema
@@ -260,34 +258,27 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertNotIn("artifact_revision_id", track_add_comment["properties"])
         self.assertEqual(track_list_comments["properties"]["status"].get("enum"), ["open", "resolved", "all"])
 
-        self.assertEqual(task_sys_create.get("required"), ["demand_ref", "execution_brief"])
+        self.assertEqual(task_sys_create.get("required"), ["demand_ref", "objective", "selection_reason"])
         self.assertIs(task_sys_create.get("additionalProperties"), False)
-        self.assertEqual(set(task_sys_create["properties"]), {"demand_ref", "execution_brief"})
+        self.assertEqual(set(task_sys_create["properties"]), {"demand_ref", "objective", "selection_reason"})
         demand_ref = task_sys_create["properties"]["demand_ref"]
         self.assertEqual(demand_ref.get("type"), "string")
         self.assertNotIn("properties", demand_ref)
-        execution_brief = task_sys_create["properties"]["execution_brief"]
-        self.assertIs(execution_brief.get("additionalProperties"), False)
-        self.assertEqual(execution_brief.get("required"), ["description", "detail"])
-        self.assertEqual(set(execution_brief["properties"]), {"description", "detail"})
+        self.assertEqual(task_sys_create["properties"]["objective"].get("type"), "string")
+        self.assertEqual(task_sys_create["properties"]["selection_reason"].get("type"), "string")
         self.assertEqual(task_sys_create_action.required_permission, "task_sys.create")
         self.assertEqual(task_sys_create_action.task_requirement, "free")
         self.assertEqual(task_sys_create_action.mutates, "runtime_objects")
         self.assertEqual(task_sys_list.get("required"), [])
-        self.assertEqual(task_sys_list["properties"]["status"].get("enum"), ["active", "recoverable", "all"])
+        self.assertEqual(task_sys_list["properties"]["status"].get("enum"), ["active", "terminal", "all"])
         self.assertEqual(task_sys_list["properties"]["limit"].get("type"), "integer")
         self.assertEqual(task_sys_list["properties"]["limit"].get("minimum"), 1)
         self.assertEqual(task_sys_get.get("required"), ["task_id"])
         self.assertEqual(task_sys_get["properties"]["task_id"].get("type"), "string")
-        self.assertEqual(task_sys_close.get("required"), ["task_id"])
-        self.assertEqual(task_sys_cancel.get("required"), ["task_id"])
+        self.assertEqual(task_sys_cancel.get("required"), ["task_id", "reason"])
         self.assertEqual(task_sys_cancel_action.required_permission, "task_sys.cancel")
         self.assertEqual(task_sys_cancel["properties"]["task_id"].get("type"), "string")
         self.assertEqual(task_sys_cancel["properties"]["reason"].get("type"), "string")
-        self.assertEqual(task_sys_need_parent.get("required"), ["task_id", "params"])
-        self.assertEqual(task_sys_need_parent["properties"]["params"]["properties"]["interrupt"].get("type"), "boolean")
-        self.assertNotIn("relation", task_sys_need_parent["properties"]["params"]["properties"])
-
         self.assertEqual(context_get["properties"]["limit"].get("type"), "integer")
         self.assertEqual(context_get["properties"]["limit"].get("minimum"), 1)
         self.assertEqual(context_summarize["properties"]["limit"].get("type"), "integer")

@@ -17,10 +17,11 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import daemon_core  # noqa: E402
 import browser_inbound  # noqa: E402
+import demand_orchestration_handler  # noqa: E402
 import demand_triage_handler  # noqa: E402
 import message_inbound  # noqa: E402
 import notification_center  # noqa: E402
-import task_sys_daemon_adapter  # noqa: E402
+import task_goal_handler  # noqa: E402
 import track_comment_inbound  # noqa: E402
 
 
@@ -36,7 +37,7 @@ def default_notify_subscriptions() -> list[str]:
 
 
 def default_application_command_factories() -> list[object]:
-    return [task_sys_daemon_adapter.command_handlers]
+    return [task_goal_handler.command_handlers]
 
 
 def default_daemon_handlers() -> list[object]:
@@ -46,7 +47,8 @@ def default_daemon_handlers() -> list[object]:
         *notification_center.handlers_from_registrations(registrations),
         *notification_center.handlers_from_registrations(browser_registrations),
         demand_triage_handler.DemandTriageHandler(),
-        task_sys_daemon_adapter.TaskSysProgressCheckHandler(),
+        task_goal_handler.TaskGoalHandler(),
+        demand_orchestration_handler.DemandOrchestrationHandler(),
     ]
 
 

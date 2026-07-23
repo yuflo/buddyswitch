@@ -2,67 +2,60 @@
 
 ## Purpose
 
-Demand Sys owns the actor's canonical needs. A Demand is an obligation whose
-meaning and lifecycle are independent of execution work.
+Demand Sys owns an Actor's canonical needs. A Demand describes an obligation;
+its lifecycle is independent of any individual Task used to make progress.
 
-The current ingress path is:
+The current path is:
 
 ```text
 validated IM or Track fact
-  -> source-keyed private ingress receipt
+  -> private source-keyed ingress receipt
   -> isolated demand-triage side
-  -> thread-only demand_triage.resolve
-  -> Demand-owned atomic resolution
-  -> canonical Demand pool
-  -> durable demand_pool_revision attention
-  -> parent demand-orchestration
-  -> at most one current Task
+  -> demand_triage.resolve
+  -> Demand-owned atomic application
+  -> canonical Demand pool + pool revision
+  -> independent parent Demand orchestration
+  -> at most one active native-Goal Task
 ```
 
-The receipt is private recovery metadata inside the Demand aggregate. It has no
-product identity, actor tool, read model, Web panel, CLI surface, or selectable
+The ingress receipt is recovery metadata inside the Demand aggregate, not a
+product object. It has no Actor tool, Web panel, CLI surface, or selectable
 queue.
 
 ## One aggregate and one write path
 
-The schema-v4 actor aggregate contains:
+The actor-scoped Demand aggregate contains:
 
 - canonical Demands;
-- monotonic `demand_pool_revision`;
-- source-keyed `ingress_receipts`;
-- actor-create idempotency receipts.
+- a monotonic Demand-pool revision;
+- source-keyed ingress receipts;
+- Actor-create idempotency receipts.
 
-`scripts/env/domain/demand_sys.py` owns receipt state, triage application,
-Demand mutation, opaque references, and lifecycle.
-`scripts/env/repos/demands.py` owns actor-scoped locking, full aggregate
-validation, and atomic replacement. One resolution transaction updates the
-receipt and any affected Demand together.
+`scripts/env/domain/demand_sys.py` owns Demand mutation, receipt state, triage
+application, lifecycle, and opaque references.
+`scripts/env/repos/demands.py` owns actor-scoped locking, aggregate validation,
+and atomic replacement. One resolution transaction settles the receipt and
+applies any Demand change together.
 
-There is no compatibility reader, fallback schema, dual write, shadow queue,
-or second Demand owner.
+There is no compatibility schema, fallback reader, shadow intake queue, or
+second Demand owner.
 
-## Isolated triage and direct resolution
+## Isolated inbound triage
 
-IM and Track owners validate and materialize their exact source facts, then use
-the Demand adapter to create a due-now generic `demand.ingress.triage`
-schedule. The registered Demand handler claims the source key and starts an
-ephemeral isolated side.
-
-That side receives:
+IM and Track owners first validate and persist their exact source fact, then
+schedule generic `demand.ingress.triage` attention. `DemandTriageHandler`
+claims the receipt and starts an ephemeral isolated side with:
 
 - read-only `demand_sys__list` and `demand_sys__get`;
-- source-local `message__get` and `message__conversation`;
-- one dedicated `demand_triage.resolve` MCP tool.
+- source-local Message reads;
+- one capability-bound `demand_triage.resolve` operation.
 
-It does not receive Message send, Demand mutation, Task, or unrelated product
-tools. The host mints a one-side capability, stores only its hash and binding
-in the side lease, and passes the raw token only to that side's MCP process.
-The runtime broker validates the active actor, main/side identity, exact
-purpose, source key, attempt, and open capability before calling the Demand
-owner.
+The side does not receive Demand mutation, Task creation, Message send, or
+unrelated product tools. The host validates Actor, main/side identity, purpose,
+source key, attempt, and one-use capability before the Demand owner applies
+the decision.
 
-The resolver schema has six flat required fields and uses null for values that
-do not apply. The decisions are:
+Decisions are exactly:
 
 ```text
 no_action_needed
@@ -73,41 +66,42 @@ revise
 cancel
 ```
 
-`handled` is valid only for an exact IM source. The dedicated runtime finds an
-existing actor reply by `reply_to` or sends it once through the Message owner,
-verifies the stored Message, and only then supplies verified evidence to the
-Demand transaction. The side cannot forge a Message receipt.
+`no_action_needed` and `handled` settle the receipt without creating or
+changing a Demand. `create`, `merge_intake`, `revise`, and `cancel` apply one
+Demand mutation. `handled` requires verified Message evidence; the side cannot
+forge it.
 
-The turn has no `outputSchema`, final-message JSON parser, item-completed
-consumer, or turn-completed consumer. A stale Demand reference returns the
-source receipt to pending without partial mutation.
+Inbound semantic judgment finishes entirely in the isolated side. There is no
+parent escalation branch. The later parent orchestration turn is a different
+workflow: it consumes the canonical Demand pool, not an unresolved triage
+decision.
 
-## Recovery and pool attention
+The side resolves through a dedicated MCP operation rather than returning a
+strict final-message JSON shape. Resolution persists immediately through the
+runtime broker. A stale reference returns the receipt to pending without a
+partial mutation.
 
-The generic daemon core optionally invokes each registered handler's
-`reconcile(context, state, runtime)` hook after actor registration and on
-bounded timeout polling. It records results and isolates handler failures, but
-does not know Demand states, revisions, prompts, or side purposes.
+## Two product handlers
 
-`DemandTriageHandler.reconcile` alone:
+Demand work is intentionally split by responsibility:
 
-- starts pending source receipts;
-- recovers a resolving receipt whose side lease was never registered;
-- detects idle or system-error sides that ended without resolving;
-- removes settled side leases;
-- compares `demand_pool_revision` with its durable handler checkpoint;
-- requests one duplicate-safe parent attention turn when no Task is active and
-  the parent is idle.
+- `DemandTriageHandler` owns pending receipt recovery and isolated side
+  lifecycle only;
+- `DemandOrchestrationHandler` owns durable pool attention, terminal Task
+  reconciliation, and serialized Task selection only.
 
-If a Task is active or the parent is busy, the revision remains deferred. A
-later poll rereads the one-active-Task and parent-activity invariants before
-starting work. Resolution remains durable when the instance daemon is stopped
-because the dedicated MCP process commits through the still-live runtime
-broker; daemon reconciliation catches up from canonical state after restart.
+Neither responsibility lives in generic daemon code. Both handlers use the
+daemon's product-neutral trigger and reconciliation capabilities.
+
+The orchestration handler starts an independent parent turn only when the
+parent is idle and product state requires judgment. It rereads canonical state,
+reconciles terminal Tasks against their latest Demands, then fills an empty
+Task slot from the complete live Demand pool. Busy parent state or an active
+Task defers attention without losing it.
 
 ## Actor tool boundary
 
-The actor-facing `demand_sys` tool exposes exactly:
+The Actor-facing `demand_sys` tool exposes exactly:
 
 ```text
 list
@@ -118,39 +112,55 @@ complete
 cancel
 ```
 
-The adapter derives actor ownership, provenance, idempotency, source
-references, and concurrency from host context. The actor never supplies
-storage paths, receipt keys, numeric revisions, terminal record structures, or
-resolution authority. Mutations use the current opaque `demand_ref` returned
-by `get`. `demand_pool_revision` and ingress receipts never appear in actor
-responses.
+The adapter derives Actor ownership, provenance, source references,
+idempotency, and concurrency. The Actor does not supply storage paths, receipt
+keys, numeric revisions, or terminal record structures. Mutations use the
+opaque current `demand_ref` returned by `get`.
 
-Direct actor `create` declares a canonical independent Demand immediately. It
-does not create an ingress receipt, but it increments the same private pool
-revision and therefore enters the same serialized orchestration path.
+Direct Actor `create` writes a canonical independent Demand immediately. It
+does not create an ingress receipt, but increments the same pool revision and
+enters the same orchestration path.
 
-## Demand and Task boundary
+## Task boundary
 
-Demand completion and Task completion are independent. A terminal Task is
-evidence; it never mutates a Demand automatically. The parent workflow rereads
-the latest Demand and explicitly completes, cancels, revises, or leaves it live.
+A terminal Task never mutates a Demand automatically. Demand orchestration
+rereads the latest Demand and treats the Task result as evidence:
 
-During the Phase 1 cutover, Task Sys retains its current execution lifecycle,
-while Demand ingress and selection use only the architecture above. Phase 2
-replaces that executor with native Codex Goal and removes the old Task frames;
-it does not add a parallel Task path.
+- complete the Demand only if the latest need is satisfied;
+- revise or leave it live when more work is required;
+- cancel it only when the need itself is withdrawn or no longer valid.
 
-Task domain code does not import or mutate Demand state. Demand domain code
-does not import or mutate Task state. The parent workflow is the semantic
-composition point.
+For a Demand sourced from `im.message.created`, user delivery is part of the
+latest need. Orchestration copies the exact source `message_id` into the Task
+objective and requires `message.send(reply_to=source message_id)` plus an exact
+Message reread before Goal completion. The later reconciliation turn verifies
+the durable reply again and cites that reply alongside Task evidence. A Codex
+final answer or a completed Task/Goal is not Central IM delivery; without a
+matching reply, the Demand stays live and is revised when a fresh Task is
+needed for the remaining delivery.
+
+The current product constraint is one Task per Demand at a time and one active
+Task per Actor. Demand and Task remain separate owners so future Task
+decomposition does not require changing Demand lifecycle semantics.
+
+## Recovery
+
+Canonical receipts, Demand pool revision, Task state, and handler checkpoints
+are recovery truth. Notifications accelerate attention but are not required
+for correctness. On startup and bounded polling:
+
+- triage reconciliation restarts pending work and repairs orphaned side state;
+- orchestration reconciliation detects unconsumed pool revisions and terminal
+  Task evidence.
+
+Daemon state stores only opaque handler checkpoints. It does not interpret
+Demand fields or select work.
 
 ## Explicit non-goals
 
-- No Demand graph, hierarchy, prerequisite engine, or semantic taxonomy.
-- No first-class pre-Demand product object or second queue.
-- No parent triage or semantic interrupt path.
-- No automatic Demand completion from Task state.
-- No Demand business rule in generic daemon-service code.
-- No resolver in the six-action actor tool catalog.
-- No alias, fallback, compatibility schema, dual read, or dual write for the
-  retired triage path.
+- No first-class pre-Demand product object.
+- No Demand graph or dependency engine.
+- No parent inbound-triage judgment.
+- No automatic Demand completion from Task status.
+- No Demand business rule in daemon-service core.
+- No resolver in the six-action Actor tool catalog.

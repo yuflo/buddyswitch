@@ -383,20 +383,19 @@ def _active_task_required_rejection(
         durability="none",
         retryable=True,
         retry_guidance=(
-            "Run this action from a task_sys side or parent frame. "
-            "If the work is new actor-driving input, route it through Task Sys ingress first."
+            "Demand orchestration must select one live Demand and create one native-Goal Task "
+            "before task-bound product work can run."
         ),
         allowed_next_actions=[
-            "Continue from the current task_sys.side_frame or task_sys.parent_frame.",
-            "Use task_sys.list or task_sys.get to inspect actor-owned Task Sys tasks.",
-            "Use task_sys.close, task_sys.cancel, or task_sys.need_parent when handling a Task Sys frame.",
-            "Route new actor-driving input through Task Sys ingress before retrying task-bound tool work.",
+            "Use task_sys.list to confirm that the native-Goal Task slot is empty.",
+            "Demand orchestration may select one live Demand and call task_sys.create.",
+            "Use task_sys.get when a Task id exists and its Goal binding needs inspection.",
         ],
         alternative_capabilities=[
             tool_results.alternative_capability(
                 tool="task_sys",
                 action="list",
-                condition="List active or recoverable actor-owned Task Sys tasks.",
+                condition="List active or terminal Actor-owned Tasks.",
                 mutates_product_state=False,
             ),
             tool_results.alternative_capability(
@@ -407,15 +406,9 @@ def _active_task_required_rejection(
             ),
             tool_results.alternative_capability(
                 tool="task_sys",
-                action="close",
-                condition="Close the active Task Sys task when the frame work is complete.",
-                mutates_product_state=False,
-            ),
-            tool_results.alternative_capability(
-                tool="task_sys",
-                action="need_parent",
-                condition="Ask Task Sys to submit the parent when side processing needs parent work.",
-                mutates_product_state=False,
+                action="create",
+                condition="Create one Task only after Demand orchestration selected a current live Demand.",
+                mutates_product_state=True,
             ),
         ],
         extra={

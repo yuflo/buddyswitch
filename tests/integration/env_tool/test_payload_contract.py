@@ -56,10 +56,8 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": f"dref-payload-contract-{role}",
             },
-            execution_brief={
-                "description": "Payload contract fixture.",
-                "detail": f"Exercise payload contracts for {task_id}.",
-            },
+            objective=f"Exercise payload contracts for {task_id}.",
+            selection_reason="The payload-contract fixture requires one active Task.",
         )
 
     def _dispatch(self, *, tool: str, action: str, args: dict[str, object], role: str = "dev") -> dict[str, object]:
@@ -149,8 +147,8 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             "scripts/env/tool_runtime/role_auth.py",
             "tools/launcher/external_im_session.py",
             "tools/launcher/im_http_router.py",
-            "tools/launcher/task_sys_runtime.py",
-            "buddyswitch/skills/shared/task-management/SKILL.md",
+            "tools/launcher/task_goal_handler.py",
+            "buddyswitch/skills/shared/demand-orchestration/SKILL.md",
             "docs/arch/web-interface-call-architecture.md",
         )
         retired = (

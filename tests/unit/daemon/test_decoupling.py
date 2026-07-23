@@ -157,12 +157,12 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         ):
             self.assertNotIn(token, core_source)
 
-    def test_instance_daemon_is_only_generic_daemon_task_adapter_composition_root(self) -> None:
+    def test_instance_daemon_is_only_generic_daemon_goal_handler_composition_root(self) -> None:
         candidates = sorted((ROOT / "tools" / "launcher").glob("*.py"))
         combined = []
         for path in candidates:
             imports = _imported_modules(path)
-            if "daemon_core" in imports and "task_sys_daemon_adapter" in imports:
+            if "daemon_core" in imports and "task_goal_handler" in imports:
                 combined.append(path.name)
         self.assertEqual(combined, ["instance_daemon.py"])
 
@@ -203,6 +203,8 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             {
                 "task_sys",
                 "task_sys_runtime",
+                "task_goal_handler",
+                "demand_orchestration_handler",
                 "im_wake_handler",
                 "track_comment_added_handler",
                 "browser_page_expired_handler",

@@ -88,10 +88,8 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": f"dref-active-gate-{role}",
             },
-            execution_brief={
-                "description": "Active Task gate fixture.",
-                "detail": f"Exercise the active Task gate for {task_id}.",
-            },
+            objective=f"Exercise the active Task gate for {task_id}.",
+            selection_reason="The gate fixture requires one active native-Goal Task.",
         )
 
     def _snapshot_runtime_files(self) -> dict[str, str]:
@@ -121,8 +119,10 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
         self.assertIn("search.request", str(response.get("why_blocked", "")))
         self.assertIn("Task Sys has no active task", str(response.get("why_blocked", "")))
         allowed_next_actions = "\n".join(str(row) for row in response.get("allowed_next_actions", []))
-        self.assertIn("task_sys.side_frame", allowed_next_actions)
-        self.assertIn("task_sys.need_parent", allowed_next_actions)
+        self.assertIn("Demand orchestration", allowed_next_actions)
+        self.assertIn("task_sys.create", allowed_next_actions)
+        self.assertNotIn("task_sys.side_frame", allowed_next_actions)
+        self.assertNotIn("task_sys.need_parent", allowed_next_actions)
         self.assertEqual(response.get("category"), "task_required", msg=response)
         self.assertEqual(response.get("gate_source"), "env.tool task requirement", msg=response)
         self.assertEqual(response.get("gate_stage"), "pre_dispatch", msg=response)

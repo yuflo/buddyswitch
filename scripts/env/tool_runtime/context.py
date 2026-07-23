@@ -31,7 +31,7 @@ from env.repos import track_comments as _track_comment_repo
 from env.repos import tracks as _track_repo
 from env.tool_runtime import daemon_client
 from env.tool_runtime import im_actor_delivery
-from env.tool_runtime import task_sys_runtime_client
+from env.tool_runtime import task_goal_runtime_client
 from env.tool_runtime import role_auth as _role_auth
 import re
 
@@ -173,7 +173,7 @@ class RuntimeObjectAccess:
     def runtime_sources(self) -> dict[str, Any]:
         return {
             "tracks": "track.list / track.open",
-            "tasks": "task_sys.create / task_sys.list / task_sys.get / task_sys.close / task_sys.cancel / task_sys.need_parent",
+            "tasks": "task_sys.create / task_sys.list / task_sys.get / task_sys.cancel",
             "demands": "demand_sys.list / demand_sys.get",
             "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
@@ -395,20 +395,14 @@ class ImActorDeliveryAccess:
         return im_actor_delivery.deliver(payload)
 
 
-class TaskSysRuntimeAccess:
-    """Task Sys-owned runtime commands available to Task tool consumers."""
+class TaskGoalRuntimeAccess:
+    """Task-owned access to the daemon's native Goal reconciliation adapter."""
 
     def __init__(self, *, instance_json: Path) -> None:
         self._instance_root = instance_json.parent
 
-    def execute_instruction(self, instruction: Mapping[str, object]) -> dict[str, Any]:
-        return task_sys_runtime_client.execute_instruction(
-            instance_root=self._instance_root,
-            instruction=instruction,
-        )
-
-    def cleanup_side_lease(self, task_id: str) -> dict[str, Any]:
-        return task_sys_runtime_client.cleanup_side_lease(
+    def reconcile_task(self, task_id: str) -> dict[str, Any]:
+        return task_goal_runtime_client.reconcile_task(
             instance_root=self._instance_root,
             task_id=task_id,
         )
@@ -501,8 +495,8 @@ class ToolContext(Mapping[str, Any]):
         )
         object.__setattr__(
             self,
-            "task_sys_runtime",
-            TaskSysRuntimeAccess(instance_json=self.instance_json),
+            "task_goal_runtime",
+            TaskGoalRuntimeAccess(instance_json=self.instance_json),
         )
         object.__setattr__(
             self,

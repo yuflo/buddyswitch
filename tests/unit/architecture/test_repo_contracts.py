@@ -130,6 +130,9 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
         "track_comment_added_handler.py",
         "browser_page_expired_handler.py",
         "browser_release_handler.py",
+        "demand_triage_handler.py",
+        "task_goal_handler.py",
+        "demand_orchestration_handler.py",
     )
     launcher_root = REPO_ROOT / "tools" / "launcher"
     for name in handlers:
@@ -138,7 +141,9 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
         assert "daemon_core" not in imports
 
     product_adapters = (
-        "task_sys_daemon_adapter",
+        "demand_triage_handler",
+        "task_goal_handler",
+        "demand_orchestration_handler",
         "im_wake_handler",
         "track_comment_added_handler",
         "browser_page_expired_handler",

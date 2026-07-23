@@ -158,7 +158,10 @@ artifact_templates = ["brief"]
         self.assertTrue(project_link.is_symlink())
         self.assertEqual(project_link.resolve(), (project_workspace / "projects" / "app").resolve())
         self.assertEqual((project_workspace / "projects" / "app" / "product.txt").read_text(encoding="utf-8"), "source-v1\n")
-        self.assertTrue((result.codex_home_dir / "config.toml").is_file())
+        actor_codex_config = (result.codex_home_dir / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("[features]", actor_codex_config)
+        self.assertIn("plugins = false", actor_codex_config)
+        self.assertIn("goals = true", actor_codex_config)
         self.assertTrue((result.codex_home_dir / "auth.json").is_symlink())
         self.assertEqual(
             (result.codex_home_dir / "auth.json").resolve(),

@@ -114,7 +114,6 @@ def start_side_thread(
     workspace_dir: Path,
     shared_project_workspace_dir: Path,
     permissions: str,
-    task_id: str | None = None,
     model: str | None = None,
     model_reasoning_effort: str | None = None,
     output_schema: Mapping[str, Any] | None = None,
@@ -144,7 +143,6 @@ def start_side_thread(
         actor_id=normalized_actor,
         parent_thread_id=normalized_parent,
         side_thread_id=side_thread_id,
-        task_id=task_id,
         purpose=normalized_purpose,
         turn_kind="starting",
         capability_hash=capability_hash,
@@ -374,39 +372,6 @@ def cleanup_side_thread(
     except Exception as exc:
         payload["lease_unregister_error"] = str(exc)
     return payload
-
-
-def cleanup_task_side_lease(
-    *,
-    socket_path: Path,
-    instance_json: Path,
-    actor_id: str,
-    parent_thread_id: str,
-    task_id: str,
-) -> dict[str, Any]:
-    row = side_thread_registry.find_task_side_thread(
-        instance_json,
-        actor_id=actor_id,
-        parent_thread_id=parent_thread_id,
-        task_id=task_id,
-    )
-    if not isinstance(row, Mapping):
-        return {
-            "action": "cleanup",
-            "side_thread_id": None,
-            "turn_interrupt_attempted": False,
-            "turn_interrupt_ok": False,
-            "lease_unregistered": False,
-            "lease_unregister_error": "task side lease not found",
-        }
-    side_thread_id = _require_text(row.get("thread_id"), "side_thread.thread_id")
-    return cleanup_side_thread(
-        socket_path=socket_path,
-        instance_json=instance_json,
-        actor_id=actor_id,
-        parent_thread_id=parent_thread_id,
-        side_thread_id=side_thread_id,
-    )
 
 
 def _print_json(payload: Any) -> None:

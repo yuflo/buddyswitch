@@ -22,7 +22,17 @@ from env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
 from env.domain import track_read  # noqa: E402
 
 
-TASK_KEYS = ("task_id", "source_type", "demand_ref", "status", "actor", "updated_at")
+TASK_KEYS = (
+    "task_id",
+    "demand_ref",
+    "objective",
+    "selection",
+    "goal_binding",
+    "status",
+    "result",
+    "actor",
+    "updated_at",
+)
 TASK_ACTOR_KEYS = ("actor_id", "role_id")
 TRACK_LIST_KEYS = (
     "id",
@@ -57,29 +67,26 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         actor_id: str = "act-pm-demo",
         role_id: str = "pm",
         updated_at: str,
-        status: str = "in_progress.side_processing",
+        status: str = "active",
         result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
+            "schema_version": 1,
             "id": task_id,
-            "source_type": "demand",
-            "source_ref": {
+            "demand_ref": {
                 "demand_id": f"demand-{task_id}",
                 "basis_revision": 1,
                 "demand_ref": f"dref-{task_id}",
             },
-            "actor_target": {"actor_id": actor_id, "role_id": role_id, "internal_stack": "hidden"},
-            "inbound_context": {"prompt": "secret prompt"},
-            "status": status,
-            "execution": {
-                "processor": None if result is not None else "side",
-                "handoff": {"side_thread_id": "thr-secret"},
-                "result": result,
+            "actor_target": {"actor_id": actor_id, "role_id": role_id},
+            "objective": f"Deliver {task_id} through its native Goal.",
+            "selection": {
+                "reason": "Selected for projection testing.",
+                "selected_at": "2026-07-13T00:00:00Z",
             },
-            "events": [{"type": "created", "at": "2026-07-13T00:00:00Z", "raw_payload": {"secret": True}}],
-            "runtime_instruction": {"type": "start_side"},
-            "side_thread_id": "thr-secret",
-            "handoff": {"parent_frame_context": {"secret": True}},
+            "goal_binding": None,
+            "status": status,
+            "result": result,
             "raw_payload": {"private": True},
             "repo_path": "/Users/private/worktree",
             "internal_stack": ["traceback"],
@@ -191,37 +198,42 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                 status="completed",
             ),
             self._task_record(
-                task_id="task-recoverable",
+                task_id="task-active",
                 updated_at="2026-07-13T11:00:00Z",
-                result={"type": "failure", "reason": "runtime_failed", "stage": "side_input", "internal_stack": "hidden"},
             ),
         ]
         before = deepcopy(records)
+        visible_records = [
+            record
+            for record in records
+            if record["actor_target"]["actor_id"] == actor_id
+        ]
 
-        with mock.patch.object(task_read.task_sys, "list_tasks", return_value=records) as list_tasks:
+        with mock.patch.object(task_read.task_sys, "list_tasks", return_value=visible_records) as list_tasks:
             projection = task_read.actor_external_task_projection(actor_profile=self._actor_profile(actor_id=actor_id))
 
-        list_tasks.assert_called_once_with(actor_target={"actor_id": actor_id, "role_id": "pm"})
+        list_tasks.assert_called_once_with(
+            actor_target={"actor_id": actor_id, "role_id": "pm"},
+            statuses=None,
+        )
         self.assertEqual(
             [row["task_id"] for row in projection["tasks"]],
-            ["task-completed", "task-canceled", "task-recoverable", "task-old"],
+            ["task-completed", "task-canceled", "task-active", "task-old"],
         )
         self.assertEqual(
             [row["task_id"] for row in projection["active_tasks"]],
-            ["task-recoverable", "task-old"],
+            ["task-active", "task-old"],
         )
-        self.assertEqual([row["task_id"] for row in projection["recoverable_tasks"]], ["task-recoverable"])
         self.assertEqual(
             [row["task_id"] for row in projection["terminal_tasks"]],
             ["task-completed", "task-canceled"],
         )
         self.assertEqual(projection["task_count"], 4)
         self.assertEqual(projection["active_count"], 2)
-        self.assertEqual(projection["recoverable_count"], 1)
         self.assertEqual(projection["terminal_count"], 2)
         self.assertEqual(records, before)
 
-        for group in ("tasks", "active_tasks", "recoverable_tasks", "terminal_tasks"):
+        for group in ("tasks", "active_tasks", "terminal_tasks"):
             for row in projection[group]:
                 self.assertEqual(tuple(row.keys()), TASK_KEYS)
                 self.assertEqual(tuple(row["actor"].keys()), TASK_ACTOR_KEYS)
@@ -244,7 +256,6 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                     "raw_payload",
                     "repo_path",
                     "internal_stack",
-                    "source_ref",
                     "task_desc",
                     "relation",
                     "task_relation",
@@ -276,7 +287,7 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
             task_id="task-demand-external",
             updated_at="2026-07-13T10:00:00Z",
         )
-        demand_record["source_ref"] = {
+        demand_record["demand_ref"] = {
             "demand_id": "demand-external-safe",
             "basis_revision": 7,
             "demand_ref": "dref-external-safe",
@@ -290,11 +301,11 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         )
         self.assertEqual(tuple(demand_row), TASK_KEYS)
 
-        malformed = deepcopy(demand_record)
-        malformed["source_ref"]["detail"] = "must not leak"
-        non_demand = deepcopy(demand_record)
-        non_demand["source_type"] = "track.comment.added"
-        for record in (malformed, non_demand):
+        malformed_demand = deepcopy(demand_record)
+        malformed_demand["demand_ref"] = "not-an-object"
+        malformed_actor = deepcopy(demand_record)
+        malformed_actor["actor_target"] = "not-an-object"
+        for record in (malformed_demand, malformed_actor):
             with self.subTest(record=record):
                 with self.assertRaises(ValueError):
                     task_read.external_task_projection(record)
@@ -308,11 +319,9 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                 {
                     "tasks": [],
                     "active_tasks": [],
-                    "recoverable_tasks": [],
                     "terminal_tasks": [],
                     "task_count": 0,
                     "active_count": 0,
-                    "recoverable_count": 0,
                     "terminal_count": 0,
                 },
             )

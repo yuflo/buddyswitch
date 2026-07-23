@@ -1,4 +1,4 @@
-"""Demand product handler for isolated ingress triage and orchestration."""
+"""Demand product handler for isolated inbound triage."""
 
 from __future__ import annotations
 
@@ -23,12 +23,10 @@ import demand_triage_mcp_server  # noqa: E402
 import demand_triage_runtime  # noqa: E402
 import side_thread_registry  # noqa: E402
 from env.domain import demand_sys  # noqa: E402
-from env.domain import task_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
 from runtime_kernel import lifecycle as runtime_broker_lifecycle  # noqa: E402
 
 
-ORCHESTRATION_TRIGGER = "demand.orchestrate"
 RETRY_SECONDS = 5
 
 TRIAGE_PROMPT = """Use $demand-triage.
@@ -40,11 +38,6 @@ thread to decide.
 Inbound:
 {fact}
 """
-
-ORCHESTRATION_PROMPT = """[DEMAND ORCHESTRATION]
-Use $demand-orchestration. Reconcile any terminal Task outcome when present.
-If there is no active Task, compare all live Demands, select at most one, reread
-it, and create one current Task. Choosing none is valid when justified."""
 
 TRIAGE_ENV_TOOLS = [
     "demand_sys__list",
@@ -113,30 +106,6 @@ def _schedule_retry(state: Any, source_key: str) -> None:
     )
 
 
-def _schedule_orchestration(state: Any, *, delay_seconds: int = 0) -> None:
-    state.upsert_schedule(
-        delay_seconds=delay_seconds,
-        trigger_type=ORCHESTRATION_TRIGGER,
-        payload={},
-        source_context={"owner": "demand_sys"},
-        schedule_key="demand-orchestration",
-    )
-
-
-def _orchestrate(context: Any, state: Any, runtime: Any) -> None:
-    actor_target = _actor_target(context)
-    if task_sys.list_tasks(
-        actor_target=actor_target,
-        statuses=task_sys.ACTIVE_TASK_STATUSES,
-    ):
-        return
-    activity = runtime.parent_activity()
-    if isinstance(activity, Mapping) and activity.get("status") == "idle":
-        runtime.input_actor(ORCHESTRATION_PROMPT)
-        return
-    _schedule_orchestration(state, delay_seconds=RETRY_SECONDS)
-
-
 def _runtime_broker_socket(context: Any) -> Path:
     instance_root = Path(
         getattr(
@@ -192,10 +161,10 @@ class DemandTriageHandler:
     name = "demand_triage"
 
     def handles(self, trigger: Any) -> bool:
-        return getattr(trigger, "type", None) in {
-            demand_sys_daemon_adapter.DEMAND_INGRESS_TRIAGE_TRIGGER,
-            ORCHESTRATION_TRIGGER,
-        }
+        return (
+            getattr(trigger, "type", None)
+            == demand_sys_daemon_adapter.DEMAND_INGRESS_TRIAGE_TRIGGER
+        )
 
     def _start_triage(
         self,
@@ -441,77 +410,20 @@ class DemandTriageHandler:
             changed = True
         return changed
 
-    def _reconcile_pool_attention(
-        self,
-        context: Any,
-        state: Any,
-        runtime: Any,
-        actor_target: Mapping[str, Any],
-    ) -> bool:
-        snapshot = demand_sys.pool_snapshot(actor_target)
-        handler_state = state.handler_state(self.name)
-        raw_checkpoint = handler_state.get("checkpoint")
-        checkpoint = (
-            dict(raw_checkpoint)
-            if isinstance(raw_checkpoint, Mapping)
-            else {}
-        )
-        observed = checkpoint.get("observed_demand_pool_revision", 0)
-        if not isinstance(observed, int) or isinstance(observed, bool):
-            observed = 0
-        current = snapshot["demand_pool_revision"]
-        if current <= observed:
-            return False
-        next_checkpoint = {
-            "observed_demand_pool_revision": observed,
-            "deferred_demand_pool_revision": current,
-        }
-        if snapshot["live_demand_count"] == 0:
-            next_checkpoint = {
-                "observed_demand_pool_revision": current,
-                "deferred_demand_pool_revision": None,
-            }
-        elif task_sys.list_tasks(
-            actor_target=actor_target,
-            statuses=task_sys.ACTIVE_TASK_STATUSES,
-        ):
-            pass
-        else:
-            activity = runtime.parent_activity()
-            if (
-                isinstance(activity, Mapping)
-                and activity.get("status") == "idle"
-            ):
-                runtime.input_actor(ORCHESTRATION_PROMPT)
-                next_checkpoint = {
-                    "observed_demand_pool_revision": current,
-                    "deferred_demand_pool_revision": None,
-                }
-        state.update_handler_state(
-            self.name,
-            {"checkpoint": next_checkpoint},
-        )
-        return True
-
     def reconcile(
         self,
         context: Any,
         state: Any,
         runtime: Any,
     ) -> daemon_contracts.HandlerResult:
+        del runtime
         actor_target = _actor_target(context)
         ingress_changed = self._reconcile_ingress(
             context,
             state,
             actor_target,
         )
-        attention_changed = self._reconcile_pool_attention(
-            context,
-            state,
-            runtime,
-            actor_target,
-        )
-        if ingress_changed or attention_changed:
+        if ingress_changed:
             return daemon_contracts.HandlerResult.handled()
         return daemon_contracts.HandlerResult.ignored()
 
@@ -525,9 +437,6 @@ class DemandTriageHandler:
         if not self.handles(trigger):
             return daemon_contracts.HandlerResult.ignored()
         try:
-            if trigger.type == ORCHESTRATION_TRIGGER:
-                _orchestrate(context, state, runtime)
-                return daemon_contracts.HandlerResult.handled()
             return self._start_triage(context, state, trigger)
         except Exception as exc:
             return daemon_contracts.HandlerResult.failed(str(exc))

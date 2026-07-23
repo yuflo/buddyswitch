@@ -893,10 +893,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 "basis_revision": 1,
                 "demand_ref": "dref-browser-lazy-release",
             },
-            execution_brief={
-                "description": "Browser lazy release fixture.",
-                "detail": "Exercise browser lazy release integration.",
-            },
+            objective="Exercise browser lazy release integration.",
+            selection_reason="The browser lifecycle fixture Demand is selected.",
         )
 
     def _page_trigger(self, triggers: Any, *, actor_id: str, role: str, tab_target_id: str) -> Any:

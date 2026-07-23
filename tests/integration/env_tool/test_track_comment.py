@@ -72,10 +72,8 @@ class TrackCommentEnvToolTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": f"dref-track-comment-{role}",
             },
-            execution_brief={
-                "description": "Track comment fixture.",
-                "detail": f"Exercise Track comment tooling for {task_id}.",
-            },
+            objective=f"Exercise Track comment tooling for {task_id}.",
+            selection_reason="The Task slot is empty and this fixture Demand is selected.",
         )
 
     def _dispatch(self, *, actor_id: str, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:

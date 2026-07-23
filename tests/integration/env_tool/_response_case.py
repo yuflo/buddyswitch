@@ -208,10 +208,8 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": f"dref-response-contract-{role}",
             },
-            execution_brief={
-                "description": "Response contract fixture.",
-                "detail": f"Exercise response contracts for {task_id}.",
-            },
+            objective=f"Exercise response contracts for {task_id}.",
+            selection_reason="The response-contract fixture requires one active Task.",
         )
 
     def _dispatch(

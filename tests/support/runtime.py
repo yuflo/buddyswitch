@@ -97,10 +97,8 @@ class RuntimeTestWorkspace:
                 "basis_revision": 1,
                 "demand_ref": f"dref-{demand_id.removeprefix('demand-')}",
             },
-            execution_brief={
-                "description": title,
-                "detail": "\n".join(detail_parts),
-            },
+            objective="\n".join(detail_parts),
+            selection_reason=f"Test fixture selected Demand {demand_id}.",
         )
         return str(result["task_id"])
 
@@ -121,10 +119,8 @@ class RuntimeTestWorkspace:
                 "basis_revision": 1,
                 "demand_ref": f"dref-{demand_id.removeprefix('demand-')}",
             },
-            execution_brief={
-                "description": "Active test Task.",
-                "detail": f"Active test Task fixture for {task_slug}.",
-            },
+            objective=f"Complete the active test Task fixture for {task_slug}.",
+            selection_reason=f"Test fixture selected Demand {demand_id}.",
         )
         return str(result["task_id"])
 

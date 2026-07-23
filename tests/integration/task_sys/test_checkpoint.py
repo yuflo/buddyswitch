@@ -43,5 +43,5 @@ class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(
             tool_registry.supported_actions("task_sys"),
-            {"create", "list", "get", "close", "need_parent", "cancel"},
+            {"create", "list", "get", "cancel"},
         )

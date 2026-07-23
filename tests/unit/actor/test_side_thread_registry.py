@@ -71,7 +71,7 @@ class SideThreadRegistryTests(unittest.TestCase):
             self.assertEqual(payload["side_threads"], [row])
             self.assertEqual(payload["updated_at"], "2026-06-02T00:00:00Z")
 
-    def test_register_can_write_task_bound_side_lease_metadata(self) -> None:
+    def test_register_can_write_purpose_and_turn_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(temp_root)
 
@@ -79,16 +79,14 @@ class SideThreadRegistryTests(unittest.TestCase):
                 instance_json,
                 actor_id="act-dev-side",
                 parent_thread_id="thr-main",
-                side_thread_id="thr-side-task",
-                task_id="task-controlled-inbound-abcdef123456",
-                purpose="task_sys.side_frame",
+                side_thread_id="thr-side-triage",
+                purpose="demand-triage",
                 turn_id="turn-side-1",
                 now=lambda: "2026-06-30T00:00:00Z",
             )
 
-            self.assertEqual(row["thread_id"], "thr-side-task")
-            self.assertEqual(row["task_id"], "task-controlled-inbound-abcdef123456")
-            self.assertEqual(row["purpose"], "task_sys.side_frame")
+            self.assertEqual(row["thread_id"], "thr-side-triage")
+            self.assertEqual(row["purpose"], "demand-triage")
             self.assertEqual(row["turn_id"], "turn-side-1")
             payload = self._payload(instance_json)
             self.assertEqual(payload["side_threads"], [row])

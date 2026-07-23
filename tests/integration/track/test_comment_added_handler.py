@@ -487,10 +487,8 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": "dref-existing-active",
             },
-            execution_brief={
-                "description": "Existing active work.",
-                "detail": "Keep this Task active while a Track Demand arrives.",
-            },
+            objective="Keep this Task active while a Track Demand arrives.",
+            selection_reason="This is the existing current Task.",
         )
         comment = self._seed_comment(mentioned_identities=["act-dev-track-handler"])
 

@@ -2,91 +2,107 @@
 
 ## Purpose
 
-The actor instance daemon is product-neutral host infrastructure:
+Daemon service is product-neutral host infrastructure:
 
 ```text
-daemon hosts product modules; daemon does not know product modules
+daemon hosts product handlers; handlers own product meaning
 ```
 
-It owns process lifecycle, actor registration, mailbox transport, generic
+It owns process lifecycle, Actor registration, mailbox transport, generic
 triggers and schedules, handler dispatch, bounded polling, and host telemetry.
-Product modules own every product command, payload, state transition, recovery
-decision, prompt, and read model.
+It does not own Demand, Task, Goal, IM, Track, Browser, or Web semantics.
 
 ## Generic capabilities
 
 The daemon core provides:
 
-- `DaemonContext` with stable actor, role, main-thread, path, socket, workspace,
-  and permission facts;
-- `HandlerResult` with `ignored`, `handled`, or `failed`;
+- `DaemonContext` with Actor, role, main-thread, path, socket, workspace, and
+  permission facts;
 - `DaemonHandler.handles/handle` for trigger dispatch;
-- optional `DaemonReconciler.reconcile` for durable-state recovery;
-- generic due-now schedules and owner-scoped schedule cancellation;
-- a product-neutral mailbox application-command registry;
-- `DaemonRuntime.parent_activity()` and `input_actor(text)`.
+- optional product-neutral `reconcile(context, state, runtime)` activation;
+- due-now schedules and owner-scoped schedule cancellation;
+- a mailbox application-command registry;
+- generic parent-activity observation and parent input;
+- isolated handler telemetry and opaque checkpoints.
 
-After actor registration and on each bounded App Server timeout, the core calls
-every available reconciliation hook in explicit handler order. One hook error
-is recorded against that handler and does not stop later hooks. The core does
-not interpret the hook result beyond generic status telemetry.
+After Actor registration and during bounded App Server polling, the core calls
+registered reconciliation hooks in explicit order. One handler failure is
+recorded and does not stop later handlers. The core never interprets a
+checkpoint, derives a product transition, or discovers product handlers.
 
-## Product ownership
+## Product handlers
 
-- Demand Sys owns source-keyed ingress receipts, side purpose and capability
-  semantics, resolver authority, Message/Demand coordination, pool revision
-  cursors, retry policy, and orchestration prompts.
-- Task Sys owns Task records, execution semantics, and its application command
-  adapter.
-- IM, Track, and Browser own their source validation and product lifecycle.
+The instance composition currently registers, among other owners:
 
-Demand recovery is implemented only in `DemandTriageHandler.reconcile`.
-Generic daemon modules do not import Demand or Task modules, inspect product
-storage, recognize product trigger strings, or branch on product state.
+- `DemandTriageHandler` for isolated inbound Demand triage recovery;
+- `TaskGoalHandler` for canonical Task/native Goal convergence;
+- `DemandOrchestrationHandler` for Demand reconciliation and Task selection;
+- IM, Track, and Browser handlers for their own source lifecycles.
 
-The dedicated Demand resolver reaches the runtime broker through the explicit
-`demand.ingress.resolve` application operation. The runtime broker is a host
-composition boundary; `demand_triage_runtime.py` owns all Demand/Message
-semantics. Daemon liveness is not required for that operation.
+These modules may import product domains and App Server adapters. Generic
+daemon modules may not.
+
+`TaskGoalHandler` illustrates the boundary precisely:
+
+```text
+daemon generic command/reconcile callback
+  -> product-owned TaskGoalHandler
+  -> canonical Task + App Server goal/get|set|clear
+```
+
+The daemon activates and reconciles the bridge. Codex App Server owns native
+Goal persistence, continuation, turn scheduling, and model API calls. The
+daemon does not execute the Task objective.
+
+## Notifications and recovery
+
+App Server notifications are acceleration signals. Product handlers reread
+canonical product state and App Server state during reconciliation, so daemon
+correctness does not depend on notification replay.
+
+Examples:
+
+- Demand triage recovers from canonical ingress receipts and side leases;
+- Task–Goal convergence recovers from canonical Task plus `goal/get`;
+- Demand orchestration recovers from pool revision plus terminal Tasks.
+
+This is the general value of daemon reconciliation: a product-independent
+activation opportunity over product-owned durable truth. Adding a new product
+does not add a product switch to daemon core.
 
 ## Composition root
 
 `tools/launcher/instance_daemon.py` is the only production composition root
-that imports generic daemon orchestration and concrete product adapters. It
-registers inbound handlers, reconciliation-capable handlers, and application
-commands explicitly.
+that imports generic daemon orchestration and concrete product handlers. It
+registers handlers and application commands explicitly and in visible order.
 
-There is no product plugin discovery, central product switch, semantic event
-bus, or daemon-owned workflow engine.
+There is no plugin discovery, semantic event bus, central product workflow
+engine, or product service locator.
 
 ## State and status
 
-Daemon state contains host-control facts only: readiness, registered handler
-telemetry and checkpoints, and generic schedules. Handler checkpoints are
-opaque product-owned objects; the core persists and projects them without
-understanding their fields.
+Daemon state contains host facts only: readiness, schedules, handler telemetry,
+and opaque checkpoints. Daemon status does not read product storage.
 
-Daemon status does not read Demand, Task, IM, Track, Browser, or Web storage.
-Consumer views compose host status with the public read model owned by each
-product.
+Consumer views compose daemon/host status with public read projections owned by
+each product.
 
 ## Dependency direction
 
 Allowed:
 
 ```text
-product adapter -> generic daemon contracts/client/runtime
-product adapter -> owning product domain/runtime/repository
-instance_daemon -> generic daemon + concrete product adapters
-runtime broker composition -> explicit product application operation
+product handler -> daemon contracts/runtime
+product handler -> product domain or App Server adapter
+instance_daemon -> daemon core + concrete product handlers
+product tool -> narrow application-command capability
 ```
 
 Forbidden:
 
 ```text
-generic daemon core/state/contracts -> product module/token/schema
-generic daemon status -> product storage or projection
-transport -> product payload or lifecycle policy
+daemon core/state/contracts -> product module or schema
+daemon status -> product storage
+transport -> product transition policy
 product tool -> broad daemon service locator
-new path -> retired alias, fallback, dual read, or dual write
 ```

@@ -236,7 +236,6 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
         side_thread_id: str = "thr-side-1",
         turn_id: str = "turn-side-active",
         purpose: str = "host_control.side",
-        task_id: str | None = None,
     ) -> None:
         payload = self._payload(instance_json)
         row: dict[str, object] = {
@@ -248,8 +247,6 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             "created_at": "2026-07-02T00:00:00Z",
             "updated_at": "2026-07-02T00:00:00Z",
         }
-        if task_id is not None:
-            row["task_id"] = task_id
         payload["side_threads"] = [row]
         instance_json.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
@@ -272,11 +269,10 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 actor_id="act-dev-side",
                 parent_thread_id="thr-main",
                 text="Start side work",
-                purpose="task_sys.side_frame",
+                purpose="demand-triage",
                 workspace_dir=self.workspace_dir,
                 shared_project_workspace_dir=self.project_workspace_dir,
                 permissions="buddyswitch-runtime",
-                task_id="task-controlled-inbound-abc123",
                 output_schema={
                     "type": "object",
                     "required": ["decision"],
@@ -299,7 +295,7 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 },
             )
             self.assertEqual(result["action"], "start")
-            self.assertEqual(result["purpose"], "task_sys.side_frame")
+            self.assertEqual(result["purpose"], "demand-triage")
             self.assertEqual(result["parent_thread_id"], "thr-main")
             self.assertEqual(result["side_thread_id"], "thr-side-1")
             self.assertEqual(result["thread_action"], "start")
@@ -311,8 +307,7 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["thread_id"], "thr-side-1")
             self.assertEqual(rows[0]["parent_thread_id"], "thr-main")
-            self.assertEqual(rows[0]["purpose"], "task_sys.side_frame")
-            self.assertEqual(rows[0]["task_id"], "task-controlled-inbound-abc123")
+            self.assertEqual(rows[0]["purpose"], "demand-triage")
             self.assertEqual(rows[0]["turn_id"], "turn-side-started")
             self.assertEqual(rows[0]["turn_kind"], "work")
 
@@ -422,11 +417,10 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 actor_id="act-dev-side",
                 parent_thread_id="thr-main",
                 text="Finish immediately",
-                purpose="task_sys.side_frame",
+                purpose="demand-triage",
                 workspace_dir=self.workspace_dir,
                 shared_project_workspace_dir=self.project_workspace_dir,
                 permissions="buddyswitch-runtime",
-                task_id="task-controlled-inbound-fast123",
             )
 
             self.assertEqual(result["turn_id"], "turn-side-started")
@@ -450,11 +444,10 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                     actor_id="act-dev-side",
                     parent_thread_id="thr-main",
                     text="Start side work",
-                    purpose="task_sys.side_frame",
+                    purpose="demand-triage",
                     workspace_dir=self.workspace_dir,
                     shared_project_workspace_dir=self.project_workspace_dir,
                     permissions="buddyswitch-runtime",
-                    task_id="task-controlled-inbound-setup-failure",
                 )
 
             self.assertTrue(raised.exception.retryable)
@@ -487,11 +480,10 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                     actor_id="act-dev-side",
                     parent_thread_id="thr-main",
                     text="Start side work",
-                    purpose="task_sys.side_frame",
+                    purpose="demand-triage",
                     workspace_dir=self.workspace_dir,
                     shared_project_workspace_dir=self.project_workspace_dir,
                     permissions="buddyswitch-runtime",
-                    task_id="task-controlled-inbound-unsafe-retry",
                 )
 
             self.assertFalse(raised.exception.retryable)

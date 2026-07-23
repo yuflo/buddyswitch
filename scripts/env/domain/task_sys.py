@@ -1,35 +1,41 @@
-"""Minimal task sys substrate for actor-driving inbound."""
+"""Task owner for one Demand-bound objective executed by one native Codex Goal."""
 
 from __future__ import annotations
 
 from copy import deepcopy
 import fcntl
+import hashlib
+from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
 from env.domain.identity import ActorIdentityProfile
 from env.repos import runtime_files
 
-SIDE_PROCESSING = "in_progress.side_processing"
-AWAITING_PARENT = "in_progress.awaiting_parent"
-PARENT_PROCESSING = "in_progress.parent_processing"
+ACTIVE = "active"
 COMPLETED = "completed"
 CANCELED = "canceled"
 
-TASK_STATUSES = (SIDE_PROCESSING, AWAITING_PARENT, PARENT_PROCESSING, COMPLETED, CANCELED)
-ACTIVE_TASK_STATUSES = (SIDE_PROCESSING, AWAITING_PARENT, PARENT_PROCESSING)
-LEGAL_TASK_TRANSITIONS = {
-    "need_parent": {SIDE_PROCESSING: AWAITING_PARENT},
-    "parent_accepted": {AWAITING_PARENT: PARENT_PROCESSING},
-    "close": {SIDE_PROCESSING: COMPLETED, PARENT_PROCESSING: COMPLETED},
-    "cancel": {
-        SIDE_PROCESSING: CANCELED,
-        AWAITING_PARENT: CANCELED,
-        PARENT_PROCESSING: CANCELED,
-    },
-}
-RECOVERABLE_TASK_REASONS = ("runtime_failed", "side_no_result", "side_timed_out")
-RUNTIME_INSTRUCTION_TYPES = ("start_side", "submit_parent", "interrupt_submit_parent")
+TASK_STATUSES = (ACTIVE, COMPLETED, CANCELED)
+ACTIVE_TASK_STATUSES = (ACTIVE,)
+TERMINAL_TASK_STATUSES = (COMPLETED, CANCELED)
+
+_TASK_KEYS = frozenset(
+    {
+        "schema_version",
+        "id",
+        "actor_target",
+        "demand_ref",
+        "objective",
+        "selection",
+        "goal_binding",
+        "status",
+        "result",
+        "created_at",
+        "updated_at",
+    }
+)
+_GOAL_BINDING_KEYS = frozenset({"thread_id", "objective_hash", "goal_created_at"})
 
 
 class TaskSysError(ValueError):
@@ -41,7 +47,7 @@ class TaskSourceConflict(TaskSysError):
 
     def __init__(self, task_id: str) -> None:
         self.task_id = task_id
-        super().__init__(f"Task source already exists with different input: {task_id}")
+        super().__init__(f"Task source already exists with different objective or selection: {task_id}")
 
 
 class TaskActiveConflict(TaskSysError):
@@ -51,6 +57,14 @@ class TaskActiveConflict(TaskSysError):
         self.task_id = task_id
         self.task_status = task_status
         super().__init__(f"Actor already has active Task {task_id} in status {task_status}")
+
+
+class TaskGoalConflict(TaskSysError):
+    code = "E_TASK_SYS_GOAL_CONFLICT"
+
+    def __init__(self, task_id: str, message: str) -> None:
+        self.task_id = task_id
+        super().__init__(f"Task {task_id} Goal conflict: {message}")
 
 
 def _require_text(value: Any, field: str) -> str:
@@ -65,15 +79,23 @@ def _require_mapping(value: Any, field: str) -> Mapping[str, Any]:
     return value
 
 
-def _payload_copy(value: Mapping[str, Any]) -> dict[str, Any]:
+def _copy(value: Mapping[str, Any]) -> dict[str, Any]:
     return deepcopy(dict(value))
 
 
 def _normalize_actor_target(value: Any) -> dict[str, str]:
     target = _require_mapping(value, "actor_target")
+    if set(target) != {"actor_id", "role_id"}:
+        raise ValueError("actor_target must contain exactly actor_id and role_id")
     return {
-        "role_id": runtime_files.require_id(_require_text(target.get("role_id"), "actor_target.role_id"), "actor_target.role_id"),
-        "actor_id": runtime_files.require_id(_require_text(target.get("actor_id"), "actor_target.actor_id"), "actor_target.actor_id"),
+        "actor_id": runtime_files.require_id(
+            _require_text(target.get("actor_id"), "actor_target.actor_id"),
+            "actor_target.actor_id",
+        ),
+        "role_id": runtime_files.require_id(
+            _require_text(target.get("role_id"), "actor_target.role_id"),
+            "actor_target.role_id",
+        ),
     }
 
 
@@ -103,116 +125,168 @@ def _normalize_demand_ref(value: Any) -> dict[str, Any]:
 def _actor_demand_ref(value: Any) -> dict[str, str]:
     demand_ref = _normalize_demand_ref(value)
     return {
-        "demand_id": str(demand_ref["demand_id"]),
-        "demand_ref": str(demand_ref["demand_ref"]),
+        "demand_id": demand_ref["demand_id"],
+        "demand_ref": demand_ref["demand_ref"],
     }
 
 
-def _actor_source(value: Any) -> dict[str, Any]:
-    source = _require_mapping(value, "source")
-    if set(source) != {"type", "ref"} or source.get("type") != "demand":
-        raise ValueError("source must be an exact Demand source")
-    return {
-        "type": "demand",
-        "ref": _actor_demand_ref(source.get("ref")),
-    }
+def objective_hash(objective: str) -> str:
+    normalized = _require_text(objective, "objective")
+    return f"sha256:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
 
 
-def _normalize_execution_brief(value: Any) -> dict[str, str]:
-    execution_brief = _require_mapping(value, "execution_brief")
-    if set(execution_brief) != {"description", "detail"}:
-        raise ValueError("execution_brief must contain exactly description and detail")
-    return {
-        "description": _require_text(execution_brief.get("description"), "execution_brief.description"),
-        "detail": _require_text(execution_brief.get("detail"), "execution_brief.detail"),
-    }
-
-
-def _normalize_failure_reason(value: Any) -> str:
-    if value not in RECOVERABLE_TASK_REASONS:
-        raise ValueError(f"side runtime failure reason must be one of {', '.join(RECOVERABLE_TASK_REASONS)}")
-    return str(value)
-
-
-def _normalize_handoff_params(value: Any) -> dict[str, Any]:
-    params = _payload_copy(_require_mapping(value, "params"))
-    allowed = {"parent_frame_context", "interrupt", "ordering"}
-    unknown = sorted(key for key in params if key not in allowed)
-    if unknown:
-        raise ValueError(f"params has unsupported fields: {', '.join(unknown)}")
-    if "parent_frame_context" in params:
-        parent_frame_context = _payload_copy(_require_mapping(params["parent_frame_context"], "params.parent_frame_context"))
-    else:
-        parent_frame_context = {}
-    if "interrupt" in params and not isinstance(params["interrupt"], bool):
-        raise ValueError("params.interrupt must be a bool")
-    interrupt = params.get("interrupt") is True
-    if "ordering" in params:
-        ordering = _payload_copy(_require_mapping(params["ordering"], "params.ordering"))
-    else:
-        ordering = {}
-    return {
-        "parent_frame_context": parent_frame_context,
-        "interrupt": interrupt,
-        "ordering": ordering,
-        "side_thread_id": None,
-        "cleanup": {},
-    }
-
-
-def _new_execution(processor: str | None) -> dict[str, Any]:
-    if processor not in {"side", "parent", None}:
-        raise ValueError("execution.processor must be side, parent, or null")
-    return {"processor": processor, "handoff": None, "result": None}
-
-
-def _execution(record: Mapping[str, Any]) -> Mapping[str, Any]:
-    return _require_mapping(record.get("execution"), "task.execution")
-
-
-def _execution_processor(record: Mapping[str, Any]) -> str | None:
-    processor = _execution(record).get("processor")
-    if processor is None:
+def _normalize_goal_binding(value: Any) -> dict[str, Any] | None:
+    if value is None:
         return None
-    if processor not in {"side", "parent"}:
-        raise ValueError("task.execution.processor must be side, parent, or null")
-    return str(processor)
+    binding = _require_mapping(value, "goal_binding")
+    if set(binding) != _GOAL_BINDING_KEYS:
+        raise ValueError("goal_binding must contain exactly thread_id, objective_hash, and goal_created_at")
+    created_at = binding.get("goal_created_at")
+    if type(created_at) is not int or created_at < 0:
+        raise ValueError("goal_binding.goal_created_at must be a non-negative integer")
+    normalized_hash = _require_text(binding.get("objective_hash"), "goal_binding.objective_hash")
+    if not normalized_hash.startswith("sha256:"):
+        raise ValueError("goal_binding.objective_hash must be a sha256 hash")
+    return {
+        "thread_id": _require_text(binding.get("thread_id"), "goal_binding.thread_id"),
+        "objective_hash": normalized_hash,
+        "goal_created_at": created_at,
+    }
 
 
-def _execution_handoff(record: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    handoff = _execution(record).get("handoff")
-    if handoff is None:
+def _normalize_goal(goal: Any, *, objective: str) -> dict[str, Any]:
+    value = _require_mapping(goal, "goal")
+    thread_id = _require_text(value.get("threadId"), "goal.threadId")
+    goal_objective = _require_text(value.get("objective"), "goal.objective")
+    if goal_objective != objective:
+        raise ValueError("goal.objective must exactly equal the Task objective")
+    status = _require_text(value.get("status"), "goal.status")
+    created_at = value.get("createdAt")
+    updated_at = value.get("updatedAt")
+    if type(created_at) is not int or created_at < 0:
+        raise ValueError("goal.createdAt must be a non-negative integer")
+    if type(updated_at) is not int or updated_at < 0:
+        raise ValueError("goal.updatedAt must be a non-negative integer")
+    token_budget = value.get("tokenBudget")
+    if token_budget is not None and (type(token_budget) is not int or token_budget <= 0):
+        raise ValueError("goal.tokenBudget must be null or a positive integer")
+    tokens_used = value.get("tokensUsed")
+    time_used_seconds = value.get("timeUsedSeconds")
+    if type(tokens_used) is not int or tokens_used < 0:
+        raise ValueError("goal.tokensUsed must be a non-negative integer")
+    if type(time_used_seconds) is not int or time_used_seconds < 0:
+        raise ValueError("goal.timeUsedSeconds must be a non-negative integer")
+    return {
+        "thread_id": thread_id,
+        "objective": goal_objective,
+        "status": status,
+        "token_budget": token_budget,
+        "tokens_used": tokens_used,
+        "time_used_seconds": time_used_seconds,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+
+
+def _validate_result(value: Any, *, status: str) -> dict[str, Any] | None:
+    if status == ACTIVE:
+        if value is not None:
+            raise ValueError("active Task result must be null")
         return None
-    return _require_mapping(handoff, "task.execution.handoff")
+    result = _require_mapping(value, "task.result")
+    result_type = result.get("type")
+    if status == COMPLETED:
+        required = {
+            "type",
+            "goal_status",
+            "thread_id",
+            "objective_hash",
+            "goal_created_at",
+            "goal_updated_at",
+            "token_budget",
+            "tokens_used",
+            "time_used_seconds",
+            "recorded_at",
+        }
+        if set(result) != required or result_type != "goal_terminal" or result.get("goal_status") != "complete":
+            raise ValueError("completed Task result must be an exact complete Goal terminal snapshot")
+        _normalize_goal_binding(
+            {
+                "thread_id": result.get("thread_id"),
+                "objective_hash": result.get("objective_hash"),
+                "goal_created_at": result.get("goal_created_at"),
+            }
+        )
+        if type(result.get("goal_updated_at")) is not int or result["goal_updated_at"] < 0:
+            raise ValueError("task.result.goal_updated_at must be a non-negative integer")
+        token_budget = result.get("token_budget")
+        if token_budget is not None and (type(token_budget) is not int or token_budget <= 0):
+            raise ValueError("task.result.token_budget must be null or a positive integer")
+        for field in ("tokens_used", "time_used_seconds"):
+            if type(result.get(field)) is not int or result[field] < 0:
+                raise ValueError(f"task.result.{field} must be a non-negative integer")
+        _require_text(result.get("recorded_at"), "task.result.recorded_at")
+    elif status == CANCELED:
+        if set(result) != {"type", "reason", "recorded_at"} or result_type != "actor_canceled":
+            raise ValueError("canceled Task result must be an exact actor_canceled result")
+        _require_text(result.get("reason"), "task.result.reason")
+        _require_text(result.get("recorded_at"), "task.result.recorded_at")
+    return _copy(result)
 
 
-def _execution_result(record: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    result = _execution(record).get("result")
-    if result is None:
-        return None
-    return _require_mapping(result, "task.execution.result")
+def _validate_task(record: Any) -> dict[str, Any]:
+    try:
+        value = _require_mapping(record, "task")
+        if set(value) != _TASK_KEYS or value.get("schema_version") != 1:
+            raise ValueError("Task record does not match the current schema")
+        task_id = runtime_files.require_id(value.get("id"), "task.id")
+        if not task_id.startswith("task-demand-"):
+            raise ValueError("task.id must be a Demand Task id")
+        actor_target = _normalize_actor_target(value.get("actor_target"))
+        demand_ref = _normalize_demand_ref(value.get("demand_ref"))
+        objective = _require_text(value.get("objective"), "task.objective")
+        selection = _require_mapping(value.get("selection"), "task.selection")
+        if set(selection) != {"reason", "selected_at"}:
+            raise ValueError("task.selection must contain exactly reason and selected_at")
+        normalized_selection = {
+            "reason": _require_text(selection.get("reason"), "task.selection.reason"),
+            "selected_at": _require_text(selection.get("selected_at"), "task.selection.selected_at"),
+        }
+        goal_binding = _normalize_goal_binding(value.get("goal_binding"))
+        status = value.get("status")
+        if status not in TASK_STATUSES:
+            raise ValueError(f"task.status must be one of {', '.join(TASK_STATUSES)}")
+        result = _validate_result(value.get("result"), status=str(status))
+        if status == COMPLETED and goal_binding is None:
+            raise ValueError("completed Task must have a Goal binding")
+        created_at = _require_text(value.get("created_at"), "task.created_at")
+        updated_at = _require_text(value.get("updated_at"), "task.updated_at")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"retired or invalid Task record: {exc}") from exc
+    return {
+        "schema_version": 1,
+        "id": task_id,
+        "actor_target": actor_target,
+        "demand_ref": demand_ref,
+        "objective": objective,
+        "selection": normalized_selection,
+        "goal_binding": goal_binding,
+        "status": status,
+        "result": result,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
 
 
-def _is_active_task(record: Mapping[str, Any]) -> bool:
-    return record.get("status") in ACTIVE_TASK_STATUSES
-
-
-def _is_recoverable_task(record: Mapping[str, Any]) -> bool:
-    if record.get("status") != SIDE_PROCESSING:
-        return False
-    result = _execution_result(record)
-    return isinstance(result, Mapping) and result.get("type") == "failure" and result.get("reason") in RECOVERABLE_TASK_REASONS
-
-
-def _task_sys_tasks_dir() -> Any:
+def _tasks_dir() -> Path:
     return runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
 
 
-def _task_file(task_id: str) -> Any:
-    return _task_sys_tasks_dir() / f"{runtime_files.require_id(task_id, 'task id')}.json"
+def _task_file(task_id: str) -> Path:
+    return _tasks_dir() / f"{runtime_files.require_id(task_id, 'task id')}.json"
 
 
-def _actor_lock_file(actor_target: Mapping[str, str]) -> Any:
+def _actor_lock_file(actor_target: Mapping[str, str]) -> Path:
     return (
         runtime_files.LOCAL_ROOT
         / "locks"
@@ -225,83 +299,9 @@ def _new_task_id() -> str:
     return f"task-demand-{uuid4().hex[:12]}"
 
 
-def _event(event_type: str, *, at: str, data: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    row: dict[str, Any] = {"type": event_type, "at": at}
-    if data:
-        row["data"] = _payload_copy(data)
-    return row
-
-
-def _append_event(record: dict[str, Any], event_type: str, *, at: str, data: Mapping[str, Any] | None = None) -> None:
-    events = record.get("events")
-    if not isinstance(events, list):
-        events = []
-    record["events"] = [*events, _event(event_type, at=at, data=data)]
-
-
-def _transition_status(record: dict[str, Any], action: str, *, at: str) -> str:
-    transitions = LEGAL_TASK_TRANSITIONS.get(action)
-    if transitions is None:
-        raise ValueError(f"unsupported task lifecycle action: {action}")
-    current = record.get("status")
-    next_status = transitions.get(current)
-    if next_status is None:
-        raise ValueError(f"task status {current!r} cannot transition via {action}")
-    record.update({"status": next_status, "updated_at": at})
-    return next_status
-
-
-def _side_frame(*, task_id: str, source: Mapping[str, Any], actor_target: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "kind": "task_sys.side_frame",
-        "task_id": task_id,
-        "source": _actor_source(source),
-        "actor_target": _payload_copy(actor_target),
-        "context": _payload_copy(context),
-    }
-
-
-def _parent_frame(record: Mapping[str, Any]) -> dict[str, Any]:
-    task_id = runtime_files.require_id(_require_text(record.get("id"), "task.id"), "task id")
-    if record.get("source_type") != "demand":
-        raise ValueError("task.source_type must be demand")
-    demand_ref = _normalize_demand_ref(record.get("source_ref"))
-    handoff = _payload_copy(_require_mapping(_execution_handoff(record), "task.execution.handoff"))
-    return {
-        "kind": "task_sys.parent_frame",
-        "task_id": task_id,
-        "source": {
-            "type": "demand",
-            "ref": _actor_demand_ref(demand_ref),
-        },
-        "actor_target": _normalize_actor_target(record.get("actor_target")),
-        "inbound_context": _payload_copy(_require_mapping(record.get("inbound_context"), "task.inbound_context")),
-        "execution_handoff": handoff,
-    }
-
-
-def runtime_instruction(
-    instruction_type: str,
-    *,
-    task_id: str,
-    actor_target: Mapping[str, Any],
-    frame: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    if instruction_type not in RUNTIME_INSTRUCTION_TYPES:
-        raise ValueError(f"runtime instruction type must be one of {', '.join(RUNTIME_INSTRUCTION_TYPES)}")
-    payload: dict[str, Any] = {
-        "type": instruction_type,
-        "task_id": runtime_files.require_id(task_id, "task id"),
-        "actor_target": _normalize_actor_target(actor_target),
-    }
-    if frame is not None:
-        payload["frame"] = _payload_copy(_require_mapping(frame, "frame"))
-    return payload
-
-
 def _persist_task(record: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _payload_copy(record)
-    runtime_files.write_json_object(_task_file(str(normalized["id"])), normalized)
+    normalized = _validate_task(record)
+    runtime_files.write_json_object(_task_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -309,7 +309,14 @@ def _load_task(task_id: str) -> dict[str, Any]:
     path = _task_file(task_id)
     if not path.exists():
         raise ValueError(f"task not found: {task_id}")
-    return runtime_files.read_json_object(path)
+    return _validate_task(runtime_files.read_json_object(path))
+
+
+def _with_actor_lock(actor_target: Mapping[str, str]):
+    runtime_files.require_runtime_workspace_write_root()
+    lock_path = _actor_lock_file(actor_target)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    return lock_path.open("a+", encoding="utf-8")
 
 
 def list_tasks(
@@ -317,166 +324,80 @@ def list_tasks(
     actor_target: Mapping[str, Any] | None = None,
     statuses: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
-    tasks_dir = _task_sys_tasks_dir()
+    tasks_dir = _tasks_dir()
     if not tasks_dir.exists():
         return []
     normalized_target = _normalize_actor_target(actor_target) if actor_target is not None else None
     allowed_statuses = set(statuses) if statuses is not None else None
+    if allowed_statuses is not None and not allowed_statuses.issubset(TASK_STATUSES):
+        raise ValueError("statuses contains an unsupported Task status")
     rows: list[dict[str, Any]] = []
     for path in sorted(tasks_dir.glob("*.json")):
-        record = runtime_files.read_json_object(path)
-        if normalized_target is not None:
-            target = record.get("actor_target")
-            if not isinstance(target, Mapping):
-                continue
-            if _normalize_actor_target(target) != normalized_target:
-                continue
-        if allowed_statuses is not None and record.get("status") not in allowed_statuses:
+        record = _validate_task(runtime_files.read_json_object(path))
+        if normalized_target is not None and record["actor_target"] != normalized_target:
+            continue
+        if allowed_statuses is not None and record["status"] not in allowed_statuses:
             continue
         rows.append(record)
     return rows
 
 
-def task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the canonical actor-visible Task summary shape."""
-
-    task_id = task.get("id")
-    if task.get("source_type") != "demand":
-        raise ValueError("task.source_type must be demand")
-    source_ref = _normalize_demand_ref(task.get("source_ref"))
-    execution = task.get("execution")
-    events = task.get("events")
-    return {
-        "task_id": task_id,
-        "id": task_id,
-        "source_type": "demand",
-        "source_ref": _actor_demand_ref(source_ref),
-        "status": task.get("status"),
-        "execution": _payload_copy(execution) if isinstance(execution, Mapping) else {},
-        "updated_at": task.get("updated_at"),
-        "event_types": [
-            str(event.get("type"))
-            for event in events if isinstance(event, Mapping) and event.get("type")
-        ] if isinstance(events, list) else [],
-    }
+def get_task(task_id: str) -> dict[str, Any]:
+    return _load_task(runtime_files.require_id(task_id, "task id"))
 
 
-def actor_task_projection(*, actor_profile: ActorIdentityProfile) -> dict[str, object]:
-    """Read Task records once and return canonical actor-visible summaries."""
-
-    if not isinstance(actor_profile, ActorIdentityProfile):
-        raise ValueError("actor_profile must be an ActorIdentityProfile")
-    actor_target = _normalize_actor_target(
-        {"actor_id": actor_profile.identity.id, "role_id": actor_profile.role_id}
-    )
-    records: list[dict[str, Any]] = []
-    for record in list_tasks():
-        target = record.get("actor_target")
-        if not isinstance(target, Mapping):
-            continue
-        try:
-            normalized_target = _normalize_actor_target(target)
-        except ValueError:
-            continue
-        if normalized_target == actor_target:
-            records.append(record)
-
-    classified = [(record, task_summary(record)) for record in records]
-    tasks = [summary for _record, summary in classified]
-    active_tasks = [summary for record, summary in classified if _is_active_task(record)]
-    recoverable_tasks = [summary for record, summary in classified if _is_recoverable_task(record)]
-    return {
-        "tasks": tasks,
-        "active_tasks": active_tasks,
-        "recoverable_tasks": recoverable_tasks,
-        "task_count": len(tasks),
-        "active_count": len(active_tasks),
-        "recoverable_count": len(recoverable_tasks),
-    }
-
-
-def actor_task_detail(task_id: str) -> dict[str, Any]:
-    """Return one Task without exposing Demand storage concurrency fields."""
-
-    task = _payload_copy(_load_task(runtime_files.require_id(task_id, "task id")))
-    task["source_ref"] = _actor_demand_ref(task.get("source_ref"))
-    return task
-
-
-def _create_task(
+def create(
     *,
-    actor_target: Mapping[str, str],
+    actor_target: Mapping[str, Any],
     demand_ref: Mapping[str, Any],
-    execution_brief: Mapping[str, Any],
+    objective: str,
+    selection_reason: str,
 ) -> dict[str, Any]:
-    source = {"type": "demand", "ref": _payload_copy(demand_ref)}
-    context = {"execution_brief": _payload_copy(execution_brief)}
-    lock_path = _actor_lock_file(actor_target)
-    runtime_files.require_runtime_workspace_write_root()
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with lock_path.open("a+", encoding="utf-8") as lock_file:
+    normalized_target = _normalize_actor_target(actor_target)
+    normalized_ref = _normalize_demand_ref(demand_ref)
+    normalized_objective = _require_text(objective, "objective")
+    normalized_reason = _require_text(selection_reason, "selection_reason")
+    lock_file = _with_actor_lock(normalized_target)
+    with lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
-            actor_tasks = list_tasks(actor_target=actor_target)
+            actor_tasks = list_tasks(actor_target=normalized_target)
             for existing in actor_tasks:
-                if (
-                    existing.get("source_type") == source["type"]
-                    and existing.get("source_ref") == source["ref"]
-                ):
-                    task_id = runtime_files.require_id(existing.get("id"), "task id")
-                    if existing.get("inbound_context") != context:
-                        raise TaskSourceConflict(task_id)
+                if existing["demand_ref"] == normalized_ref:
+                    if (
+                        existing["objective"] != normalized_objective
+                        or existing["selection"]["reason"] != normalized_reason
+                    ):
+                        raise TaskSourceConflict(existing["id"])
                     return {
                         "ok": True,
-                        "task_id": task_id,
+                        "task_id": existing["id"],
                         "task": existing,
-                        "instruction": None,
                         "outcome": "existing",
                         "state_changed": False,
                     }
-
             for existing in actor_tasks:
-                if _is_active_task(existing):
-                    task_id = runtime_files.require_id(existing.get("id"), "task id")
-                    task_status = _require_text(existing.get("status"), "task.status")
-                    raise TaskActiveConflict(task_id, task_status)
-
-            task_id = _new_task_id()
+                if existing["status"] == ACTIVE:
+                    raise TaskActiveConflict(existing["id"], existing["status"])
             now = runtime_files.now_iso()
             record = {
-                "id": task_id,
-                "source_type": source["type"],
-                "source_ref": _payload_copy(source["ref"]),
-                "actor_target": dict(actor_target),
-                "inbound_context": _payload_copy(context),
-                "status": SIDE_PROCESSING,
-                "execution": _new_execution("side"),
-                "events": [
-                    _event("created", at=now),
-                    _event("side_frame_started", at=now, data={"instruction": "start_side"}),
-                ],
+                "schema_version": 1,
+                "id": _new_task_id(),
+                "actor_target": normalized_target,
+                "demand_ref": normalized_ref,
+                "objective": normalized_objective,
+                "selection": {"reason": normalized_reason, "selected_at": now},
+                "goal_binding": None,
+                "status": ACTIVE,
+                "result": None,
                 "created_at": now,
                 "updated_at": now,
             }
             persisted = _persist_task(record)
-            frame = _side_frame(
-                task_id=task_id,
-                source=source,
-                actor_target=actor_target,
-                context=context,
-            )
-            instruction = runtime_instruction(
-                "start_side",
-                task_id=task_id,
-                actor_target=actor_target,
-                frame=frame,
-            )
             return {
                 "ok": True,
-                "task_id": task_id,
+                "task_id": persisted["id"],
                 "task": persisted,
-                "instruction": instruction,
                 "outcome": "created",
                 "state_changed": True,
             }
@@ -484,271 +405,198 @@ def _create_task(
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def create(
-    *,
-    actor_target: Mapping[str, Any],
-    demand_ref: Mapping[str, Any],
-    execution_brief: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Create one Demand-sourced Task through the canonical side lifecycle."""
-
-    return _create_task(
-        actor_target=_normalize_actor_target(actor_target),
-        demand_ref=_normalize_demand_ref(demand_ref),
-        execution_brief=_normalize_execution_brief(execution_brief),
-    )
-
-
-def record_task_close(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
+def bind_goal(task_id: str, goal: Mapping[str, Any]) -> dict[str, Any]:
     normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _require_mapping(update, "task close")
-    record = _load_task(normalized_task_id)
-    status = record.get("status")
+    initial = _load_task(normalized_task_id)
+    lock_file = _with_actor_lock(initial["actor_target"])
+    with lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            record = _load_task(normalized_task_id)
+            if record["status"] != ACTIVE:
+                raise TaskGoalConflict(normalized_task_id, "only an active Task can bind a Goal")
+            normalized_goal = _normalize_goal(goal, objective=record["objective"])
+            binding = {
+                "thread_id": normalized_goal["thread_id"],
+                "objective_hash": objective_hash(record["objective"]),
+                "goal_created_at": normalized_goal["created_at"],
+            }
+            existing = record["goal_binding"]
+            if existing is not None:
+                if existing != binding:
+                    raise TaskGoalConflict(normalized_task_id, "a different Goal is already bound")
+                return {
+                    "ok": True,
+                    "task_id": normalized_task_id,
+                    "task": record,
+                    "outcome": "goal_bound",
+                    "state_changed": False,
+                }
+            record["goal_binding"] = binding
+            record["updated_at"] = runtime_files.now_iso()
+            persisted = _persist_task(record)
+            return {
+                "ok": True,
+                "task_id": normalized_task_id,
+                "task": persisted,
+                "outcome": "goal_bound",
+                "state_changed": True,
+            }
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
-    existing_result = _execution_result(record)
-    if status == COMPLETED and isinstance(existing_result, Mapping) and existing_result.get("type") == "completion":
-        return {"ok": True, "task_id": normalized_task_id, "outcome": "close", "task": record, "state_changed": False}
-    processor = "side" if status == SIDE_PROCESSING else "parent" if status == PARENT_PROCESSING else None
-    if processor is None:
-        raise ValueError(f"task status {status!r} cannot transition via close")
-    now = runtime_files.now_iso()
-    completion_result: dict[str, Any] = {"type": "completion", "processor": processor, "updated_at": now}
-    summary = payload.get("summary")
-    if isinstance(summary, str) and summary.strip():
-        completion_result["summary"] = summary.strip()
-    execution = _payload_copy(_execution(record))
-    execution["processor"] = None
-    execution["result"] = completion_result
-    record["execution"] = execution
-    _transition_status(record, "close", at=now)
-    _append_event(record, "closed", at=now, data={"processor": processor})
 
-    persisted = _persist_task(record)
-    return {"ok": True, "task_id": normalized_task_id, "outcome": "close", "task": persisted, "state_changed": True}
-
-
-def record_task_cancel(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _require_mapping(update, "task cancel")
-    record = _load_task(normalized_task_id)
-    status = record.get("status")
-    existing_result = _execution_result(record)
-    if status == CANCELED and isinstance(existing_result, Mapping) and existing_result.get("type") == "cancellation":
-        return {"ok": True, "task_id": normalized_task_id, "outcome": "cancel", "task": record, "state_changed": False}
-    if status not in ACTIVE_TASK_STATUSES:
-        raise ValueError(f"task status {status!r} cannot transition via cancel")
-
-    now = runtime_files.now_iso()
-    cancellation_result: dict[str, Any] = {
-        "type": "cancellation",
-        "previous_status": status,
-        "updated_at": now,
+def _require_bound_goal(task_id: str, record: Mapping[str, Any], goal: Mapping[str, Any]) -> dict[str, Any]:
+    normalized_goal = _normalize_goal(goal, objective=str(record["objective"]))
+    binding = _normalize_goal_binding(record.get("goal_binding"))
+    if binding is None:
+        raise TaskGoalConflict(task_id, "Task has no Goal binding")
+    observed_binding = {
+        "thread_id": normalized_goal["thread_id"],
+        "objective_hash": objective_hash(str(record["objective"])),
+        "goal_created_at": normalized_goal["created_at"],
     }
-    processor = (
-        "side"
-        if status in {SIDE_PROCESSING, AWAITING_PARENT}
-        else "parent"
-        if status == PARENT_PROCESSING
-        else None
-    )
-    if processor is not None:
-        cancellation_result["processor"] = processor
-    reason = payload.get("reason")
-    if isinstance(reason, str) and reason.strip():
-        cancellation_result["reason"] = reason.strip()
-    execution = _payload_copy(_execution(record))
-    execution["processor"] = None
-    execution["result"] = cancellation_result
-    record["execution"] = execution
-    _transition_status(record, "cancel", at=now)
-    _append_event(record, "canceled", at=now, data={"previous_status": status})
-
-    persisted = _persist_task(record)
-    return {"ok": True, "task_id": normalized_task_id, "outcome": "cancel", "task": persisted, "state_changed": True}
+    if binding != observed_binding:
+        raise TaskGoalConflict(task_id, "Goal does not match the Task binding")
+    return normalized_goal
 
 
-def record_side_need_parent(task_id: str, result: Mapping[str, Any]) -> dict[str, Any]:
+def record_goal_complete(task_id: str, goal: Mapping[str, Any]) -> dict[str, Any]:
     normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _require_mapping(result, "side need_parent result")
-    params = _normalize_handoff_params(payload.get("params"))
-    record = _load_task(normalized_task_id)
-    if record.get("status") != SIDE_PROCESSING:
-        raise ValueError(f"task status {record.get('status')!r} cannot transition via need_parent")
-    now = runtime_files.now_iso()
-    execution = _payload_copy(_execution(record))
-    execution["processor"] = None
-    execution["handoff"] = params
-    record["execution"] = execution
-    _transition_status(record, "need_parent", at=now)
-    _append_event(record, "side_parent_requested", at=now, data={"interrupt": params.get("interrupt") is True})
+    initial = _load_task(normalized_task_id)
+    lock_file = _with_actor_lock(initial["actor_target"])
+    with lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            record = _load_task(normalized_task_id)
+            normalized_goal = _require_bound_goal(normalized_task_id, record, goal)
+            if normalized_goal["status"] != "complete":
+                raise TaskGoalConflict(normalized_task_id, "only a complete Goal can complete a Task")
+            if record["status"] == COMPLETED:
+                return {
+                    "ok": True,
+                    "task_id": normalized_task_id,
+                    "task": record,
+                    "outcome": "goal_complete",
+                    "state_changed": False,
+                }
+            if record["status"] != ACTIVE:
+                raise TaskGoalConflict(normalized_task_id, f"Task status {record['status']} cannot complete")
+            now = runtime_files.now_iso()
+            binding = record["goal_binding"]
+            record.update(
+                {
+                    "status": COMPLETED,
+                    "result": {
+                        "type": "goal_terminal",
+                        "goal_status": "complete",
+                        "thread_id": binding["thread_id"],
+                        "objective_hash": binding["objective_hash"],
+                        "goal_created_at": binding["goal_created_at"],
+                        "goal_updated_at": normalized_goal["updated_at"],
+                        "token_budget": normalized_goal["token_budget"],
+                        "tokens_used": normalized_goal["tokens_used"],
+                        "time_used_seconds": normalized_goal["time_used_seconds"],
+                        "recorded_at": now,
+                    },
+                    "updated_at": now,
+                }
+            )
+            persisted = _persist_task(record)
+            return {
+                "ok": True,
+                "task_id": normalized_task_id,
+                "task": persisted,
+                "outcome": "goal_complete",
+                "state_changed": True,
+            }
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
-    persisted = _persist_task(record)
-    return {"ok": True, "task_id": normalized_task_id, "outcome": "need_parent", "task": persisted, "state_changed": True}
 
-
-def record_side_runtime_failure(task_id: str, failure: Mapping[str, Any]) -> dict[str, Any]:
+def record_task_cancel(task_id: str, reason: str) -> dict[str, Any]:
     normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _payload_copy(_require_mapping(failure, "side runtime failure"))
-    reason = _normalize_failure_reason(payload.pop("reason", None))
-    record = _load_task(normalized_task_id)
-    if record.get("status") != SIDE_PROCESSING:
-        raise ValueError("task must be in side processing before side runtime failure")
+    normalized_reason = _require_text(reason, "reason")
+    initial = _load_task(normalized_task_id)
+    lock_file = _with_actor_lock(initial["actor_target"])
+    with lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            record = _load_task(normalized_task_id)
+            if record["status"] == CANCELED:
+                if record["result"]["reason"] != normalized_reason:
+                    raise TaskGoalConflict(normalized_task_id, "Task was canceled with a different reason")
+                return {
+                    "ok": True,
+                    "task_id": normalized_task_id,
+                    "task": record,
+                    "outcome": "actor_canceled",
+                    "state_changed": False,
+                }
+            if record["status"] != ACTIVE:
+                raise TaskGoalConflict(normalized_task_id, f"Task status {record['status']} cannot cancel")
+            now = runtime_files.now_iso()
+            record.update(
+                {
+                    "status": CANCELED,
+                    "result": {
+                        "type": "actor_canceled",
+                        "reason": normalized_reason,
+                        "recorded_at": now,
+                    },
+                    "updated_at": now,
+                }
+            )
+            persisted = _persist_task(record)
+            return {
+                "ok": True,
+                "task_id": normalized_task_id,
+                "task": persisted,
+                "outcome": "actor_canceled",
+                "state_changed": True,
+            }
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
-    now = runtime_files.now_iso()
-    result_payload: dict[str, Any] = {
-        "type": "failure",
-        "reason": reason,
-        "stage": _require_text(payload.get("stage"), "failure.stage"),
-        "processor": _require_text(payload.get("processor", "side"), "failure.processor"),
-        "error": _require_text(payload.get("error"), "failure.error"),
-        "updated_at": now,
-    }
-    retryable = payload.get("retryable")
-    if retryable is not None:
-        if not isinstance(retryable, bool):
-            raise ValueError("failure.retryable must be a bool")
-        result_payload["retryable"] = retryable
-    attempts = payload.get("attempts")
-    if attempts is not None:
-        if not isinstance(attempts, int) or attempts < 1:
-            raise ValueError("failure.attempts must be a positive integer")
-        result_payload["attempts"] = attempts
-    last_side_thread_id = payload.get("last_side_thread_id")
-    if isinstance(last_side_thread_id, str) and last_side_thread_id.strip():
-        result_payload["last_side_thread_id"] = last_side_thread_id.strip()
-    cleanup = payload.get("cleanup")
-    if cleanup is not None:
-        result_payload["cleanup"] = _payload_copy(_require_mapping(cleanup, "failure.cleanup"))
 
-    execution = _payload_copy(_execution(record))
-    execution["processor"] = None
-    execution["result"] = result_payload
-    record.update({"execution": execution, "updated_at": now})
-    _append_event(record, "side_runtime_failed", at=now, data={"reason": reason, "stage": result_payload["stage"]})
-    persisted = _persist_task(record)
+def task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
+    value = _validate_task(task)
     return {
-        "ok": True,
-        "task_id": normalized_task_id,
-        "outcome": reason,
-        "task": persisted,
-        "state_changed": True,
+        "task_id": value["id"],
+        "id": value["id"],
+        "demand_ref": _actor_demand_ref(value["demand_ref"]),
+        "objective": value["objective"],
+        "selection": _copy(value["selection"]),
+        "goal_binding": _copy(value["goal_binding"]) if value["goal_binding"] is not None else None,
+        "status": value["status"],
+        "result": _copy(value["result"]) if value["result"] is not None else None,
+        "updated_at": value["updated_at"],
     }
 
 
-def record_side_cleanup(task_id: str, update: Mapping[str, Any]) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
-    payload = _require_mapping(update, "side cleanup")
-    side_thread_id = _require_text(payload.get("side_thread_id"), "cleanup.side_thread_id")
-    cleanup = _payload_copy(_require_mapping(payload.get("cleanup"), "cleanup.cleanup"))
-    record = _load_task(normalized_task_id)
-    now = runtime_files.now_iso()
-
-    execution_result = _execution_result(record)
-    if (
-        record.get("status") in {COMPLETED, CANCELED}
-        and isinstance(execution_result, Mapping)
-        and execution_result.get("type") in {"completion", "cancellation"}
-    ):
-        normalized_result = _payload_copy(execution_result)
-        if normalized_result.get("processor") != "side":
-            raise ValueError("side cleanup can only update side completion or cancellation results")
-        normalized_result["side_thread_id"] = side_thread_id
-        normalized_result["cleanup"] = cleanup
-        normalized_result["updated_at"] = now
-        execution = _payload_copy(_execution(record))
-        execution["result"] = normalized_result
-        record.update({"execution": execution, "updated_at": now})
-        _append_event(record, "side_cleanup_recorded", at=now, data={"side_thread_id": side_thread_id})
-        persisted = _persist_task(record)
-        return {"ok": True, "task_id": normalized_task_id, "task": persisted, "state_changed": True}
-
-    handoff = _execution_handoff(record)
-    if isinstance(handoff, Mapping):
-        normalized_handoff = _payload_copy(handoff)
-        normalized_handoff["side_thread_id"] = side_thread_id
-        normalized_handoff["cleanup"] = cleanup
-        normalized_handoff["updated_at"] = now
-        execution = _payload_copy(_execution(record))
-        execution["handoff"] = normalized_handoff
-        record.update({"execution": execution, "updated_at": now})
-        _append_event(record, "side_cleanup_recorded", at=now, data={"side_thread_id": side_thread_id})
-        persisted = _persist_task(record)
-        return {"ok": True, "task_id": normalized_task_id, "task": persisted, "state_changed": True}
-
-    raise ValueError("task must have a side completion, cancellation, or need_parent result before side cleanup")
-
-
-def get_task(task_id: str) -> dict[str, Any]:
-    return _load_task(runtime_files.require_id(task_id, "task id"))
-
-
-def parent_handoff_instruction(task_id: str) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
-    record = _load_task(normalized_task_id)
-    if record.get("status") != AWAITING_PARENT or _execution_handoff(record) is None:
-        raise ValueError("task must be awaiting parent before parent handoff instruction")
-    params = _require_mapping(_execution_handoff(record), "task.execution.handoff")
-    instruction_type = "interrupt_submit_parent" if params.get("interrupt") is True else "submit_parent"
-    return runtime_instruction(
-        instruction_type,
-        task_id=normalized_task_id,
-        actor_target=_normalize_actor_target(record.get("actor_target")),
-        frame=_parent_frame(record),
-    )
-
-
-def outcome_instruction(task_id: str) -> dict[str, Any]:
-    """Return parent attention for one terminal Task."""
-
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
-    record = _load_task(normalized_task_id)
-    if record.get("source_type") != "demand":
-        raise ValueError("task.source_type must be demand")
-    status = record.get("status")
-    expected_result_type = {
-        COMPLETED: "completion",
-        CANCELED: "cancellation",
-    }.get(status)
-    if expected_result_type is None:
-        raise ValueError("Demand-sourced Task must be completed or canceled before outcome attention")
-    outcome = _payload_copy(_require_mapping(_execution_result(record), "task.execution.result"))
-    if outcome.get("type") != expected_result_type:
-        raise ValueError(f"{status} Demand-sourced Task must have a {expected_result_type} result")
-    processor = outcome.get("processor")
-    if processor not in {"side", "parent"}:
-        raise ValueError("Task outcome processor must be side or parent")
-    _require_text(outcome.get("updated_at"), "task.execution.result.updated_at")
-    demand_ref = _normalize_demand_ref(record.get("source_ref"))
-    frame = {
-        "kind": "task_sys.outcome_frame",
-        "task_id": normalized_task_id,
-        "status": status,
-        "source": {"type": "demand", "ref": _actor_demand_ref(demand_ref)},
-        "evidence_ref": {
-            "type": "task_sys.task",
-            "ref": {"task_id": normalized_task_id},
-        },
-        "outcome": outcome,
+def actor_task_projection(*, actor_profile: ActorIdentityProfile) -> dict[str, object]:
+    if not isinstance(actor_profile, ActorIdentityProfile):
+        raise ValueError("actor_profile must be an ActorIdentityProfile")
+    actor_target = {
+        "actor_id": actor_profile.identity.id,
+        "role_id": actor_profile.role_id,
     }
-    return runtime_instruction(
-        "submit_parent",
-        task_id=normalized_task_id,
-        actor_target=_normalize_actor_target(record.get("actor_target")),
-        frame=frame,
-    )
+    records = list_tasks(actor_target=actor_target)
+    classified = [(record, task_summary(record)) for record in records]
+    tasks = [summary for _record, summary in classified]
+    active_tasks = [summary for record, summary in classified if record["status"] == ACTIVE]
+    terminal_tasks = [summary for record, summary in classified if record["status"] in TERMINAL_TASK_STATUSES]
+    return {
+        "tasks": tasks,
+        "active_tasks": active_tasks,
+        "terminal_tasks": terminal_tasks,
+        "task_count": len(tasks),
+        "active_count": len(active_tasks),
+        "terminal_count": len(terminal_tasks),
+    }
 
 
-def record_parent_handoff_started(task_id: str) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
-    record = _load_task(normalized_task_id)
-    if record.get("status") != AWAITING_PARENT:
-        raise ValueError("task must be awaiting parent before parent processing starts")
-    _require_mapping(_execution_handoff(record), "task.execution.handoff")
-    now = runtime_files.now_iso()
-    execution = _payload_copy(_execution(record))
-    execution["processor"] = "parent"
-    record["execution"] = execution
-    _transition_status(record, "parent_accepted", at=now)
-    _append_event(record, "parent_handoff_started", at=now)
-    persisted = _persist_task(record)
-    return {"ok": True, "task_id": normalized_task_id, "task": persisted}
+def actor_task_detail(task_id: str) -> dict[str, Any]:
+    task = _load_task(runtime_files.require_id(task_id, "task id"))
+    task["demand_ref"] = _actor_demand_ref(task["demand_ref"])
+    return task

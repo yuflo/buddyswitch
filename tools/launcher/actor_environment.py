@@ -52,6 +52,7 @@ enabled = false
 
 [features]
 plugins = false
+goals = true
 """
 
 

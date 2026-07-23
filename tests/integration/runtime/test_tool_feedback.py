@@ -88,10 +88,8 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
                 "basis_revision": 1,
                 "demand_ref": f"dref-feedback-{role}",
             },
-            execution_brief={
-                "description": "Runtime feedback fixture.",
-                "detail": f"Exercise runtime feedback for {task_id}.",
-            },
+            objective=f"Exercise runtime feedback for {task_id}.",
+            selection_reason="The runtime feedback fixture Demand is selected.",
         )
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:

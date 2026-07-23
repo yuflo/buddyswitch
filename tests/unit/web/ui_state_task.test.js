@@ -6,9 +6,20 @@ const { assert, app, imNotFoundResponse, okResponse, createRenderElements } = re
 function task(taskId, status, updatedAt) {
   return {
     task_id: taskId,
-    source_type: 'demand',
-    demand_ref: { demand_id: 'demand-' + taskId, basis_revision: 1 },
+    demand_ref: { demand_id: 'demand-' + taskId, demand_ref: 'dref-' + taskId },
+    objective: 'Deliver ' + taskId + ' through the native Goal.',
+    selection: { reason: 'Selected from the live Demand pool.' },
+    goal_binding: {
+      thread_id: 'thread-main',
+      objective_hash: 'hash-' + taskId,
+      goal_created_at: 100,
+    },
     status,
+    result: status === 'completed'
+      ? { type: 'goal_terminal', goal_status: 'complete' }
+      : status === 'canceled'
+        ? { type: 'actor_canceled', reason: 'Stopped by Actor.' }
+        : null,
     actor: { actor_id: 'act-task', role_id: 'dev' },
     updated_at: updatedAt,
   };
@@ -70,16 +81,15 @@ async function renderTaskPanel(taskSys, interactionState) {
 test('B2 Task ledger renders active current task and two visible recent rows', async () => {
   const html = await renderTaskPanel({
     active_count: 1,
-    recoverable_count: 0,
     terminal_count: 5,
-    active_tasks: [task('task-current', 'in_progress.parent_processing', '2026-07-17T10:06:00Z')],
-    recoverable_tasks: [],
+    active_tasks: [task('task-current', 'active', '2026-07-17T10:06:00Z')],
     terminal_tasks: terminalTasks,
   });
 
   assert.match(html, /class="task-ledger-count"[^>]*>1 active · 5 recent/);
   assert.match(html, /class="task-ledger-row is-current"/);
-  assert.match(html, /Now · in_progress\.parent_processing/);
+  assert.match(html, /Now · active/);
+  assert.match(html, /Deliver task-current through the native Goal/);
   assert.match(html, /task-current/);
   assert.match(html, /2 of 5 · Show all/);
   assert.match(html, /5 of 5 · Show fewer/);
@@ -88,30 +98,26 @@ test('B2 Task ledger renders active current task and two visible recent rows', a
   assert.match(html, /task-terminal-4/);
 });
 
-test('B2 Task ledger prioritizes recoverable work with one amber attention row', async () => {
+test('B2 Task ledger exposes the current Task Demand and native Goal binding', async () => {
   const html = await renderTaskPanel({
-    active_count: 2,
-    recoverable_count: 1,
+    active_count: 1,
     terminal_count: 2,
-    active_tasks: [task('task-current', 'in_progress.parent_processing', '2026-07-17T10:06:00Z')],
-    recoverable_tasks: [task('task-attention', 'in_progress.side_processing', '2026-07-17T10:07:00Z')],
+    active_tasks: [task('task-current', 'active', '2026-07-17T10:06:00Z')],
     terminal_tasks: terminalTasks.slice(0, 2),
   });
 
-  assert.match(html, /2 active · 2 recent/);
-  assert.match(html, /class="task-ledger-row is-current needs-attention"/);
-  assert.match(html, /Needs attention · in_progress\.side_processing/);
-  assert.match(html, /task-attention/);
-  assert.doesNotMatch(html, /task-current/);
+  assert.match(html, /1 active · 2 recent/);
+  assert.match(html, /class="task-ledger-row is-current"/);
+  assert.match(html, /<span>Demand<\/span><code>demand-task-current<\/code>/);
+  assert.match(html, /<span>Goal thread<\/span><code>thread-main<\/code>/);
+  assert.doesNotMatch(html, /Needs attention|needs-attention|recoverable/);
 });
 
 test('B2 Task ledger keeps recent terminal work visible without an active task', async () => {
   const html = await renderTaskPanel({
     active_count: 0,
-    recoverable_count: 0,
     terminal_count: 2,
     active_tasks: [],
-    recoverable_tasks: [],
     terminal_tasks: terminalTasks.slice(0, 2),
   });
 
@@ -125,10 +131,8 @@ test('B2 Task ledger keeps recent terminal work visible without an active task',
 test('B2 Task ledger renders one compact no-task row when the actor has no tasks', async () => {
   const html = await renderTaskPanel({
     active_count: 0,
-    recoverable_count: 0,
     terminal_count: 0,
     active_tasks: [],
-    recoverable_tasks: [],
     terminal_tasks: [],
   });
 
@@ -141,10 +145,8 @@ test('B2 Task ledger renders one compact no-task row when the actor has no tasks
 test('B2 Task ledger uses native exclusive details and exposes only safe row detail', async () => {
   const html = await renderTaskPanel({
     active_count: 1,
-    recoverable_count: 0,
     terminal_count: 5,
-    active_tasks: [task('task-current', 'in_progress.parent_processing', '2026-07-17T10:06:00Z')],
-    recoverable_tasks: [],
+    active_tasks: [task('task-current', 'active', '2026-07-17T10:06:00Z')],
     terminal_tasks: terminalTasks,
   });
 
@@ -153,19 +155,18 @@ test('B2 Task ledger uses native exclusive details and exposes only safe row det
   assert.match(html, /<details class="task-ledger-row-detail" name="actor-task-row-detail"[^>]*>/);
   assert.match(html, /<summary class="task-ledger-row is-current"[^>]*aria-expanded="false">/);
   assert.match(html, /<span>Task ID<\/span><code>task-current<\/code>/);
+  assert.match(html, /<span>Demand<\/span><code>demand-task-current<\/code>/);
+  assert.match(html, /<span>Goal thread<\/span><code>thread-main<\/code>/);
   assert.match(html, /<span>Updated<\/span><time datetime="2026-07-17T10:06:00Z">2026-07-17T10:06:00Z<\/time>/);
   assert.doesNotMatch(html, /<span>Active<\/span>/);
-  assert.doesNotMatch(html, /<span>Recoverable<\/span>/);
-  assert.doesNotMatch(html, /Processor|runtime_failed|execution|events|task_relation|Relation|Description|active_processor|failure_result|Cancel|Retry/);
+  assert.doesNotMatch(html, /Processor|runtime_failed|execution|events|task_relation|Relation|active_processor|failure_result|Cancel|Retry/);
 });
 
 test('B2 Task ledger preserves recent and exclusive row disclosure state across console refresh', async () => {
   const html = await renderTaskPanel({
     active_count: 0,
-    recoverable_count: 0,
     terminal_count: 5,
     active_tasks: [],
-    recoverable_tasks: [],
     terminal_tasks: terminalTasks,
   }, {
     recentExpanded: true,

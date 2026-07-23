@@ -31,7 +31,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         "--target-id",
     )
     SHARED_TOOL_SKILLS = {
-        "task_sys": ROOT / "buddyswitch/skills/shared/task-management/SKILL.md",
         "track": ROOT / "buddyswitch/skills/shared/track-tool/SKILL.md",
         "artifact": ROOT / "buddyswitch/skills/shared/artifact-tool/SKILL.md",
     }
@@ -99,7 +98,6 @@ class RuntimeSkillsTests(unittest.TestCase):
     SHARED_RUNTIME_TOOL_SKILLS = {
         "track-tool",
         "artifact-tool",
-        "task-management",
         "demand-triage",
         "demand-orchestration",
     }
@@ -178,7 +176,6 @@ class RuntimeSkillsTests(unittest.TestCase):
         required = {
             "track-tool",
             "artifact-tool",
-            "task-management",
             "demand-triage",
             "demand-orchestration",
         }

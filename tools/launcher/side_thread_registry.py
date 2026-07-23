@@ -111,7 +111,6 @@ def register_side_thread(
     actor_id: str,
     parent_thread_id: str,
     side_thread_id: str,
-    task_id: str | None = None,
     purpose: str | None = None,
     turn_id: str | None = None,
     turn_kind: str | None = None,
@@ -131,8 +130,6 @@ def register_side_thread(
             "created_at": timestamp,
             "updated_at": timestamp,
         }
-        if task_id is not None:
-            row["task_id"] = _require_id(task_id, "Task id")
         if purpose is not None:
             row["purpose"] = _require_id(purpose, "Side thread purpose")
         if turn_id is not None:
@@ -345,34 +342,6 @@ def consume_side_thread_capability(
         payload["updated_at"] = timestamp
         _write_payload(Path(instance_json), payload)
         return consumed
-
-
-def find_task_side_thread(
-    instance_json: Path,
-    *,
-    actor_id: str,
-    parent_thread_id: str,
-    task_id: str,
-    purpose: str = "task_sys.side_frame",
-) -> dict[str, Any] | None:
-    actor = _require_id(actor_id, "Actor id")
-    parent = _require_id(parent_thread_id, "Parent thread id")
-    task = _require_id(task_id, "Task id")
-    normalized_purpose = _require_id(purpose, "Side thread purpose")
-    payload = _load_payload(Path(instance_json), actor)
-    for row in _side_rows(payload):
-        thread_id = row.get("thread_id")
-        if (
-            isinstance(thread_id, str)
-            and thread_id
-            and thread_id != parent
-            and row.get("parent_thread_id") == parent
-            and row.get("status") == "open"
-            and row.get("task_id") == task
-            and row.get("purpose") == normalized_purpose
-        ):
-            return row
-    return None
 
 
 def unregister_side_thread(

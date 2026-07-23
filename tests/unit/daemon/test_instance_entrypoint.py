@@ -28,7 +28,8 @@ EXPECTED_HANDLER_TYPES = [
     "BrowserReleaseHandler",
     "BrowserFailedOpenPageCleanupHandler",
     "DemandTriageHandler",
-    "TaskSysProgressCheckHandler",
+    "TaskGoalHandler",
+    "DemandOrchestrationHandler",
 ]
 EXPECTED_HANDLER_NAMES = [
     "im_message_created",
@@ -37,7 +38,8 @@ EXPECTED_HANDLER_NAMES = [
     "browser_cockpit_release",
     "browser_failed_open_page_cleanup",
     "demand_triage",
-    "task_sys_progress_check",
+    "task_goal",
+    "demand_orchestration",
 ]
 
 
@@ -65,9 +67,10 @@ def imported_modules(path: Path) -> set[str]:
 class InstanceDaemonEntrypointTests(unittest.TestCase):
     def test_task_application_commands_are_registered_only_at_composition_root(self) -> None:
         imports = imported_modules(INSTANCE_DAEMON_PATH)
-        self.assertIn("task_sys_daemon_adapter", imports)
+        self.assertIn("task_goal_handler", imports)
+        self.assertNotIn("task_sys_daemon_adapter", imports)
         factories = self.instance_daemon.default_application_command_factories()
-        self.assertEqual(factories, [self.instance_daemon.task_sys_daemon_adapter.command_handlers])
+        self.assertEqual(factories, [self.instance_daemon.task_goal_handler.command_handlers])
 
     def setUp(self) -> None:
         self.instance_daemon = load_instance_daemon()
@@ -80,6 +83,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertIn("message_inbound", imports)
         self.assertIn("track_comment_inbound", imports)
         self.assertIn("demand_triage_handler", imports)
+        self.assertIn("demand_orchestration_handler", imports)
         self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("browser_page_expired_handler", imports)
@@ -88,7 +92,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
         handlers = self.instance_daemon.default_daemon_handlers()
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
-        self.assertIsInstance(handlers[-1], self.instance_daemon.task_sys_daemon_adapter.TaskSysProgressCheckHandler)
+        self.assertIsInstance(handlers[-2], self.instance_daemon.task_goal_handler.TaskGoalHandler)
+        self.assertIsInstance(
+            handlers[-1],
+            self.instance_daemon.demand_orchestration_handler.DemandOrchestrationHandler,
+        )
 
     def test_run_passes_unified_daemon_handler_list_to_daemon_core(self) -> None:
         recorded: dict[str, object] = {}

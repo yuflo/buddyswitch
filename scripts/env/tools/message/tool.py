@@ -177,7 +177,7 @@ def _build_definition() -> ToolDefinition:
                 do_not_use_when=(
                     'You are starting a new target-identity conversation and do not have an explicit target identity id.',
                     'You need Track discussion; use track.add_comment instead of Central IM.',
-                    'Use task_sys.need_parent when a task_sys.side_frame needs parent handling.',
+                    'You need to change Demand or Task state; use the owning Demand or Task operation.',
                 ),
                 risk_hints={
                     'read_only': False,

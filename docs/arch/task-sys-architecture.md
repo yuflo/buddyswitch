@@ -2,165 +2,149 @@
 
 ## Purpose
 
-Task Sys organizes execution of one actor-owned unit of work. The current
-product invariant is one actor-scoped active Task. Every Task uses the same
-side-first lifecycle:
+Task Sys owns one Actor's canonical execution commitment. A Task binds one
+current Demand snapshot to one self-contained objective and one native Codex
+Goal on the Actor's persistent main thread.
+
+The current execution path is:
 
 ```text
-in_progress.side_processing
-  |-> completed | canceled
-  `-> in_progress.awaiting_parent
-        `-> in_progress.parent_processing
-              `-> completed | canceled
+independent parent Demand orchestration
+  -> task_sys.create
+  -> durable active Task
+  -> task_goal.reconcile_task
+  -> TaskGoalHandler
+  -> Codex App Server thread/goal/set
+  -> native Goal continuation on the main thread
+  -> Goal notification or goal/get recovery
+  -> durable completed or canceled Task
+  -> Demand orchestration attention
 ```
 
-Task Sys does not own needs, matching, queueing, or coordination among needs.
-Demand Sys owns those facts. The Actor + installed task-management skill is the
-only semantic composition boundary between the two products.
+Task Sys does not run work in an auxiliary thread, interpret inbound facts, or
+decide whether a Demand is satisfied. Native Goal is the only Task execution
+loop.
 
-Every Task is created from one current opaque Demand reference. The Task actor
-tool boundary resolves it to an internal snapshot before calling the Task
-domain. The snapshot is evidence of the actor's selection, not permission for
-Task Sys to read or interpret Demand state.
+## One owner and one record
 
-## Creation owner
+`scripts/env/domain/task_sys.py` is the canonical Task owner. Its record has
+exactly:
 
-`scripts/env/domain/task_sys.py` owns Task creation, source idempotency, the
-single-active gate, lifecycle transitions, and Task frame construction.
-`task_sys.create` is the sole Task creation path. Its actor input is one opaque
-string returned by Demand Sys plus a self-contained execution brief. The tool
-boundary validates current actor ownership through Demand Sys, then calls Task
-Sys with the resolved internal snapshot. Task Sys validates that snapshot's
-shape but does not read or interpret Demand state.
+```text
+schema_version
+id
+actor_target { actor_id, role_id }
+demand_ref { demand_id, basis_revision, demand_ref }
+objective
+selection { reason, selected_at }
+goal_binding | null
+status
+result | null
+created_at
+updated_at
+```
 
-Inside its actor-scoped lock Task Sys:
+Statuses are exactly `active`, `completed`, and `canceled`. At most one Task
+may be active for an Actor. A Task remains bound to the Demand snapshot it was
+created from; later Demand revisions are judged by Demand orchestration after
+the Task is terminal.
 
-1. returns an exact source/context replay without another runtime instruction;
-2. rejects a reused source identity with different context;
-3. rejects a different source while any Task is active;
-4. otherwise persists one `in_progress.side_processing` Task and returns one
-   `start_side` instruction.
-
-Lock files are local coordination facts. Task JSON is the canonical product
-truth. No inbound product handler can create a Task; the actor first
-canonicalizes Demand state and then explicitly selects at most one Demand through
-`task_sys.create`.
+There is no second Task schema, compatibility reader, alternate write path, or
+execution state hidden in a side-thread lease.
 
 ## Actor tool boundary
 
-The actor tool adapter derives actor identity and role from `ToolContext`.
-Callers cannot supply an actor target. Every Task read or mutation verifies the
-same exact owner before access. The public action set is `create`, `list`,
-`get`, `close`, `cancel`, and `need_parent`.
-
-The adapter reaches Task semantics through `ToolContext.rules.task_sys`,
-resolves the opaque reference through `ToolContext.rules.demand_sys`, and
-performs runtime work only through `TaskSysRuntimeAccess`. This is the
-application composition boundary. The Task domain and runtime do not import a
-Demand domain or repository, query Demand state, or mutate another product.
-
-## Runtime frames
-
-Task Sys owns three strict frame kinds:
-
-- `task_sys.side_frame` starts every new Task;
-- `task_sys.parent_frame` hands the same Task from side to parent;
-- `task_sys.outcome_frame` returns a terminal Task receipt and its opaque
-  Demand reference to the parent Actor.
-
-Parent handoff and outcome attention both reuse the existing `submit_parent`
-runtime instruction. An outcome frame contains the Task id, canonical terminal
-status, opaque DemandRef, exact `task_sys.task` evidence reference, and matching
-completion or cancellation result only. It does not contain or copy Demand
-status, lifecycle, detail, provenance, canonicalization judgment, or selection
-policy.
-
-Closing or canceling a Task persists terminal truth before outcome attention is
-submitted. Submission failure is explicit feedback and never rolls back the
-terminal Task. Every terminal Task emits the same outcome frame. The Actor
-uses `$demand-orchestration`, rereads Demand-owned state, decides any later
-Demand mutation, and then applies the same at-most-one Task selection rule to
-another live Demand. Task cancellation never implies Demand cancellation.
-
-## Lifecycle attention
-
-Every side processor runs in a fresh isolated ephemeral App Server thread.
-`side_thread_lifecycle` creates it with `thread/start`, explicit side developer
-instructions and runtime capability. It registers a `starting` lease before
-submitting the self-contained side frame, atomically advances that lease to the
-exact `work` turn, then reads the resulting generic thread status. Side
-creation never inherits parent conversation history and has no fork or
-boundary-injection path. A post-submit setup failure is retryable only after the
-exact returned turn is interrupted and its lease is removed. If the starting
-lease disappeared before binding, Task Sys rereads canonical Task status: only
-a Task that already left `side_processing` is accepted as a legitimate
-terminal/handoff consume; otherwise the exact unleased turn is interrupted and
-the Task records a non-retryable runtime failure.
-
-Task Sys owns one processor-aware Task Progress Check. The Task Sys daemon
-adapter resolves the exact active Task from each processor's real yield signal:
-
-- a completed main-thread turn may check only the actor's
-  `in_progress.parent_processing` Task;
-- an idle registered `task_sys.side_frame` thread may check only the exact
-  actor-owned `in_progress.side_processing` Task named by its current lease and
-  `work` turn id.
-
-The runtime returns the check to the same processor: parent checks use the main
-thread, while side checks use the exact registered side thread. A side work
-turn is claimed by one atomic `work -> progress_check_pending -> progress_check`
-lease transition; the creator performs the same claim immediately when its
-post-start read finds that the first work turn already became idle. This closes
-the notification-before-registration race without polling or retry logic. A
-check turn is not eligible to create another check, including after daemon
-restart. Side keeps `progress_check_pending` whenever external submission may
-have happened but the returned turn identity could not be persisted; it rolls
-back to `work` only when the lifecycle owner proves submission was not
-attempted. Parent stores a `submitting` checkpoint before external submission,
-then adds the submitted turn id after receipt. Generic daemon state persists
-this opaque handler checkpoint; only the Task adapter interprets it. A completion or
-idle signal itself never changes Task status; only actor-selected Task actions
-do so.
-
-Side frames may use only frame data and explicitly allowed product tools. Local
-filesystem or shell inspection, including read-only workspace files, belongs to
-parent processing and must use `task_sys.need_parent`.
-
-## Read boundaries
-
-Internal actor tools use `actor_task_projection`, which exposes canonical Task
-status and execution facts for the active actor. Public CLI and Web surfaces
-use `task_read`, an exact allowlist. Its `demand_ref` contains the Demand id and
-opaque current reference copied from every Task's source snapshot; numeric
-Demand concurrency fields stay internal. Malformed or non-Demand
-records are rejected; they are not projected as a second supported shape. The
-read model never projects execution briefs, events, runtime instructions, paths,
-or raw context.
-
-## Dependency laws
-
-Allowed:
+The Actor-facing tool exposes exactly:
 
 ```text
-Task tool -> ToolContext.rules.demand_sys + ToolContext.rules.task_sys + TaskSysRuntimeAccess
-Task read projection -> Task domain
-Task runtime adapter -> Task domain + generic actor/runtime primitives
-Actor workflow -> independent Demand Sys and Task Sys actor actions
+list
+get
+create
+cancel
 ```
 
-Forbidden:
+`create` accepts only an opaque `demand_ref`, a self-contained `objective`, and
+a `selection_reason`. The tool boundary resolves the current Demand through
+the Demand rule capability, derives the Actor target, writes the Task through
+the Task owner, and requests idempotent Goal reconciliation.
+
+The Actor cannot bind a Goal, mark a Task successful, write terminal host
+snapshots, supply revisions, or synchronize a Demand. Successful completion
+comes only from a matching native Goal becoming `complete`. `cancel` records
+an explicit Actor decision to stop active work and requests matching Goal
+cleanup.
+
+## Task–Goal convergence
+
+`tools/launcher/task_goal_handler.py` is the sole semantic adapter between Task
+and native Goal state:
+
+- an unbound active Task with no Goal causes `thread/goal/set`, then binds the
+  returned Goal;
+- an unbound active Task with the exact matching Goal binds it without
+  creating another Goal;
+- a bound Task with a matching non-complete Goal remains active;
+- a bound Task with a matching complete Goal records one durable completed
+  result;
+- a bound Task whose Goal disappeared becomes canceled with an explicit host
+  reason;
+- a canceled Task clears only its matching Goal;
+- a completed Goal already consumed by a prior Task is cleared before the next
+  Task receives a fresh Goal;
+- a different unfinished Goal is an invariant conflict and is never
+  overwritten.
+
+Non-complete native statuses such as paused, blocked, usage-limited, or
+budget-limited keep the Task active. They are Goal execution state, not a
+second Task lifecycle.
+
+App Server owns Goal persistence, continuation, turn scheduling, and model
+calls. The instance daemon hosts the adapter and accelerates convergence; it
+does not execute the objective.
+
+## Recovery
+
+Task and `thread/goal/get` are canonical recovery truth. Goal notifications
+accelerate convergence, but correctness does not depend on notification
+history. The registered handler rereads both truths during daemon startup and
+bounded generic reconciliation.
+
+This makes these interruptions recoverable without a fallback path:
+
+- Task persisted before the reconcile command reaches the daemon;
+- Goal set before Task binding is persisted;
+- Goal becomes complete while the daemon is unavailable;
+- Goal cleanup notification is missed.
+
+Repeated reconciliation is idempotent.
+
+## Demand boundary
+
+Task completion and Demand completion are deliberately independent. A terminal
+Task is evidence. A later independent parent Demand orchestration turn rereads
+the latest Demand and decides whether to complete, cancel, revise, or keep it
+live. Only after that judgment may an empty Task slot be filled from the whole
+live Demand pool.
+
+Task domain code does not import or mutate Demand state. Demand domain code
+does not import or mutate Task state. Demand orchestration is their explicit
+product composition point.
+
+## Projections
+
+External-safe Task projections contain only:
 
 ```text
-Task implementation -> Demand import, read, validation, call, subscription, or mutation
-Demand implementation -> Task import, read, call, or mutation
-generic daemon -> Task or Demand business semantics
-generic daemon checkpoint storage -> interpretation of Task turn identities
-side lifecycle -> inherited parent conversation or parallel fork path
-second create name, gate, source write path, lifecycle, or shadow Task state
-Task outcome mutating Demand without an Actor decision
-inbound product handler -> Task creation
+task_id
+demand_ref
+objective
+selection
+goal_binding
+status
+result
+actor
+updated_at
 ```
 
-These laws are enforced by
-`tests/unit/architecture/test_task_sys_boundaries.py` and the adjacent Demand
-and daemon boundary tests.
+Actor Console exposes active and terminal collections only. Web and public CLI
+are read-only Task consumers.

@@ -1417,32 +1417,35 @@
 
   function renderTaskLedgerRowHtml(task, options) {
     const current = options && options.current === true;
-    const attention = options && options.attention === true;
     const rowClasses = ['task-ledger-row'];
     if (current) {
       rowClasses.push('is-current');
     }
-    if (attention) {
-      rowClasses.push('needs-attention');
-    }
     const status = task && task.status ? String(task.status) : 'unknown';
-    const context = current
-      ? (attention ? 'Needs attention · ' : 'Now · ') + status
-      : status;
+    const context = current ? 'Now · ' + status : status;
     const taskId = task && task.task_id ? String(task.task_id) : '—';
+    const objective = task && task.objective ? String(task.objective) : 'Task';
+    const demandId = task && task.demand_ref && task.demand_ref.demand_id
+      ? String(task.demand_ref.demand_id)
+      : '—';
+    const goalThreadId = task && task.goal_binding && task.goal_binding.thread_id
+      ? String(task.goal_binding.thread_id)
+      : 'Not bound yet';
     const updatedAt = task && task.updated_at ? String(task.updated_at) : '—';
     const open = Boolean(options && options.visible && options.openTaskId === taskId);
     return [
       '<details class="task-ledger-row-detail" name="actor-task-row-detail" data-task-ledger-task-id="' + escapeHtml(taskId) + '"' + (open ? ' open' : '') + '>',
       '<summary class="' + rowClasses.join(' ') + '" data-task-ledger-task-id="' + escapeHtml(taskId) + '" aria-expanded="' + String(open) + '">',
       '<span class="task-ledger-row-copy">',
-      '<strong>' + escapeHtml(task && task.source_type ? task.source_type : 'Task') + '</strong>',
+      '<strong>' + escapeHtml(objective) + '</strong>',
       '<span>' + escapeHtml(context) + '</span>',
       '</span>',
       '<time class="task-ledger-short-time" datetime="' + escapeHtml(updatedAt) + '">' + escapeHtml(formatTaskLedgerTime(updatedAt)) + '</time>',
       '</summary>',
       '<div class="task-ledger-detail">',
       '<span>Task ID</span><code>' + escapeHtml(taskId) + '</code>',
+      '<span>Demand</span><code>' + escapeHtml(demandId) + '</code>',
+      '<span>Goal thread</span><code>' + escapeHtml(goalThreadId) + '</code>',
       '<span>Updated</span><time datetime="' + escapeHtml(updatedAt) + '">' + escapeHtml(updatedAt) + '</time>',
       '</div>',
       '</details>',
@@ -1505,15 +1508,13 @@
     }
     if (
       !Array.isArray(taskSys.active_tasks)
-      || !Array.isArray(taskSys.recoverable_tasks)
       || !Array.isArray(taskSys.terminal_tasks)
       || typeof taskSys.active_count !== 'number'
       || typeof taskSys.terminal_count !== 'number'
     ) {
       return renderEmpty('Task Sys response is missing required fields.');
     }
-    const current = taskSys.recoverable_tasks[0] || taskSys.active_tasks[0] || null;
-    const attention = taskSys.recoverable_tasks.length > 0;
+    const current = taskSys.active_tasks[0] || null;
     const terminalTasks = taskSys.terminal_tasks;
     const countHtml = '<span class="task-ledger-count">' + escapeHtml(String(taskSys.active_count)) + ' active · ' + escapeHtml(String(taskSys.terminal_count)) + ' recent</span>';
     if (!current && !terminalTasks.length) {
@@ -1522,7 +1523,7 @@
     const currentHtml = current
       ? renderTaskLedgerRowHtml(current, {
         current: true,
-        attention,
+        attention: false,
         visible: true,
         openTaskId: state.actorTaskOpenId,
       })

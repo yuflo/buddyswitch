@@ -268,17 +268,15 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
                 "basis_revision": 1,
                 "demand_ref": "dref-task-track-hint",
             },
-            execution_brief={
-                "description": "Task hint fixture.",
-                "detail": f"Track context: track-task-hint. Instance: {instance_root}.",
-            },
+            objective=f"Exercise the Task projection. Track context: track-task-hint. Instance: {instance_root}.",
+            selection_reason="The Task slot is empty and this fixture Demand is selected.",
         )
         task = result["task"]
 
         after = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
         self.assertEqual(after, before)
         self.assertEqual(
-            task["source_ref"],
+            task["demand_ref"],
             {
                 "demand_id": "demand-task-track-hint",
                 "basis_revision": 1,
@@ -287,7 +285,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
         )
         self.assertIn(
             "Track context: track-task-hint",
-            task["inbound_context"]["execution_brief"]["detail"],
+            task["objective"],
         )
         self.assertNotIn("artifact_ids", task)
         self.assertNotIn("artifact_slots", task)

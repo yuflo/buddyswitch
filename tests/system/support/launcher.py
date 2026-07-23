@@ -378,7 +378,7 @@ class SystemLauncherHarness(LauncherTestSupport):
         runtime_skills = workspace_dir / ".agents" / "skills"
         for skill_id in self._PM_PRODUCT_SKILLS:
             self.assertTrue((runtime_skills / skill_id / "SKILL.md").exists(), msg=skill_id)
-        self.assertTrue((runtime_skills / "task-management" / "SKILL.md").exists())
+        self.assertTrue((runtime_skills / "demand-orchestration" / "SKILL.md").exists())
         self.assertTrue((runtime_skills / "track-tool" / "SKILL.md").exists())
         self.assertTrue((runtime_skills / "artifact-tool" / "SKILL.md").exists())
         self.assertFalse((runtime_skills / "write-prd").exists())
