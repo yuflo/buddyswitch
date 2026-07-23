@@ -95,7 +95,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
                 "task_id": "task-controlled-inbound-abcdef123456",
                 "source": {
                     "type": "demand",
-                    "ref": {"demand_id": "demand-runtime-side", "basis_revision": 1},
+                    "ref": {"demand_id": "demand-runtime-side", "demand_ref": "dref-runtime-side"},
                 },
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
                 "context": {
@@ -110,7 +110,11 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
     def _ingested_instruction(self) -> tuple[str, dict[str, Any]]:
         result = task_sys.create(
             actor_target={"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
-            demand_ref={"demand_id": "demand-runtime-ingested", "basis_revision": 1},
+            demand_ref={
+                "demand_id": "demand-runtime-ingested",
+                "basis_revision": 1,
+                "demand_ref": "dref-runtime-ingested",
+            },
             execution_brief={
                 "description": "Draft brief.",
                 "detail": "Draft the exact runtime fixture brief.",
@@ -128,7 +132,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
                 "task_id": "task-controlled-inbound-abcdef123456",
                 "source": {
                     "type": "demand",
-                    "ref": {"demand_id": "demand-runtime-parent", "basis_revision": 1},
+                    "ref": {"demand_id": "demand-runtime-parent", "demand_ref": "dref-runtime-parent"},
                 },
                 "actor_target": {"actor_id": "act-dev-task-sys-runtime", "role_id": "dev"},
                 "inbound_context": {
@@ -204,7 +208,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
                 "status": status,
                 "source": {
                     "type": "demand",
-                    "ref": {"demand_id": "demand-runtime-terminal", "basis_revision": 4},
+                    "ref": {"demand_id": "demand-runtime-terminal", "demand_ref": "dref-runtime-terminal"},
                 },
                 "evidence_ref": {
                     "type": "task_sys.task",
@@ -267,7 +271,7 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
                 "type": "demand",
                 "ref": {
                     "demand_id": "demand-runtime-side",
-                    "basis_revision": 1,
+                    "demand_ref": "dref-runtime-side",
                     "extra": True,
                 },
             },
@@ -754,17 +758,19 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         self.assertIn("task_sys.outcome_frame", text)
         self.assertIn("task-demand-terminal123", text)
         self.assertIn("demand-runtime-terminal", text)
-        self.assertIn("basis_revision", text)
+        self.assertNotIn("basis_revision", text)
+        self.assertIn("demand_ref", text)
+        self.assertIn("$demand-orchestration", text)
         self.assertIn("Completed the selected Demand snapshot.", text)
         self.assertIn('"task_id": "task-demand-terminal123"', text)
         self.assertIn("Pass this evidence reference unchanged", text)
-        self.assertIn("After any Demand mutation, acknowledge the exact returned revision", text)
+        self.assertNotIn("acknowledge the exact returned revision", text)
         self.assertIn("already terminal", text)
         self.assertIn("reconcile", text.lower())
         self.assertIn("source-owned obligation", text)
         self.assertNotIn("task_sys.close", text)
         self.assertNotIn("task_sys.cancel", text)
-        self.assertIn("task_sys.create", text)
+        self.assertIn("task_sys__create", text)
         self.assertIn("one other live Demand", text)
         self.assertNotIn("Demand status", text)
         self.assertNotIn("Demand lifecycle", text)
@@ -773,10 +779,12 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         text = self.module.render_submit_parent_frame(self._outcome_instruction(status="canceled")["frame"])
 
         self.assertIn("task_sys.outcome_frame", text)
+        self.assertIn("$demand-orchestration", text)
+        self.assertNotIn("basis_revision", text)
         self.assertIn("canceled", text.lower())
         self.assertIn("does not imply", text.lower())
         self.assertIn("complete, cancel, revise, or keep", text.lower())
-        self.assertIn("After any Demand mutation, acknowledge the exact returned revision", text)
+        self.assertNotIn("acknowledge the exact returned revision", text)
         self.assertNotIn("task_sys.close", text)
         self.assertNotIn("task_sys.cancel(task_id", text)
 
@@ -975,7 +983,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         task = {
             "id": "task-controlled-inbound-progress123",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-runtime-progress-parent", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-runtime-progress-parent",
+                "demand_ref": "dref-runtime-progress-parent",
+            },
             "status": "in_progress.parent_processing",
             "events": [
                 {"type": "created", "at": "2026-07-16T00:00:00Z"},
@@ -1008,7 +1019,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         task = {
             "id": "task-controlled-inbound-side-progress123",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-runtime-progress-side", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-runtime-progress-side",
+                "demand_ref": "dref-runtime-progress-side",
+            },
             "status": "in_progress.side_processing",
             "events": [
                 {"type": "created", "at": "2026-07-16T00:00:00Z"},
@@ -1056,7 +1070,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         task = {
             "id": "task-controlled-inbound-progress123",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-runtime-submit-parent", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-runtime-submit-parent",
+                "demand_ref": "dref-runtime-submit-parent",
+            },
             "status": "in_progress.parent_processing",
             "events": [{"type": "parent_handoff_started", "at": "2026-07-16T00:01:00Z"}],
         }
@@ -1108,7 +1125,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         task = {
             "id": "task-controlled-inbound-side-progress123",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-runtime-submit-side", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-runtime-submit-side",
+                "demand_ref": "dref-runtime-submit-side",
+            },
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }
@@ -1169,7 +1189,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         task = {
             "id": "task-controlled-inbound-side-cleaned123",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-runtime-side-cleaned", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-runtime-side-cleaned",
+                "demand_ref": "dref-runtime-side-cleaned",
+            },
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }
@@ -1217,7 +1240,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         task = {
             "id": "task-controlled-inbound-side-uncertain123",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-runtime-side-uncertain", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-runtime-side-uncertain",
+                "demand_ref": "dref-runtime-side-uncertain",
+            },
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }
@@ -1271,7 +1297,10 @@ class TaskSysRuntimeExecutorTests(RuntimeWorkspaceTestCase):
         task = {
             "id": "task-controlled-inbound-side-safe-retry123",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-runtime-side-safe-retry", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-runtime-side-safe-retry",
+                "demand_ref": "dref-runtime-side-safe-retry",
+            },
             "status": "in_progress.side_processing",
             "events": [{"type": "side_frame_started", "at": "2026-07-16T00:00:01Z"}],
         }

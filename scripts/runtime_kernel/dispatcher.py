@@ -27,7 +27,29 @@ def _load_browser_runtime_manager(repo_root: Path) -> Any:
     return module
 
 
+def _load_demand_triage_runtime(repo_root: Path) -> Any:
+    module_path = (
+        Path(repo_root)
+        / "tools"
+        / "launcher"
+        / "demand_triage_runtime.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "buddyswitch_demand_triage_runtime",
+        module_path,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            f"failed to load Demand triage runtime: {module_path}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("buddyswitch_demand_triage_runtime", module)
+    spec.loader.exec_module(module)
+    return module
+
+
 browser_runtime_manager: Any | None = None
+demand_triage_runtime: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +157,16 @@ def _browser_runtime_manager_for_session(session: RuntimeBrokerSession) -> Any:
     return _load_browser_runtime_manager(repo_root)
 
 
+def _demand_triage_runtime_for_session(session: RuntimeBrokerSession) -> Any:
+    if demand_triage_runtime is not None:
+        return demand_triage_runtime
+    repo_root = _runtime_source_repo_root(
+        manifest_path=session.manifest_path,
+        repo_root_path=session.repo_root_path,
+    )
+    return _load_demand_triage_runtime(repo_root)
+
+
 @contextlib.contextmanager
 def _runtime_server_env(
     *,
@@ -194,13 +226,18 @@ def _env_tool_dispatch(
     active_role = str(instance_record["role"]).strip()
     payload = dict(params)
     return dispatch_env_tool_request(
-        payload=payload,
+        payload={
+            key: value
+            for key, value in payload.items()
+            if key != "invocation"
+        },
         active_role=active_role,
         actor_id=actor_id,
         instance_json=instance_json_path,
         instance_payload=dict(instance_record),
         manifest=manifest,
         manifest_path=manifest_path,
+        invocation=payload.get("invocation"),
     )
 
 
@@ -364,6 +401,27 @@ def _browser_dispatch(
     )
 
 
+def _demand_ingress_resolve_dispatch(
+    *,
+    session: RuntimeBrokerSession,
+    instance_record: dict[str, Any],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    runtime = _demand_triage_runtime_for_session(session)
+    try:
+        return runtime.resolve_request(
+            instance_json=session.instance_json_path,
+            instance_record=instance_record,
+            params=params,
+        )
+    except runtime.DemandTriageRuntimeError as exc:
+        return _error(
+            exc.code,
+            exc.message,
+            retriable=bool(exc.retriable),
+        )
+
+
 def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSession) -> dict[str, Any]:
     try:
         method_raw = request.get("method")
@@ -431,6 +489,12 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
                 return _ping_dispatch(session=session, instance_record=instance_record)
             if method == "status":
                 return _status_dispatch(session=session, instance_record=instance_record)
+            if method == "demand.ingress.resolve":
+                return _demand_ingress_resolve_dispatch(
+                    session=session,
+                    instance_record=instance_record,
+                    params=params,
+                )
             if method.startswith("browser."):
                 return _browser_dispatch(
                     method=method,

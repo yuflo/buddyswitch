@@ -299,7 +299,11 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         task_record = {
             "id": "task-demo",
             "source_type": "demand",
-            "source_ref": {"demand_id": "demand-external-control", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": "demand-external-control",
+                "basis_revision": 1,
+                "demand_ref": "dref-external-control",
+            },
             "status": "in_progress.side_processing",
             "actor_target": {"actor_id": "act-pm-demo", "role_id": "pm", "secret": True},
             "updated_at": "2026-07-14T00:00:00Z",
@@ -370,7 +374,10 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             self.assertEqual(tuple(row["actor"]), ("actor_id", "role_id"))
             self.assertEqual(
                 row["demand_ref"],
-                {"demand_id": "demand-external-control", "basis_revision": 1},
+                {
+                    "demand_id": "demand-external-control",
+                    "demand_ref": "dref-external-control",
+                },
             )
 
         track_summary_keys = (

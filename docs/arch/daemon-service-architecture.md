@@ -2,186 +2,91 @@
 
 ## Purpose
 
-The actor instance daemon is product-neutral host infrastructure. It owns the
-process and delivery mechanics needed to host product modules, while product
-modules own every product command, payload, state transition, read model, and
-error contract.
-
-The stable rule is:
+The actor instance daemon is product-neutral host infrastructure:
 
 ```text
 daemon hosts product modules; daemon does not know product modules
 ```
 
-## Generic daemon responsibilities
+It owns process lifecycle, actor registration, mailbox transport, generic
+triggers and schedules, handler dispatch, bounded polling, and host telemetry.
+Product modules own every product command, payload, state transition, recovery
+decision, prompt, and read model.
 
-The generic daemon owns:
+## Generic capabilities
 
-- instance process lifecycle and readiness;
-- actor, role, main-thread, workspace, socket, and permission host facts;
-- generic mailbox request and response transport;
-- generic local triggers, cross-actor signals, schedules, and handler dispatch;
-- current daemon state and atomic persistence;
-- host runtime facts required by registered handlers;
-- host-control status for readiness, registered handlers, schedules, and errors.
+The daemon core provides:
 
-Generic daemon contracts, state, runtime, core, mailbox, and client modules do
-not import or branch on Demand, Task Sys, IM, Track, Browser, or Web product
-semantics.
+- `DaemonContext` with stable actor, role, main-thread, path, socket, workspace,
+  and permission facts;
+- `HandlerResult` with `ignored`, `handled`, or `failed`;
+- `DaemonHandler.handles/handle` for trigger dispatch;
+- optional `DaemonReconciler.reconcile` for durable-state recovery;
+- generic due-now schedules and owner-scoped schedule cancellation;
+- a product-neutral mailbox application-command registry;
+- `DaemonRuntime.parent_activity()` and `input_actor(text)`.
 
-## Product module responsibilities
+After actor registration and on each bounded App Server timeout, the core calls
+every available reconciliation hook in explicit handler order. One hook error
+is recorded against that handler and does not stop later hooks. The core does
+not interpret the hook result beyond generic status telemetry.
 
-Each product module owns its own business meaning and exposes a narrow adapter
-to generic daemon capabilities.
+## Product ownership
 
-- Task Sys owns task storage, lifecycle rules, actor task projection, runtime
-  command names, payload validation, timeout policy, Task errors, and Task
-  completion attention frames.
-- Demand Sys owns Demand lifecycle, attention policy, actor-check prompt, and
-  persistence. The actor owns canonicalization judgment.
-- IM owns actor-directed message delivery, payload validation, identity and
-  reachability decisions, and its trigger semantics.
-- Track owns comment delivery, payload validation, and exact source-fact
-  materialization before Demand capture.
-- Browser owns page and cockpit lifecycle meaning and uses only public generic
-  schedule operations.
+- Demand Sys owns source-keyed ingress receipts, side purpose and capability
+  semantics, resolver authority, Message/Demand coordination, pool revision
+  cursors, retry policy, and orchestration prompts.
+- Task Sys owns Task records, execution semantics, and its application command
+  adapter.
+- IM, Track, and Browser own their source validation and product lifecycle.
 
-Product adapters may depend on generic daemon contracts and clients. Generic
-daemon modules may not depend on product adapters.
+Demand recovery is implemented only in `DemandTriageHandler.reconcile`.
+Generic daemon modules do not import Demand or Task modules, inspect product
+storage, recognize product trigger strings, or branch on product state.
 
-Cross-product judgment remains outside daemon infrastructure. In the current
-Demand/Task flow, the Actor + installed task-management skill calls the two
-independent actor action catalogs. Daemon runtime only delivers the Demand
-Check text and Task frames supplied by their owning product adapters.
-
-IM and Track handlers may call the Demand daemon adapter after validating their
-own source fact. That adapter requests generic actor input; neither the generic
-daemon nor either inbound handler selects work or calls Task Sys.
-
-`DaemonRuntime` exposes only product-neutral host mechanics to handlers:
-
-- `parent_activity()` reads the current main-thread activity fact;
-- `input_actor(text)` delegates to the existing Actor Session input primitive,
-  which starts an idle actor turn or steers the active turn.
-
-The runtime does not interpret the input text or own a prompt, check policy,
-product id, schema, retry, or receipt. Those remain with the product adapter
-that requests actor input.
-
-## Explicit runtime capabilities
-
-`ToolContext` exposes four separate runtime capabilities:
-
-- `ActorDirectoryAccess` for actor listing and reachability;
-- `SignalDeliveryAccess` for generic cross-actor signal envelopes;
-- `TaskSysRuntimeAccess` for Task-owned runtime commands;
-- `ImActorDeliveryAccess` for IM-owned actor delivery.
-
-There is no aggregate runtime service locator. IM, Track, and Task consumers
-receive only the capability their production path uses.
-
-## Stable handler contract
-
-`tools/launcher/daemon_contracts.py` is the sole owner of:
-
-- `DaemonContext`, which carries stable host identity, path, role, socket, and
-  permission facts;
-- `HandlerResult`, which reports `ignored`, `handled`, or `failed`;
-- `DaemonHandler`, which declares `handles(trigger)` and
-  `handle(context, state, runtime, trigger)`.
-
-Product handlers import these contracts directly. `daemon_core.py` executes
-the contracts but does not define or re-export them.
+The dedicated Demand resolver reaches the runtime broker through the explicit
+`demand.ingress.resolve` application operation. The runtime broker is a host
+composition boundary; `demand_triage_runtime.py` owns all Demand/Message
+semantics. Daemon liveness is not required for that operation.
 
 ## Composition root
 
-`tools/launcher/instance_daemon.py` is the only production module allowed to
-import both generic daemon orchestration and product adapters. It registers
-product handlers and application commands when starting the instance daemon.
+`tools/launcher/instance_daemon.py` is the only production composition root
+that imports generic daemon orchestration and concrete product adapters. It
+registers inbound handlers, reconciliation-capable handlers, and application
+commands explicitly.
 
-Registration is explicit. No generic daemon module discovers product modules,
-loads product plugins, or recognizes product command prefixes.
+There is no product plugin discovery, central product switch, semantic event
+bus, or daemon-owned workflow engine.
 
-## Mailbox application commands
+## State and status
 
-The mailbox owns host-control methods and a product-neutral map from an opaque
-command key to a callable. It validates registry structure, rejects duplicate
-or conflicting keys, dispatches the callable, and returns a generic envelope.
+Daemon state contains host-control facts only: readiness, registered handler
+telemetry and checkpoints, and generic schedules. Handler checkpoints are
+opaque product-owned objects; the core persists and projects them without
+understanding their fields.
 
-The registered product adapter owns the command key, payload, validation,
-timeout, operation result, and product error meaning. The mailbox does not
-inspect command prefixes or retain aliases for replaced keys.
-
-Task runtime commands follow one path:
-
-```text
-task_sys_runtime_client.py
-  -> daemon_client.request_mailbox
-      -> generic application command registry
-          -> task_sys_daemon_adapter.py
-              -> Task Sys runtime
-```
-
-The client and adapter share current command keys from
-`task_sys_runtime_protocol.py`. The generic client and mailbox do not define a
-Task command, timeout, payload, or error branch.
-
-## Task read boundary
-
-`env.domain.task_sys.actor_task_projection` remains the internal Task Sys
-classifier. It accepts the current actor identity profile, reads Task records
-once, and derives canonical task, active-task, and recoverable-task summaries
-for Task tools, Context tools, and runtime gating.
-
-External read surfaces use exact allowlist projections instead. Web and CLI Task
-panels read fresh DTOs from `env.domain.task_read.actor_external_task_projection`
-and do not expose execution, events, runtime instructions, context, handoff, raw
-payloads, or repo paths.
-
-## Status boundary
-
-Daemon status contains host-control facts only. It does not read product
-storage, classify product records, or return product DTOs.
-
-Web product views compose daemon host facts with public product read models.
-Task panels obtain Task state from external Task read projections, not daemon
-status or the internal Task Sys classifier. Actor runtime tools likewise use
-their owning product client or read model rather than daemon status.
-
-## State boundary
-
-Daemon state contains only the exact current host schema. Unknown fields are
-invalid. Active code does not name, remove, translate, or preserve retired
-state fields.
-
-Products do not calculate daemon state paths or instantiate daemon state
-internals. Generic public state operations provide the schedule queries and
-owner-scoped cancellation needed by product lifecycle code.
-
-Browser cleanup calls
-`daemon_state.cancel_pending_schedules_by_source_owner` with the exact actor,
-main thread, and source owner. `daemon_state.py` alone validates the state
-identity, filters pending schedules, and persists the result.
+Daemon status does not read Demand, Task, IM, Track, Browser, or Web storage.
+Consumer views compose host status with the public read model owned by each
+product.
 
 ## Dependency direction
 
 Allowed:
 
 ```text
-product adapter -> generic daemon contracts/client
-product adapter -> generic DaemonRuntime host capability
-product adapter -> owning product domain/runtime/repo
-instance_daemon -> generic daemon + product adapters
-Web API -> host-control API + public product read model
+product adapter -> generic daemon contracts/client/runtime
+product adapter -> owning product domain/runtime/repository
+instance_daemon -> generic daemon + concrete product adapters
+runtime broker composition -> explicit product application operation
 ```
 
 Forbidden:
 
 ```text
-generic daemon -> product module/token/schema
+generic daemon core/state/contracts -> product module/token/schema
 generic daemon status -> product storage or projection
-product module -> daemon core/state implementation
+transport -> product payload or lifecycle policy
 product tool -> broad daemon service locator
-transport -> hardcoded product command/payload/error
-new production path -> retired alias, wrapper, fallback, dual read, or dual write
+new path -> retired alias, fallback, dual read, or dual write
 ```

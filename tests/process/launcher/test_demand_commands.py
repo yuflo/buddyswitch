@@ -46,29 +46,27 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
         records = {
             "demand-older": {
                 "id": "demand-older",
-                "intake_key": "inbound:older",
                 "description": "Older need",
                 "detail": "Private detail must not leave the external projection.",
                 "source_refs": [{"type": "inbound", "ref": {"id": "info-older"}}],
                 "revision": 2,
-                "checked_revision": 1,
                 "terminal": None,
                 "created_at": "2026-07-19T01:00:00+08:00",
                 "updated_at": "2026-07-19T01:10:00+08:00",
             },
             "demand-newer": {
                 "id": "demand-newer",
-                "intake_key": "actor:newer",
                 "description": "Newer need",
                 "detail": "Another private detail.",
                 "source_refs": [],
                 "revision": 3,
-                "checked_revision": 3,
                 "terminal": {
                     "type": "completed",
                     "at": "2026-07-19T02:10:00+08:00",
                     "summary": "Satisfied.",
-                    "evidence_refs": [],
+                    "evidence_refs": [
+                        {"type": "task_sys.task", "ref": {"task_id": "task-demand-newer"}}
+                    ],
                 },
                 "created_at": "2026-07-19T02:00:00+08:00",
                 "updated_at": "2026-07-19T02:10:00+08:00",
@@ -76,7 +74,14 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
         }
         path.write_text(
             json.dumps(
-                {"schema_version": 2, "actor_target": target, "demands": records},
+                {
+                    "schema_version": 4,
+                    "actor_target": target,
+                    "demands": records,
+                    "demand_pool_revision": 2,
+                    "ingress_receipts": {},
+                    "actor_creation_receipts": {},
+                },
                 ensure_ascii=True,
                 indent=2,
             )
@@ -108,11 +113,10 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
             self.assertEqual([row["demand_id"] for row in rows], ["demand-newer", "demand-older"])
             expected_fields = {
                 "demand_id",
-                "intake_key",
+                "demand_ref",
                 "description",
                 "actor",
                 "revision",
-                "checked_revision",
                 "terminal",
                 "created_at",
                 "updated_at",
@@ -159,7 +163,7 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
             env = self._env(source_home_path, state_root)
             before = aggregate.read_bytes()
 
-            for action in ("create", "revise", "absorb_into", "complete", "cancel"):
+            for action in ("create", "revise", "complete", "cancel"):
                 with self.subTest(action=action):
                     result = self._run(env, "demand", action)
                     self.assertEqual(result.returncode, 2)
@@ -170,7 +174,7 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
             self.assertEqual(help_result.returncode, 0)
             self.assertIn("buddyswitch-codex demand list --actor <actor-id>", help_result.stdout)
             self.assertIn("buddyswitch-codex demand get <demand-id> --actor <actor-id>", help_result.stdout)
-            for action in ("create", "revise", "absorb_into", "complete", "cancel"):
+            for action in ("create", "revise", "complete", "cancel"):
                 self.assertNotIn(f"buddyswitch-codex demand {action}", help_result.stdout)
 
     def test_malformed_or_unscoped_arguments_fail_before_state_mutation(self) -> None:

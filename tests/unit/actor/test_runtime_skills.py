@@ -100,6 +100,8 @@ class RuntimeSkillsTests(unittest.TestCase):
         "track-tool",
         "artifact-tool",
         "task-management",
+        "demand-triage",
+        "demand-orchestration",
     }
     RETIRED_MESSAGE_TOOL_ID = "message" + "-tool"
     RETIRED_MESSAGE_TOOL_DIR = ROOT / "buddyswitch" / "skills" / "shared" / RETIRED_MESSAGE_TOOL_ID
@@ -173,7 +175,13 @@ class RuntimeSkillsTests(unittest.TestCase):
         self.assertNotIn("handoff-tool", all_skill_ids)
 
     def test_each_role_keeps_shared_runtime_tools_without_handoff(self) -> None:
-        required = {"track-tool", "artifact-tool", "task-management"}
+        required = {
+            "track-tool",
+            "artifact-tool",
+            "task-management",
+            "demand-triage",
+            "demand-orchestration",
+        }
         for role in self.manifest.get("roles", []):
             assert isinstance(role, dict)
             skills = set(role.get("skills", []))

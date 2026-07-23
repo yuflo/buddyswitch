@@ -41,10 +41,9 @@ class TrackCommentAddedHandler:
         runtime: Any,
         trigger: Any,
     ) -> Any:
-        del state
         if getattr(trigger, "type", None) != "track.comment.added":
             return daemon_contracts.HandlerResult.ignored()
-        return self._handle_track_comment_added(context, runtime, trigger)
+        return self._handle_track_comment_added(context, state, trigger)
 
     def _payload(self, trigger: Any) -> dict[str, str]:
         payload = getattr(trigger, "payload", None)
@@ -104,7 +103,7 @@ class TrackCommentAddedHandler:
     def _handle_track_comment_added(
         self,
         context: Any,
-        runtime: Any,
+        state: Any,
         trigger: Any,
     ) -> daemon_contracts.HandlerResult:
         try:
@@ -128,10 +127,9 @@ class TrackCommentAddedHandler:
             track_id = payload["track_id"]
             comment_id = payload["comment_id"]
             thread_id = payload["thread_id"]
-            demand_sys_daemon_adapter.capture_inbound(
-                context,
-                runtime,
-                intake_key=f"track.comment.added:{track_id}:{comment_id}",
+            demand_sys_daemon_adapter.enqueue_inbound(
+                state,
+                source_key=f"track.comment.added:{track_id}:{comment_id}",
                 description=content,
                 detail=(
                     f"Track comment on {track_id} "

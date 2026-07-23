@@ -46,7 +46,11 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         return {
             "id": task_id,
             "source_type": "demand",
-            "source_ref": {"demand_id": f"demand-{task_id}", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": f"demand-{task_id}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-{task_id}",
+            },
             "actor_target": {"actor_id": actor_id, "role_id": role_id},
             "inbound_context": {
                 "execution_brief": {
@@ -151,6 +155,7 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             "demand_ref": {
                 "demand_id": f"demand-substrate-{source_id}",
                 "basis_revision": 1,
+                "demand_ref": f"dref-substrate-{source_id}",
             },
             "execution_brief": {
                 "description": "Draft brief.",
@@ -255,7 +260,13 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(frame["task_id"], task_id)
         self.assertEqual(
             frame["source"],
-            {"type": "demand", "ref": create_args["demand_ref"]},
+            {
+                "type": "demand",
+                "ref": {
+                    "demand_id": create_args["demand_ref"]["demand_id"],
+                    "demand_ref": create_args["demand_ref"]["demand_ref"],
+                },
+            },
         )
         self.assertEqual(frame["actor_target"], create_args["actor_target"])
         self.assertEqual(
@@ -352,7 +363,13 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(frame["task_id"], task_id)
         self.assertEqual(
             frame["source"],
-            {"type": "demand", "ref": self._create_args()["demand_ref"]},
+            {
+                "type": "demand",
+                "ref": {
+                    "demand_id": self._create_args()["demand_ref"]["demand_id"],
+                    "demand_ref": self._create_args()["demand_ref"]["demand_ref"],
+                },
+            },
         )
         self.assertEqual(
             frame["inbound_context"],
@@ -685,8 +702,22 @@ class TaskSysSubstrateTests(RuntimeWorkspaceTestCase):
             ({**valid, "actor_target": {"role_id": "dev"}}, "actor_target.actor_id"),
             ({**valid, "actor_target": {"actor_id": valid["actor_target"]["actor_id"]}}, "actor_target.role_id"),
             ({**valid, "demand_ref": {"demand_id": "demand-invalid"}}, "exactly"),
-            ({**valid, "demand_ref": {"demand_id": "invalid", "basis_revision": 1}}, "Demand id"),
-            ({**valid, "demand_ref": {"demand_id": "demand-invalid", "basis_revision": 0}}, "positive integer"),
+            ({
+                **valid,
+                "demand_ref": {
+                    "demand_id": "invalid",
+                    "basis_revision": 1,
+                    "demand_ref": "dref-invalid",
+                },
+            }, "Demand id"),
+            ({
+                **valid,
+                "demand_ref": {
+                    "demand_id": "demand-invalid",
+                    "basis_revision": 0,
+                    "demand_ref": "dref-invalid",
+                },
+            }, "positive integer"),
             ({**valid, "execution_brief": "Draft brief"}, "execution_brief must be an object"),
             ({**valid, "execution_brief": {"description": "Draft brief"}}, "exactly"),
         )

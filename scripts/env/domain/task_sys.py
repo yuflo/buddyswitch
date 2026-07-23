@@ -79,8 +79,8 @@ def _normalize_actor_target(value: Any) -> dict[str, str]:
 
 def _normalize_demand_ref(value: Any) -> dict[str, Any]:
     demand_ref = _require_mapping(value, "demand_ref")
-    if set(demand_ref) != {"demand_id", "basis_revision"}:
-        raise ValueError("demand_ref must contain exactly demand_id and basis_revision")
+    if set(demand_ref) != {"demand_id", "basis_revision", "demand_ref"}:
+        raise ValueError("demand_ref must contain exactly demand_id, basis_revision, and demand_ref")
     demand_id = runtime_files.require_id(
         _require_text(demand_ref.get("demand_id"), "demand_ref.demand_id"),
         "demand_ref.demand_id",
@@ -90,7 +90,32 @@ def _normalize_demand_ref(value: Any) -> dict[str, Any]:
     basis_revision = demand_ref.get("basis_revision")
     if type(basis_revision) is not int or basis_revision < 1:
         raise ValueError("demand_ref.basis_revision must be a positive integer")
-    return {"demand_id": demand_id, "basis_revision": basis_revision}
+    opaque_ref = _require_text(demand_ref.get("demand_ref"), "demand_ref.demand_ref")
+    if not opaque_ref.startswith("dref-"):
+        raise ValueError("demand_ref.demand_ref must be an opaque Demand reference")
+    return {
+        "demand_id": demand_id,
+        "basis_revision": basis_revision,
+        "demand_ref": opaque_ref,
+    }
+
+
+def _actor_demand_ref(value: Any) -> dict[str, str]:
+    demand_ref = _normalize_demand_ref(value)
+    return {
+        "demand_id": str(demand_ref["demand_id"]),
+        "demand_ref": str(demand_ref["demand_ref"]),
+    }
+
+
+def _actor_source(value: Any) -> dict[str, Any]:
+    source = _require_mapping(value, "source")
+    if set(source) != {"type", "ref"} or source.get("type") != "demand":
+        raise ValueError("source must be an exact Demand source")
+    return {
+        "type": "demand",
+        "ref": _actor_demand_ref(source.get("ref")),
+    }
 
 
 def _normalize_execution_brief(value: Any) -> dict[str, str]:
@@ -230,7 +255,7 @@ def _side_frame(*, task_id: str, source: Mapping[str, Any], actor_target: Mappin
     return {
         "kind": "task_sys.side_frame",
         "task_id": task_id,
-        "source": _payload_copy(source),
+        "source": _actor_source(source),
         "actor_target": _payload_copy(actor_target),
         "context": _payload_copy(context),
     }
@@ -247,7 +272,7 @@ def _parent_frame(record: Mapping[str, Any]) -> dict[str, Any]:
         "task_id": task_id,
         "source": {
             "type": "demand",
-            "ref": demand_ref,
+            "ref": _actor_demand_ref(demand_ref),
         },
         "actor_target": _normalize_actor_target(record.get("actor_target")),
         "inbound_context": _payload_copy(_require_mapping(record.get("inbound_context"), "task.inbound_context")),
@@ -325,7 +350,7 @@ def task_summary(task: Mapping[str, Any]) -> dict[str, Any]:
         "task_id": task_id,
         "id": task_id,
         "source_type": "demand",
-        "source_ref": source_ref,
+        "source_ref": _actor_demand_ref(source_ref),
         "status": task.get("status"),
         "execution": _payload_copy(execution) if isinstance(execution, Mapping) else {},
         "updated_at": task.get("updated_at"),
@@ -368,6 +393,14 @@ def actor_task_projection(*, actor_profile: ActorIdentityProfile) -> dict[str, o
         "active_count": len(active_tasks),
         "recoverable_count": len(recoverable_tasks),
     }
+
+
+def actor_task_detail(task_id: str) -> dict[str, Any]:
+    """Return one Task without exposing Demand storage concurrency fields."""
+
+    task = _payload_copy(_load_task(runtime_files.require_id(task_id, "task id")))
+    task["source_ref"] = _actor_demand_ref(task.get("source_ref"))
+    return task
 
 
 def _create_task(
@@ -690,7 +723,7 @@ def outcome_instruction(task_id: str) -> dict[str, Any]:
         "kind": "task_sys.outcome_frame",
         "task_id": normalized_task_id,
         "status": status,
-        "source": {"type": "demand", "ref": demand_ref},
+        "source": {"type": "demand", "ref": _actor_demand_ref(demand_ref)},
         "evidence_ref": {
             "type": "task_sys.task",
             "ref": {"task_id": normalized_task_id},

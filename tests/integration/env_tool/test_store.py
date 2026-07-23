@@ -263,7 +263,11 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
         instance_root = self._instance_root("act-task-track-hint")
         result = task_sys.create(
             actor_target={"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
-            demand_ref={"demand_id": "demand-task-track-hint", "basis_revision": 1},
+            demand_ref={
+                "demand_id": "demand-task-track-hint",
+                "basis_revision": 1,
+                "demand_ref": "dref-task-track-hint",
+            },
             execution_brief={
                 "description": "Task hint fixture.",
                 "detail": f"Track context: track-task-hint. Instance: {instance_root}.",
@@ -275,7 +279,11 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
         self.assertEqual(after, before)
         self.assertEqual(
             task["source_ref"],
-            {"demand_id": "demand-task-track-hint", "basis_revision": 1},
+            {
+                "demand_id": "demand-task-track-hint",
+                "basis_revision": 1,
+                "demand_ref": "dref-task-track-hint",
+            },
         )
         self.assertIn(
             "Track context: track-task-hint",

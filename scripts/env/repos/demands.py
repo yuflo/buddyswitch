@@ -10,9 +10,16 @@ from typing import Any, Callable, Mapping
 from . import runtime_files
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 _ACTOR_TARGET_FIELDS = {"actor_id", "role_id"}
-_AGGREGATE_FIELDS = {"schema_version", "actor_target", "demands"}
+_AGGREGATE_FIELDS = {
+    "schema_version",
+    "actor_target",
+    "demands",
+    "demand_pool_revision",
+    "ingress_receipts",
+    "actor_creation_receipts",
+}
 
 
 def normalize_actor_target(actor_target: Mapping[str, Any]) -> dict[str, str]:
@@ -63,6 +70,9 @@ def _empty_actor_state(actor_target: Mapping[str, str]) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "actor_target": dict(actor_target),
         "demands": {},
+        "demand_pool_revision": 0,
+        "ingress_receipts": {},
+        "actor_creation_receipts": {},
     }
 
 
@@ -74,7 +84,8 @@ def _validate_actor_state(
         raise ValueError("Demand actor aggregate must be an object")
     if set(payload) != _AGGREGATE_FIELDS:
         raise ValueError(
-            "Demand actor aggregate must contain exactly schema_version, actor_target, and demands"
+            "Demand actor aggregate must contain exactly schema_version, actor_target, "
+            "demands, demand_pool_revision, ingress_receipts, and actor_creation_receipts"
         )
     schema_version = payload.get("schema_version")
     if type(schema_version) is not int or schema_version != SCHEMA_VERSION:
@@ -89,10 +100,35 @@ def _validate_actor_state(
         runtime_files.require_id(demand_id, "demand id")
         if not isinstance(demand, dict):
             raise ValueError(f"Demand actor aggregate demands.{demand_id} must be an object")
+    demand_pool_revision = payload.get("demand_pool_revision")
+    if type(demand_pool_revision) is not int or demand_pool_revision < 0:
+        raise ValueError("Demand actor aggregate demand_pool_revision must be a non-negative integer")
+    ingress_receipts = payload.get("ingress_receipts")
+    if not isinstance(ingress_receipts, dict):
+        raise ValueError("Demand actor aggregate ingress_receipts must be an object")
+    for source_key, receipt in ingress_receipts.items():
+        if not isinstance(source_key, str) or not source_key.strip():
+            raise ValueError(
+                "Demand actor aggregate ingress receipt keys must be non-empty strings"
+            )
+        if not isinstance(receipt, dict):
+            raise ValueError(
+                f"Demand actor aggregate ingress_receipts.{source_key} must be an object"
+            )
+    actor_creation_receipts = payload.get("actor_creation_receipts")
+    if not isinstance(actor_creation_receipts, dict):
+        raise ValueError("Demand actor aggregate actor_creation_receipts must be an object")
+    for creation_key, demand_id in actor_creation_receipts.items():
+        if not isinstance(creation_key, str) or not creation_key.strip():
+            raise ValueError("Demand actor aggregate creation receipt keys must be non-empty strings")
+        runtime_files.require_id(demand_id, "actor creation receipt demand id")
     return {
         "schema_version": SCHEMA_VERSION,
         "actor_target": actor_target,
         "demands": copy.deepcopy(demands_by_id),
+        "demand_pool_revision": demand_pool_revision,
+        "ingress_receipts": copy.deepcopy(ingress_receipts),
+        "actor_creation_receipts": copy.deepcopy(actor_creation_receipts),
     }
 
 

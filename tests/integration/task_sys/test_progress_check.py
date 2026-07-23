@@ -47,6 +47,7 @@ class TaskSysProgressCheckTests(RuntimeWorkspaceTestCase):
             demand_ref={
                 "demand_id": f"demand-progress-check-{target_actor_id}",
                 "basis_revision": 1,
+                "demand_ref": f"dref-progress-check-{target_actor_id}",
             },
             execution_brief={
                 "description": "Continue the parent-owned Task.",

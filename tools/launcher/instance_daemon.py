@@ -17,6 +17,7 @@ for candidate in (HELPER_DIR, SCRIPTS):
 
 import daemon_core  # noqa: E402
 import browser_inbound  # noqa: E402
+import demand_triage_handler  # noqa: E402
 import message_inbound  # noqa: E402
 import notification_center  # noqa: E402
 import task_sys_daemon_adapter  # noqa: E402
@@ -44,6 +45,7 @@ def default_daemon_handlers() -> list[object]:
     return [
         *notification_center.handlers_from_registrations(registrations),
         *notification_center.handlers_from_registrations(browser_registrations),
+        demand_triage_handler.DemandTriageHandler(),
         task_sys_daemon_adapter.TaskSysProgressCheckHandler(),
     ]
 

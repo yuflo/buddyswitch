@@ -36,6 +36,10 @@ class _Runtime:
         raise AssertionError("IM wake handler must delegate attention through the Demand adapter")
 
 
+class _State:
+    pass
+
+
 class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -48,15 +52,15 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
             role=self.route["role_id"],
         )
         self._save_actor(self.route["identity_id"], self.route["role_id"])
-        self.capture_calls: list[dict[str, Any]] = []
-        original_capture = demand_sys_daemon_adapter.capture_inbound
+        self.enqueue_calls: list[dict[str, Any]] = []
+        original_enqueue = demand_sys_daemon_adapter.enqueue_inbound
         self.addCleanup(
             setattr,
             demand_sys_daemon_adapter,
-            "capture_inbound",
-            original_capture,
+            "enqueue_inbound",
+            original_enqueue,
         )
-        demand_sys_daemon_adapter.capture_inbound = self._capture_inbound
+        demand_sys_daemon_adapter.enqueue_inbound = self._enqueue_inbound
 
     def _save_actor(self, actor_id: str, role_id: str) -> None:
         identity_repo.save_actor_identity_profile({
@@ -100,21 +104,13 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         )
         return sent, trigger
 
-    def _capture_inbound(
+    def _enqueue_inbound(
         self,
-        context: Any,
-        runtime: Any,
+        state: Any,
         **intake: Any,
     ) -> dict[str, Any]:
-        self.capture_calls.append({"context": context, "runtime": runtime, **intake})
-        return {
-            "demand_id": "demand-handler-probe",
-            "revision": 1,
-            "capture_state_changed": True,
-            "pending_count": 1,
-            "attention_requested": True,
-            "actor_input": {"action": "start", "turn_id": "turn-handler-probe"},
-        }
+        self.enqueue_calls.append({"state": state, **intake})
+        return {"schedule_id": "schedule-handler-probe"}
 
     def _task_records(self) -> list[dict[str, Any]]:
         tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
@@ -123,13 +119,14 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
             for path in sorted(tasks_dir.glob("*.json"))
         ]
 
-    def test_exact_target_visible_message_maps_to_one_demand_capture(self) -> None:
+    def test_exact_target_visible_message_maps_to_one_demand_intake_schedule(self) -> None:
         sent, trigger = self._persist_message()
         runtime = _Runtime()
+        state = _State()
 
         result = im_wake_handler.ImMessageCreatedHandler().handle(
             self.context,
-            None,
+            state,
             runtime,
             trigger,
         )
@@ -139,11 +136,10 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         event_id = sent["event_id"]
         self.assertEqual(result.status, "handled")
         self.assertEqual(
-            self.capture_calls,
+            self.enqueue_calls,
             [{
-                "context": self.context,
-                "runtime": runtime,
-                "intake_key": f"im.message.created:{message_id}",
+                "state": state,
+                "source_key": f"im.message.created:{message_id}",
                 "description": "Support user data CSV export.",
                 "detail": "Support user data CSV export.",
                 "source_refs": [{
@@ -174,7 +170,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("wrong target identity", result.message or "")
-        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self.enqueue_calls, [])
         self.assertEqual(self._task_records(), [])
 
     def test_missing_message_or_event_fails_before_capture(self) -> None:
@@ -199,7 +195,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
                 )
                 self.assertEqual(result.status, "failed")
 
-        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self.enqueue_calls, [])
         self.assertEqual(self._task_records(), [])
 
     def test_mismatched_conversation_or_event_link_fails_before_capture(self) -> None:
@@ -225,7 +221,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
                 )
                 self.assertEqual(result.status, "failed")
 
-        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self.enqueue_calls, [])
         self.assertEqual(self._task_records(), [])
 
     def test_conversation_member_that_is_not_message_target_fails_before_capture(self) -> None:
@@ -246,13 +242,13 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("target", result.message or "")
-        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self.enqueue_calls, [])
         self.assertEqual(self._task_records(), [])
 
-    def test_capture_error_returns_failed_and_keeps_task_projection_empty(self) -> None:
+    def test_enqueue_error_returns_failed_and_keeps_task_projection_empty(self) -> None:
         _sent, trigger = self._persist_message()
-        demand_sys_daemon_adapter.capture_inbound = lambda *_args, **_kwargs: (
-            (_ for _ in ()).throw(RuntimeError("demand capture unavailable"))
+        demand_sys_daemon_adapter.enqueue_inbound = lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(RuntimeError("demand schedule unavailable"))
         )
 
         result = im_wake_handler.ImMessageCreatedHandler().handle(
@@ -263,8 +259,8 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         )
 
         self.assertEqual(result.status, "failed")
-        self.assertIn("demand capture unavailable", result.message or "")
-        self.assertEqual(self.capture_calls, [])
+        self.assertIn("demand schedule unavailable", result.message or "")
+        self.assertEqual(self.enqueue_calls, [])
         self.assertEqual(self._task_records(), [])
 
     def test_handler_does_not_handle_unrelated_event(self) -> None:
@@ -279,4 +275,4 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         self.assertFalse(handler.handles(trigger))
         result = handler.handle(self.context, None, _Runtime(), trigger)
         self.assertEqual(result.status, "ignored")
-        self.assertEqual(self.capture_calls, [])
+        self.assertEqual(self.enqueue_calls, [])

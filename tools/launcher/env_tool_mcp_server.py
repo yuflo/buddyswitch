@@ -81,9 +81,23 @@ def tool_error_payload(code: str, message: str, details: dict[str, Any] | None =
     return payload
 
 
-def default_dispatcher(*, tool: str, action: str, args: dict[str, Any]) -> dict[str, Any]:
+def default_dispatcher(
+    *,
+    tool: str,
+    action: str,
+    args: dict[str, Any],
+    invocation: dict[str, str],
+) -> dict[str, Any]:
     try:
-        return request_runtime_broker("env.tool", {"tool": tool, "action": action, "args": args})
+        return request_runtime_broker(
+            "env.tool",
+            {
+                "tool": tool,
+                "action": action,
+                "args": args,
+                "invocation": invocation,
+            },
+        )
     except RuntimeBrokerError as exc:
         details = dict(exc.details)
         if exc.response:
@@ -138,6 +152,25 @@ def _handle_tools_call(request_id: Any, params: Any, dispatcher: Dispatcher) -> 
             ),
         )
     try:
+        meta = params.get("_meta", {})
+        if not isinstance(meta, dict):
+            raise ValueError("tools/call params._meta must be an object")
+        turn_meta = meta.get("x-codex-turn-metadata", {})
+        if not isinstance(turn_meta, dict):
+            raise ValueError(
+                "tools/call params._meta.x-codex-turn-metadata must be an object"
+            )
+        invocation: dict[str, str] = {"request_id": str(request_id)}
+        for source, target in (
+            (meta.get("threadId"), "thread_id"),
+            (turn_meta.get("turn_id"), "turn_id"),
+        ):
+            if source is not None and (
+                not isinstance(source, str) or not source.strip()
+            ):
+                raise ValueError(f"{target} must be a non-empty string")
+            if isinstance(source, str):
+                invocation[target] = source.strip()
         tool, action = native_mcp.resolve_native_tool_name(name)
     except (KeyError, ValueError) as exc:
         return rpc_result(
@@ -149,7 +182,12 @@ def _handle_tools_call(request_id: Any, params: Any, dispatcher: Dispatcher) -> 
         )
 
     try:
-        result = dispatcher(tool=tool, action=action, args=arguments)
+        result = dispatcher(
+            tool=tool,
+            action=action,
+            args=arguments,
+            invocation=invocation,
+        )
     except McpToolDispatchError as exc:
         return rpc_result(
             request_id,

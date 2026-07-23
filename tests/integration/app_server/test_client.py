@@ -383,6 +383,16 @@ class AppServerClientTests(unittest.TestCase):
                             ephemeral=True,
                             model="gpt-5.4",
                             model_reasoning_effort="high",
+                            config_overrides={
+                                "mcp_servers.buddyswitch-env.enabled_tools": [
+                                    "demand_sys__list",
+                                    "demand_sys__get",
+                                ],
+                                "mcp_servers.buddyswitch-demand-triage": {
+                                    "command": "/usr/bin/python3",
+                                    "args": ["/repo/demand_triage_mcp_server.py"],
+                                },
+                            },
                         )
                     )
                 except BaseException as exc:
@@ -404,7 +414,20 @@ class AppServerClientTests(unittest.TestCase):
             params = request["params"]
             assert isinstance(params, dict)
             self.assertEqual(params["model"], "gpt-5.4")
-            self.assertEqual(params["config"], {"model_reasoning_effort": "high"})
+            self.assertEqual(
+                params["config"],
+                {
+                    "model_reasoning_effort": "high",
+                    "mcp_servers.buddyswitch-env.enabled_tools": [
+                        "demand_sys__list",
+                        "demand_sys__get",
+                    ],
+                    "mcp_servers.buddyswitch-demand-triage": {
+                        "command": "/usr/bin/python3",
+                        "args": ["/repo/demand_triage_mcp_server.py"],
+                    },
+                },
+            )
             self.assertEqual(params["permissions"], "buddyswitch-runtime")
             self.assertTrue(params["ephemeral"])
             self.assertEqual(params["developerInstructions"], APP_SERVER.SIDE_DEVELOPER_INSTRUCTIONS)
@@ -883,7 +906,7 @@ class AppServerClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             APP_SERVER.build_turn_steer_params("thread-1", "", "hello")
 
-    def test_turn_start_sends_input_and_permissions(self) -> None:
+    def test_turn_start_sends_input_permissions_and_optional_output_schema(self) -> None:
         self.assertTrue(hasattr(APP_SERVER, "turn_start"), "APP_SERVER.turn_start is required by side_thread_lifecycle")
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = self._socket_path(Path(temp_root))
@@ -896,7 +919,19 @@ class AppServerClientTests(unittest.TestCase):
 
             def run_turn_start() -> None:
                 try:
-                    results.append(APP_SERVER.turn_start(socket_path, "thread-1", "hello", "buddyswitch-runtime"))
+                    results.append(
+                        APP_SERVER.turn_start(
+                            socket_path,
+                            "thread-1",
+                            "hello",
+                            "buddyswitch-runtime",
+                            output_schema={
+                                "type": "object",
+                                "required": ["decision"],
+                                "properties": {"decision": {"type": "string"}},
+                            },
+                        )
+                    )
                 except BaseException as exc:
                     errors.append(exc)
 
@@ -915,6 +950,14 @@ class AppServerClientTests(unittest.TestCase):
             self.assertEqual(params["threadId"], "thread-1")
             self.assertEqual(params["input"], APP_SERVER.text_input_payload("hello"))
             self.assertEqual(params["permissions"], "buddyswitch-runtime")
+            self.assertEqual(
+                params["outputSchema"],
+                {
+                    "type": "object",
+                    "required": ["decision"],
+                    "properties": {"decision": {"type": "string"}},
+                },
+            )
             server.send_response(request["id"], {"turn": {"id": "turn-1"}})
             request_thread.join(timeout=2)
 

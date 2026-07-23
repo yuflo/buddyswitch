@@ -89,6 +89,23 @@ class ActorSideThreadTests(unittest.TestCase):
             self.assertEqual(result["capability_source"], "override")
             self.assertEqual(result["capability_durability"], "new_side_thread_only")
 
+    def test_output_schema_passes_unchanged_to_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(Path(temp_root))
+            actor_capability.seed_actor_capabilities(instance_json)
+            calls = self._install_start()
+            kwargs = self._start_kwargs(instance_json)
+            schema = {
+                "type": "object",
+                "required": ["decision"],
+                "properties": {"decision": {"type": "string"}},
+            }
+            kwargs["output_schema"] = schema
+
+            actor_side_thread.start_actor_side_thread(**kwargs)
+
+            self.assertIs(calls[0]["output_schema"], schema)
+
     def test_invalid_explicit_level_fails_before_lifecycle_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_json = self._instance_json(Path(temp_root))

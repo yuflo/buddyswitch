@@ -83,7 +83,11 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
         task_id = f"task-0001-{role}-feedback"
         task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
-            demand_ref={"demand_id": f"demand-feedback-{role}", "basis_revision": 1},
+            demand_ref={
+                "demand_id": f"demand-feedback-{role}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-feedback-{role}",
+            },
             execution_brief={
                 "description": "Runtime feedback fixture.",
                 "detail": f"Exercise runtime feedback for {task_id}.",

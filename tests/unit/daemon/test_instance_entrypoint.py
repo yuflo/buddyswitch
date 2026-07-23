@@ -27,6 +27,7 @@ EXPECTED_HANDLER_TYPES = [
     "BrowserPageExpiredHandler",
     "BrowserReleaseHandler",
     "BrowserFailedOpenPageCleanupHandler",
+    "DemandTriageHandler",
     "TaskSysProgressCheckHandler",
 ]
 EXPECTED_HANDLER_NAMES = [
@@ -35,6 +36,7 @@ EXPECTED_HANDLER_NAMES = [
     "browser_page_expired",
     "browser_cockpit_release",
     "browser_failed_open_page_cleanup",
+    "demand_triage",
     "task_sys_progress_check",
 ]
 
@@ -77,6 +79,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertIn("browser_inbound", imports)
         self.assertIn("message_inbound", imports)
         self.assertIn("track_comment_inbound", imports)
+        self.assertIn("demand_triage_handler", imports)
         self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("browser_page_expired_handler", imports)

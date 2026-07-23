@@ -63,7 +63,11 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         return {
             "id": task_id,
             "source_type": "demand",
-            "source_ref": {"demand_id": f"demand-{task_id}", "basis_revision": 1},
+            "source_ref": {
+                "demand_id": f"demand-{task_id}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-{task_id}",
+            },
             "actor_target": {"actor_id": actor_id, "role_id": role_id, "internal_stack": "hidden"},
             "inbound_context": {"prompt": "secret prompt"},
             "status": status,
@@ -224,7 +228,10 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                 self.assertEqual(row["actor"], {"actor_id": actor_id, "role_id": "pm"})
                 self.assertEqual(
                     row["demand_ref"],
-                    {"demand_id": f"demand-{row['task_id']}", "basis_revision": 1},
+                    {
+                        "demand_id": f"demand-{row['task_id']}",
+                        "demand_ref": f"dref-{row['task_id']}",
+                    },
                 )
                 for sensitive in (
                     "execution",
@@ -272,13 +279,14 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         demand_record["source_ref"] = {
             "demand_id": "demand-external-safe",
             "basis_revision": 7,
+            "demand_ref": "dref-external-safe",
         }
 
         demand_row = task_read.external_task_projection(demand_record)
 
         self.assertEqual(
             demand_row["demand_ref"],
-            {"demand_id": "demand-external-safe", "basis_revision": 7},
+            {"demand_id": "demand-external-safe", "demand_ref": "dref-external-safe"},
         )
         self.assertEqual(tuple(demand_row), TASK_KEYS)
 

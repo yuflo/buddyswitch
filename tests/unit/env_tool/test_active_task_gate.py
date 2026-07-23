@@ -83,7 +83,11 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
         actor_id = str(instance["actor_id"])
         task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
-            demand_ref={"demand_id": f"demand-active-gate-{role}", "basis_revision": 1},
+            demand_ref={
+                "demand_id": f"demand-active-gate-{role}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-active-gate-{role}",
+            },
             execution_brief={
                 "description": "Active Task gate fixture.",
                 "detail": f"Exercise the active Task gate for {task_id}.",

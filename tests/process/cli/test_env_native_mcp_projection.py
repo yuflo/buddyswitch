@@ -63,16 +63,20 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
 
         self.assertEqual(len(specs), expected_count)
         self.assertNotIn("task__get", by_name)
-        for name in (
-            "demand_sys__create",
-            "demand_sys__check",
-            "demand_sys__get_many",
-            "demand_sys__absorb_into",
-            "demand_sys__complete_check",
-        ):
-            self.assertIn(name, by_name)
+        self.assertEqual(
+            {name for name in by_name if name.startswith("demand_sys__")},
+            {
+                "demand_sys__list",
+                "demand_sys__get",
+                "demand_sys__create",
+                "demand_sys__revise",
+                "demand_sys__complete",
+                "demand_sys__cancel",
+            },
+        )
         self.assertFalse(any(name.startswith("demand__") for name in by_name))
         self.assertNotIn("demand", registry.supported_tools())
+        self.assertNotIn("demand_triage__resolve", by_name)
 
     def test_projection_loads_no_private_tool_implementations_or_services(self) -> None:
         script = """

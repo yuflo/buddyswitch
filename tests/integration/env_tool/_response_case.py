@@ -203,7 +203,11 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
         task_id = f"task-0001-{role}-response-contract"
         task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
-            demand_ref={"demand_id": f"demand-response-contract-{role}", "basis_revision": 1},
+            demand_ref={
+                "demand_id": f"demand-response-contract-{role}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-response-contract-{role}",
+            },
             execution_brief={
                 "description": "Response contract fixture.",
                 "detail": f"Exercise response contracts for {task_id}.",
@@ -219,6 +223,7 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
         tool: str,
         action: str,
         args: dict[str, object],
+        invocation: dict[str, str] | None = None,
     ) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role=role, label=actor_id)
         envelope = runtime_broker.dispatch_runtime_request(
@@ -232,6 +237,7 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
                     "tool": tool,
                     "action": action,
                     "args": args,
+                    **({"invocation": invocation} if invocation is not None else {}),
                 },
                 "deadline_ms": 35000,
             },

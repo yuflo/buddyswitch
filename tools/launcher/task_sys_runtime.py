@@ -102,19 +102,19 @@ def _demand_source(value: Any, field: str) -> dict[str, Any]:
     if set(source) != {"type", "ref"} or source.get("type") != "demand":
         raise ValueError(f"{field} must be an exact Demand source")
     source_ref = _require_mapping(source.get("ref"), f"{field}.ref")
-    if set(source_ref) != {"demand_id", "basis_revision"}:
+    if set(source_ref) != {"demand_id", "demand_ref"}:
         raise ValueError(f"{field} must be an exact Demand source")
     demand_id = _require_text(source_ref.get("demand_id"), f"{field}.ref.demand_id")
     if not demand_id.startswith("demand-"):
         raise ValueError(f"{field} must be an exact Demand source")
-    basis_revision = source_ref.get("basis_revision")
-    if type(basis_revision) is not int or basis_revision < 1:
+    demand_ref = _require_text(source_ref.get("demand_ref"), f"{field}.ref.demand_ref")
+    if not demand_ref.startswith("dref-"):
         raise ValueError(f"{field} must be an exact Demand source")
     return {
         "type": "demand",
         "ref": {
             "demand_id": demand_id,
-            "basis_revision": basis_revision,
+            "demand_ref": demand_ref,
         },
     }
 
@@ -320,6 +320,7 @@ def render_outcome_frame(frame: Mapping[str, Any]) -> str:
     return "\n\n".join(
         (
             "task_sys.outcome_frame",
+            "Use $demand-orchestration for this terminal Task receipt.",
             "This Task is already terminal. This frame is an outcome receipt, not Task work.",
             f"Terminal Task id: {task_id}",
             f"Canonical Task status: {status}",
@@ -334,14 +335,9 @@ def render_outcome_frame(frame: Mapping[str, Any]) -> str:
                 + status_guidance
             ),
             (
-                "After any Demand mutation, acknowledge the exact returned revision with "
-                "the source owner's check action before selecting more work. If reconciliation makes no mutation, "
-                "do not invent a new revision."
-            ),
-            (
                 "Do not reopen this terminal Task or create a replacement for this same source snapshot. "
                 "Keep the source obligation live when the latest state is not satisfied. After reconciliation, continue now with at most "
-                "one other live Demand through task_sys.create when no Task is active."
+                "one other live Demand through task_sys__create when no Task is active."
             ),
         )
     )

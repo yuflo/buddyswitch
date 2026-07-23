@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 HELPER_DIR = Path(__file__).resolve().parent
@@ -32,6 +32,10 @@ def start_actor_side_thread(
     permissions: str,
     task_id: str | None = None,
     capability_level: str | None = None,
+    output_schema: Mapping[str, Any] | None = None,
+    config_overrides: Mapping[str, Any] | None = None,
+    capability_hash: str | None = None,
+    binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         resolved = actor_capability.resolve_side_capability(
@@ -54,5 +58,9 @@ def start_actor_side_thread(
         task_id=task_id,
         model=resolved.model,
         model_reasoning_effort=resolved.effort,
+        output_schema=output_schema,
+        config_overrides=config_overrides,
+        capability_hash=capability_hash,
+        binding=binding,
     )
     return actor_capability.apply_side_capability_metadata(payload, resolved)

@@ -37,18 +37,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     },
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
-    "demand_sys": {
-        "create",
-        "revise",
-        "list",
-        "get",
-        "get_many",
-        "check",
-        "complete_check",
-        "absorb_into",
-        "complete",
-        "cancel",
-    },
+    "demand_sys": {"list", "get", "create", "revise", "complete", "cancel"},
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request"},
     "message": {"contacts", "send", "get", "list", "conversation"},
@@ -69,10 +58,6 @@ _EXPECTED_FREE_ACTIONS = {
     "demand_sys.revise",
     "demand_sys.list",
     "demand_sys.get",
-    "demand_sys.get_many",
-    "demand_sys.check",
-    "demand_sys.complete_check",
-    "demand_sys.absorb_into",
     "demand_sys.complete",
     "demand_sys.cancel",
     "message.contacts",
@@ -300,7 +285,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
     def test_demand_exact_replay_actions_advertise_idempotency(self) -> None:
         operations = catalog.operation_semantics()
 
-        for action in ("absorb_into", "complete", "cancel"):
+        for action in ("create", "complete", "cancel"):
             with self.subTest(action=action):
                 self.assertIs(operations[f"demand_sys.{action}"]["risk_hints"]["idempotent"], True)
 

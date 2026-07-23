@@ -174,7 +174,7 @@ class RuntimeObjectAccess:
         return {
             "tracks": "track.list / track.open",
             "tasks": "task_sys.create / task_sys.list / task_sys.get / task_sys.close / task_sys.cancel / task_sys.need_parent",
-            "demands": "demand_sys.list / demand_sys.get / demand_sys.check / demand_sys.get_many",
+            "demands": "demand_sys.list / demand_sys.get",
             "artifacts": "artifact.list / artifact.get",
             "messages": "message.list",
             "track_comments": "track.list_comments",
@@ -441,6 +441,15 @@ class RepoAccess:
 
 
 @dataclass(frozen=True)
+class InvocationFact:
+    """Host-observed identity of one native tool invocation."""
+
+    thread_id: str | None = None
+    turn_id: str | None = None
+    request_id: str | None = None
+
+
+@dataclass(frozen=True)
 class ToolContext(Mapping[str, Any]):
     """Host-owned runtime context object passed to each tool invoke."""
 
@@ -451,6 +460,7 @@ class ToolContext(Mapping[str, Any]):
     instance_payload: dict[str, Any]
     manifest: dict[str, Any]
     manifest_path: Path | None = None
+    invocation: InvocationFact = field(default_factory=InvocationFact)
     objects: RuntimeObjectAccess = field(default_factory=RuntimeObjectAccess)
     catalog: RegistryCatalogAccess = field(default_factory=RegistryCatalogAccess)
     rules: DomainAccess = field(default_factory=DomainAccess)
@@ -509,6 +519,7 @@ class ToolContext(Mapping[str, Any]):
         instance_payload: dict[str, Any],
         manifest: dict[str, Any],
         manifest_path: Path | None = None,
+        invocation: InvocationFact | None = None,
     ) -> "ToolContext":
         return cls(
             current_identity=actor_identity_profile.identity,
@@ -518,6 +529,7 @@ class ToolContext(Mapping[str, Any]):
             instance_payload=instance_payload,
             manifest=manifest,
             manifest_path=manifest_path,
+            invocation=invocation or InvocationFact(),
         )
 
     @property

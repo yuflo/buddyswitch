@@ -32,6 +32,7 @@ class TaskSysSideProcessingTests(RuntimeWorkspaceTestCase):
             "demand_ref": {
                 "demand_id": "demand-side-processing-fixture",
                 "basis_revision": 1,
+                "demand_ref": "dref-side-processing-fixture",
             },
             "execution_brief": {
                 "description": "Draft brief.",

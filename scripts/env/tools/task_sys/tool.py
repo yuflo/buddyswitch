@@ -45,28 +45,15 @@ def _build_definition() -> ToolDefinition:
             ActionDefinition(
                 name="create",
                 title="task_sys.create",
-                description="Create or replay one Task from one exact Demand revision through the canonical side lifecycle.",
+                description="Create or replay one Task from one current Demand through the canonical side lifecycle.",
                 input_schema={
                     "type": "object",
                     "additionalProperties": False,
                     "required": ["demand_ref", "execution_brief"],
                     "properties": {
                         "demand_ref": {
-                            "type": "object",
-                            "description": "Opaque Demand snapshot identity selected by the actor.",
-                            "additionalProperties": False,
-                            "required": ["demand_id", "basis_revision"],
-                            "properties": {
-                                "demand_id": {
-                                    "type": "string",
-                                    "description": "Exact actor-owned Demand id selected for execution.",
-                                },
-                                "basis_revision": {
-                                    "type": "integer",
-                                    "description": "Exact Demand revision observed when selecting the work.",
-                                    "minimum": 1,
-                                },
-                            },
+                            "type": "string",
+                            "description": "Opaque current Demand reference returned by demand_sys.get.",
                         },
                         "execution_brief": {
                             "type": "object",
@@ -95,18 +82,18 @@ def _build_definition() -> ToolDefinition:
                 visibility="Actor-owned Demand-sourced Task lifecycle",
                 durability="durable",
                 result_content_level="create/replay outcome, Task lifecycle state, opaque DemandRef, execution facts, and runtime result",
-                success_effect="Creates at most one actor Task for the exact Demand snapshot and starts its side frame only when newly created.",
+                success_effect="Creates at most one actor Task for the selected current Demand and starts its side frame only when newly created.",
                 failure_state_guarantee="Payload, source, active-Task, and authority rejections create no Task and execute no runtime instruction.",
                 reads=("task sys task record",),
                 writes=("task sys task record", "side turn through Task Sys runtime instruction"),
                 does_not_write=("Demands", "parent turns", "messages", "tracks", "artifacts", "actor private files"),
                 preconditions=(
                     "env.tool role-action policy allows this action for the active role",
-                    "demand_ref identifies one exact observed Demand revision",
+                    "demand_ref identifies one current actor-owned Demand",
                     "the actor has no different active Task",
                 ),
                 returns=("outcome", "task_id", "task_status", "demand_ref", "execution", "runtime", "state_changed"),
-                use_when=("The actor selected one live Demand revision for execution and no different Task is active.",),
+                use_when=("The actor selected one live Demand for execution and no different Task is active.",),
                 do_not_use_when=(
                     "A Task is already active; continue or finish that Task first.",
                     "You need to organize or terminalize a Demand; use Demand Sys.",

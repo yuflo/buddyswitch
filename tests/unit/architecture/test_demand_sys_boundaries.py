@@ -17,8 +17,11 @@ CLI = Path("tools/launcher/cli.py")
 ROLE_AUTH = Path("scripts/env/tool_runtime/role_auth.py")
 CONTEXT_IMPL = Path("scripts/env/tools/context/_impl.py")
 DAEMON_ADAPTER = Path("tools/launcher/demand_sys_daemon_adapter.py")
+DEMAND_HANDLER = Path("tools/launcher/demand_triage_handler.py")
 TASK_SKILL = Path("buddyswitch/skills/shared/task-management/SKILL.md")
 ARCH_ROOT = Path("docs/arch")
+SKILLS_ROOT = Path("buddyswitch/skills")
+ROLE_ROOT = Path("tools/launcher/assets/roles")
 GENERIC_DAEMON_PATHS = (
     Path("tools/launcher/daemon_contracts.py"),
     Path("tools/launcher/daemon_state.py"),
@@ -77,8 +80,11 @@ def _current_demand_surfaces() -> tuple[Path, ...]:
         ROLE_AUTH,
         CONTEXT_IMPL,
         DAEMON_ADAPTER,
+        DEMAND_HANDLER,
         TASK_SKILL,
         *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / ARCH_ROOT).glob("*.md"))),
+        *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / SKILLS_ROOT).rglob("SKILL.md"))),
+        *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / ROLE_ROOT).glob("*/AGENTS.md"))),
     )
 
 
@@ -96,6 +102,14 @@ def _retired_demand_tokens() -> tuple[str, ...]:
         "E_DEMAND_" + "RELATION",
         "terminal lineage",
         "live organization",
+        "[DEMAND " + "CHECK]",
+        "demand_sys." + "check",
+        "demand_sys." + "get_many",
+        "demand_sys." + "complete_check",
+        "demand_sys." + "absorb_into",
+        "checked_" + "revision",
+        '"absorbed"',
+        "expected_" + "revision",
     )
 
 
@@ -116,7 +130,7 @@ def test_dependency_direction_stays_inside_the_demand_owner_boundary() -> None:
     assert "env.domain.demand_sys" in context_imports
 
     impl_text = (REPO_ROOT / TOOL_ROOT / "_impl.py").read_text(encoding="utf-8")
-    assert 'getattr(rules, "demand_sys", None)' in impl_text
+    assert 'getattr(getattr(context, "rules", None), "demand_sys", None)' in impl_text
 
     forbidden_fragments = ("task_sys", "tools.launcher", "daemon_")
     for relative in _demand_implementation_files():
@@ -138,6 +152,22 @@ def test_demand_mutation_has_one_domain_owner_and_one_repository_write_path() ->
     assert "demands.transact_actor_state(" in domain_source
 
 
+def test_first_class_intake_state_and_domain_commands_are_absent() -> None:
+    repository_source = (REPO_ROOT / REPOSITORY).read_text(encoding="utf-8")
+    domain_source = (REPO_ROOT / DOMAIN).read_text(encoding="utf-8")
+
+    assert '"intakes"' not in repository_source
+    for command in (
+        "capture_" + "intake",
+        "get_" + "intake",
+        "begin_" + "triage",
+        "record_" + "triage",
+        "retry_" + "intake",
+        "apply_" + "triage_proposal",
+    ):
+        assert f"def {command}(" not in domain_source
+
+
 def test_current_demand_surfaces_do_not_preserve_the_retired_graph_model() -> None:
     for relative in _current_demand_surfaces():
         source = (REPO_ROOT / relative).read_text(encoding="utf-8")
@@ -145,7 +175,7 @@ def test_current_demand_surfaces_do_not_preserve_the_retired_graph_model() -> No
             assert token not in source, (relative, token)
 
 
-def test_demand_attention_has_one_adapter_and_no_task_or_generic_daemon_coupling() -> None:
+def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_neutral() -> None:
     for relative in GENERIC_DAEMON_PATHS:
         assert not [name for name in _imports(relative) if "demand" in name], relative
         source = (REPO_ROOT / relative).read_text(encoding="utf-8").lower()
@@ -159,13 +189,20 @@ def test_demand_attention_has_one_adapter_and_no_task_or_generic_daemon_coupling
     assert "demand_sys_daemon_adapter" in handler_imports
     assert "env.services.messages" in handler_imports
     assert not any("task_sys" in name for name in handler_imports)
-    assert "env.domain.demand_sys" in adapter_imports
+    assert "env.domain.demand_sys" not in adapter_imports
     assert not any("env.repos.demands" in name for name in adapter_imports)
     adapter_source = (REPO_ROOT / adapter).read_text(encoding="utf-8").lower()
     assert "task_sys" not in adapter_source
     assert "task sys" not in adapter_source
     assert "task lifecycle" not in adapter_source
     assert "task selection" not in adapter_source
+
+    demand_handler_imports = _imports(DEMAND_HANDLER)
+    assert "env.domain.demand_sys" in demand_handler_imports
+    assert "env.domain.task_sys" in demand_handler_imports
+    assert "daemon_contracts" in demand_handler_imports
+    instance_daemon_source = (REPO_ROOT / "tools/launcher/instance_daemon.py").read_text(encoding="utf-8")
+    assert "DemandTriageHandler()" in instance_daemon_source
 
     track_handler = Path("tools/launcher/track_comment_added_handler.py")
     track_imports = _imports(track_handler)
@@ -174,7 +211,7 @@ def test_demand_attention_has_one_adapter_and_no_task_or_generic_daemon_coupling
     actor_session = (REPO_ROOT / "tools/launcher/actor_session.py").read_text(encoding="utf-8")
     assert "demand_sys_daemon_adapter" in track_imports
     assert not any("task_sys" in name for name in track_imports)
-    assert "capture_inbound(" in track_source
+    assert "enqueue_inbound(" in track_source
     assert not (REPO_ROOT / "tools/launcher/task_sys_ingress.py").exists()
     assert 'source_type == "im.message.created"' not in task_runtime
     assert "demand_sys" not in actor_session
@@ -217,17 +254,20 @@ def test_current_architecture_allows_only_opaque_task_reference_collaboration() 
     text = (REPO_ROOT / "docs/arch/demand-sys-architecture.md").read_text(encoding="utf-8")
     normalized = " ".join(text.split())
 
-    assert "schema v2" in text
-    assert "canonical Demand set" in text
-    assert "two-pass actor canonicalization" in text
-    assert "opaque DemandRef" in text
-    assert "Actor + installed task-management skill" in text
-    assert "Track comment fact -> Track handler -> Demand daemon adapter -> Demand domain" in text
-    assert "Track thread structure never decides canonical Demand identity" in normalized
-    assert "Demand completion is independent of Task completion" in text
+    assert "schema-v4 actor aggregate" in text
+    assert "source-keyed private ingress receipt" in text
+    assert "isolated demand-triage side" in text
+    assert "thread-only demand_triage.resolve" in text
+    assert "no `outputSchema`" in text
+    assert "opaque `demand_ref`" in text
+    assert "parent demand-orchestration" in text
+    assert "IM and Track owners validate and materialize their exact source facts" in normalized
+    assert "The receipt is private recovery metadata" in text
+    assert "Demand completion and Task completion are independent" in text
     assert "## Explicit non-goals" in text
-    assert "No cross-Demand graph" in text
+    assert "No Demand graph" in text
+    assert "No first-class pre-Demand product object" in text
     assert "Task Sys -> IM or Demand" not in text
-    assert "Task implementation does not import, read, validate, call, subscribe to, or mutate Demand state" in normalized
+    assert "Task domain code does not import or mutate Demand state" in normalized
     assert "Track remains on its separate current Task path" not in text
     assert "Track handler -> Demand implementation in this phase" not in text

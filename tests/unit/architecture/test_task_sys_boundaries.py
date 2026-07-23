@@ -43,13 +43,19 @@ def _task_implementation_files() -> tuple[Path, ...]:
 
 
 def test_task_sys_has_no_demand_implementation_dependency() -> None:
-    for relative in _task_implementation_files():
+    for relative in (DOMAIN, READ_MODEL, RUNTIME):
         imports = _imports(relative)
         assert not [name for name in imports if "demand_sys" in name or "repos.demands" in name], relative
 
         source = (REPO_ROOT / relative).read_text(encoding="utf-8")
         assert "demand_sys." not in source, relative
         assert "transact_actor_state" not in source, relative
+
+    tool_imports = _imports(TOOL_ROOT / "_impl.py")
+    assert not [name for name in tool_imports if "demand_sys" in name or "repos.demands" in name]
+    tool_source = (REPO_ROOT / TOOL_ROOT / "_impl.py").read_text(encoding="utf-8")
+    assert "context.rules.demand_sys" in tool_source
+    assert "resolve_demand_ref(" in tool_source
 
 
 def test_task_sys_has_one_actor_create_action_and_one_creation_owner() -> None:
@@ -66,8 +72,7 @@ def test_task_sys_has_one_actor_create_action_and_one_creation_owner() -> None:
     assert "def _normalize_source(" not in domain_source
     assert "def _normalize_context(" not in domain_source
     assert not (REPO_ROOT / "tools/launcher/task_sys_ingress.py").exists()
-    assert 'extra["demand_ref"] = dict(source_ref)' in tool_impl_source
-    assert 'extra["demand_ref"] = dict(source_ref) if' not in tool_impl_source
+    assert '"demand_ref": source_ref.get("demand_ref")' in tool_impl_source
     assert "if not isinstance(instruction, dict)" not in tool_impl_source
     assert "buddyswitch/local/locks/task-sys" not in domain_source
     assert not (REPO_ROOT / "scripts/env/domain/tasks.py").exists()
@@ -89,9 +94,9 @@ def test_current_task_architecture_names_exact_owners_and_forward_only_boundary(
         "`starting` lease",
         "`work -> progress_check_pending -> progress_check`",
         "opaque handler checkpoint",
-        "opaque DemandRef",
+        "opaque current reference",
         "Actor + installed task-management skill",
-        "Every Task is created from one exact DemandRef",
+        "Every Task is created from one current opaque Demand reference",
         "`task_sys.create` is the sole Task creation path",
     ):
         assert token in text

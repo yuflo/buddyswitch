@@ -16,11 +16,10 @@ def external_demand_projection(
 ) -> dict[str, Any]:
     return {
         "demand_id": record["id"],
-        "intake_key": record["intake_key"],
+        "demand_ref": record["demand_ref"],
         "description": record["description"],
         "actor": dict(actor_target),
         "revision": record["revision"],
-        "checked_revision": record["checked_revision"],
         "terminal": deepcopy(record["terminal"]),
         "created_at": record["created_at"],
         "updated_at": record["updated_at"],

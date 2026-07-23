@@ -51,7 +51,11 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
         task_id = f"task-0001-{role}-payload-contract"
         task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
-            demand_ref={"demand_id": f"demand-payload-contract-{role}", "basis_revision": 1},
+            demand_ref={
+                "demand_id": f"demand-payload-contract-{role}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-payload-contract-{role}",
+            },
             execution_brief={
                 "description": "Payload contract fixture.",
                 "detail": f"Exercise payload contracts for {task_id}.",

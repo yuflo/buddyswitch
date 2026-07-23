@@ -18,17 +18,20 @@ Task Sys does not own needs, matching, queueing, or coordination among needs.
 Demand Sys owns those facts. The Actor + installed task-management skill is the
 only semantic composition boundary between the two products.
 
-Every Task is created from one exact DemandRef. The reference is an opaque
-snapshot of the actor's selection, not permission for Task Sys to read or
-interpret Demand state.
+Every Task is created from one current opaque Demand reference. The Task actor
+tool boundary resolves it to an internal snapshot before calling the Task
+domain. The snapshot is evidence of the actor's selection, not permission for
+Task Sys to read or interpret Demand state.
 
 ## Creation owner
 
 `scripts/env/domain/task_sys.py` owns Task creation, source idempotency, the
 single-active gate, lifecycle transitions, and Task frame construction.
-`task_sys.create` is the sole Task creation path. It accepts one opaque
-DemandRef snapshot plus a self-contained execution brief; Task Sys
-validates their shape but does not read or interpret Demand state.
+`task_sys.create` is the sole Task creation path. Its actor input is one opaque
+string returned by Demand Sys plus a self-contained execution brief. The tool
+boundary validates current actor ownership through Demand Sys, then calls Task
+Sys with the resolved internal snapshot. Task Sys validates that snapshot's
+shape but does not read or interpret Demand state.
 
 Inside its actor-scoped lock Task Sys:
 
@@ -50,8 +53,10 @@ Callers cannot supply an actor target. Every Task read or mutation verifies the
 same exact owner before access. The public action set is `create`, `list`,
 `get`, `close`, `cancel`, and `need_parent`.
 
-The adapter reaches Task semantics only through `ToolContext.rules.task_sys`
-and runtime work only through `TaskSysRuntimeAccess`. It does not import a
+The adapter reaches Task semantics through `ToolContext.rules.task_sys`,
+resolves the opaque reference through `ToolContext.rules.demand_sys`, and
+performs runtime work only through `TaskSysRuntimeAccess`. This is the
+application composition boundary. The Task domain and runtime do not import a
 Demand domain or repository, query Demand state, or mutate another product.
 
 ## Runtime frames
@@ -60,8 +65,8 @@ Task Sys owns three strict frame kinds:
 
 - `task_sys.side_frame` starts every new Task;
 - `task_sys.parent_frame` hands the same Task from side to parent;
-- `task_sys.outcome_frame` returns a terminal Task receipt and its exact
-  DemandRef to the parent Actor.
+- `task_sys.outcome_frame` returns a terminal Task receipt and its opaque
+  Demand reference to the parent Actor.
 
 Parent handoff and outcome attention both reuse the existing `submit_parent`
 runtime instruction. An outcome frame contains the Task id, canonical terminal
@@ -73,10 +78,9 @@ policy.
 Closing or canceling a Task persists terminal truth before outcome attention is
 submitted. Submission failure is explicit feedback and never rolls back the
 terminal Task. Every terminal Task emits the same outcome frame. The Actor
-rereads Demand-owned state, decides any later Demand mutation, acknowledges the
-resulting Demand revision when required, and then applies the same at-most-one
-Task selection rule to another live Demand. Task cancellation never implies
-Demand cancellation.
+uses `$demand-orchestration`, rereads Demand-owned state, decides any later
+Demand mutation, and then applies the same at-most-one Task selection rule to
+another live Demand. Task cancellation never implies Demand cancellation.
 
 ## Lifecycle attention
 
@@ -126,8 +130,9 @@ parent processing and must use `task_sys.need_parent`.
 
 Internal actor tools use `actor_task_projection`, which exposes canonical Task
 status and execution facts for the active actor. Public CLI and Web surfaces
-use `task_read`, an exact allowlist. Its `demand_ref` is the safe two-field
-object copied from every Task's exact source snapshot. Malformed or non-Demand
+use `task_read`, an exact allowlist. Its `demand_ref` contains the Demand id and
+opaque current reference copied from every Task's source snapshot; numeric
+Demand concurrency fields stay internal. Malformed or non-Demand
 records are rejected; they are not projected as a second supported shape. The
 read model never projects execution briefs, events, runtime instructions, paths,
 or raw context.
@@ -137,7 +142,7 @@ or raw context.
 Allowed:
 
 ```text
-Task tool -> ToolContext.rules.task_sys + TaskSysRuntimeAccess
+Task tool -> ToolContext.rules.demand_sys + ToolContext.rules.task_sys + TaskSysRuntimeAccess
 Task read projection -> Task domain
 Task runtime adapter -> Task domain + generic actor/runtime primitives
 Actor workflow -> independent Demand Sys and Task Sys actor actions

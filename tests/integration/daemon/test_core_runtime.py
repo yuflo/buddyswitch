@@ -557,6 +557,23 @@ class RecordingHandler:
         return self.result
 
 
+class ReconcileHandler:
+    name = "reconciler"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def reconcile(
+        self,
+        context: object,
+        state: object,
+        runtime: object,
+    ) -> object:
+        del context, state, runtime
+        self.calls.append("reconcile")
+        return daemon_contracts.HandlerResult.handled()
+
+
 class ExplodingOnceHandler:
     def __init__(self, *, result: object) -> None:
         self.name = "exploder"
@@ -773,6 +790,27 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.assertEqual(len(communication["mailbox_closed"]), 1)
             state = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
             self.assertIsNone(state["last_error"])
+
+    def test_run_daemon_reconciles_after_registration_and_timeout_poll(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            handler = ReconcileHandler()
+            fake_client = FakeRunDaemonClient(
+                notifications=[
+                    self.core.app_server.AppServerTimeoutError("idle"),
+                    StopDaemonLoop("stop"),
+                ],
+            )
+            self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication()
+
+            with self.assertRaises(StopDaemonLoop):
+                self.core.run_daemon(
+                    instance["instance_json"],
+                    handlers=[handler],
+                )
+
+            self.assertEqual(handler.calls, ["reconcile", "reconcile"])
 
     def test_run_daemon_sweeps_due_schedules_on_app_server_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

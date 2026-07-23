@@ -117,6 +117,10 @@ def start_side_thread(
     task_id: str | None = None,
     model: str | None = None,
     model_reasoning_effort: str | None = None,
+    output_schema: Mapping[str, Any] | None = None,
+    config_overrides: Mapping[str, Any] | None = None,
+    capability_hash: str | None = None,
+    binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_actor = _require_text(actor_id, "actor_id")
     normalized_parent = _require_text(parent_thread_id, "parent_thread_id")
@@ -132,6 +136,7 @@ def start_side_thread(
         ephemeral=True,
         model=normalized_model,
         model_reasoning_effort=normalized_effort,
+        config_overrides=config_overrides,
     )
     side_thread_id = _thread_id_from_start(started)
     side_thread_registry.register_side_thread(
@@ -142,12 +147,20 @@ def start_side_thread(
         task_id=task_id,
         purpose=normalized_purpose,
         turn_kind="starting",
+        capability_hash=capability_hash,
+        binding=binding,
     )
     lease_registered = True
     lease_consumed = False
     turn_id: str | None = None
     try:
-        sent = app_server.turn_start(socket_path, side_thread_id, text, permissions)
+        sent = app_server.turn_start(
+            socket_path,
+            side_thread_id,
+            text,
+            permissions,
+            output_schema=output_schema,
+        )
         turn_id = _turn_id_from_result(sent)
         try:
             transitioned = side_thread_registry.transition_side_thread_turn(

@@ -73,18 +73,28 @@ class _Runtime:
         return {"action": "start", "turn_id": f"turn-demand-{len(self.inputs)}"}
 
 
+class _RecordingState:
+    def __init__(self) -> None:
+        self.schedules: list[dict[str, Any]] = []
+
+    def upsert_schedule(self, **kwargs: Any) -> dict[str, Any]:
+        self.schedules.append(dict(kwargs))
+        return {"schedule_id": f"schedule-{len(self.schedules)}", **kwargs}
+
+
 class _WakeHandlerDispatcher:
     def __init__(self, *, identity_id: str, role_id: str) -> None:
         self.context = type("Context", (), {"actor_id": identity_id, "role": role_id})()
         self.identity_id = identity_id
         self.role_id = role_id
         self.runtime = _Runtime()
+        self.state = _RecordingState()
         self.handler = im_wake_handler.ImMessageCreatedHandler()
         self.triggers: list[Any] = []
 
     def __call__(self, trigger: Any) -> dict[str, Any]:
         self.triggers.append(trigger)
-        result = self.handler.handle(self.context, None, self.runtime, trigger)
+        result = self.handler.handle(self.context, self.state, self.runtime, trigger)
         return {
             "accepted": True,
             "handled_count": 1 if result.status == "handled" else 0,
@@ -375,12 +385,17 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
             {"actor_id": target_identity_id, "role_id": target_role_id},
             state="all",
         )
-        self.assertEqual(len(demands), 1)
-        self.assertEqual(demands[0]["intake_key"], f"im.message.created:{message_id}")
-        self.assertEqual(demands[0]["description"], "socket demand probe")
-        self.assertEqual(demands[0]["checked_revision"], 0)
-        self.assertEqual(len(dispatcher.runtime.inputs), 1)
-        self.assertIn("[DEMAND CHECK]", dispatcher.runtime.inputs[0])
+        self.assertEqual(demands, [])
+        self.assertEqual(len(dispatcher.state.schedules), 1)
+        self.assertEqual(
+            dispatcher.state.schedules[0]["schedule_key"],
+            f"demand-ingress:im.message.created:{message_id}",
+        )
+        self.assertEqual(
+            dispatcher.state.schedules[0]["trigger_type"],
+            "demand.ingress.triage",
+        )
+        self.assertEqual(dispatcher.runtime.inputs, [])
         self.assertEqual(self._task_records(), [])
 
     def test_actor_to_actor_send_writes_refs_and_reaches_target_local_runtime(self) -> None:
@@ -485,12 +500,17 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
             {"actor_id": target_identity_id, "role_id": target_role_id},
             state="all",
         )
-        self.assertEqual(len(demands), 1)
-        self.assertEqual(demands[0]["intake_key"], f"im.message.created:{message_id}")
-        self.assertEqual(demands[0]["description"], "integrated ping")
-        self.assertEqual(demands[0]["checked_revision"], 0)
-        self.assertEqual(len(dispatcher.runtime.inputs), 1)
-        self.assertIn("[DEMAND CHECK]", dispatcher.runtime.inputs[0])
+        self.assertEqual(demands, [])
+        self.assertEqual(len(dispatcher.state.schedules), 1)
+        self.assertEqual(
+            dispatcher.state.schedules[0]["schedule_key"],
+            f"demand-ingress:im.message.created:{message_id}",
+        )
+        self.assertEqual(
+            dispatcher.state.schedules[0]["trigger_type"],
+            "demand.ingress.triage",
+        )
+        self.assertEqual(dispatcher.runtime.inputs, [])
         self.assertEqual(self._task_records(), [])
 
     def test_wake_bridge_reports_offline_target_without_mailbox_request(self) -> None:

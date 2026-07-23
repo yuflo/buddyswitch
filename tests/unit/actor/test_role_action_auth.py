@@ -77,10 +77,6 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "demand_sys.revise",
             "demand_sys.list",
             "demand_sys.get",
-            "demand_sys.get_many",
-            "demand_sys.check",
-            "demand_sys.complete_check",
-            "demand_sys.absorb_into",
             "demand_sys.complete",
             "demand_sys.cancel",
         }

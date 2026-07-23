@@ -56,18 +56,21 @@ def _external_demand_ref(task: Mapping[str, Any]) -> dict[str, Any]:
     source_ref = task.get("source_ref")
     if not isinstance(source_ref, Mapping):
         raise ValueError("task.source_ref must be an exact DemandRef")
-    if set(source_ref) != {"demand_id", "basis_revision"}:
-        raise ValueError("task.source_ref must contain exactly demand_id and basis_revision")
+    if set(source_ref) != {"demand_id", "basis_revision", "demand_ref"}:
+        raise ValueError("task.source_ref must contain exactly demand_id, basis_revision, and demand_ref")
     demand_id = source_ref.get("demand_id")
     basis_revision = source_ref.get("basis_revision")
+    demand_ref = source_ref.get("demand_ref")
     normalized_demand_id = runtime_files.require_id(demand_id, "demand_id")
     if not normalized_demand_id.startswith("demand-"):
         raise ValueError("task.source_ref.demand_id must be a Demand id")
     if type(basis_revision) is not int or basis_revision < 1:
         raise ValueError("task.source_ref.basis_revision must be a positive integer")
+    if not isinstance(demand_ref, str) or not demand_ref.startswith("dref-"):
+        raise ValueError("task.source_ref.demand_ref must be an opaque Demand reference")
     return {
         "demand_id": normalized_demand_id,
-        "basis_revision": basis_revision,
+        "demand_ref": demand_ref,
     }
 
 

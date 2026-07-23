@@ -56,9 +56,13 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         skill_text = skill_path.read_text(encoding="utf-8")
         lowered = skill_text.lower()
         self.assertIn("task sys", lowered)
-        self.assertIn("[demand check]", lowered)
-        self.assertIn("task_sys.outcome_frame", skill_text)
-        self.assertIn("task_sys.create", skill_text)
+        self.assertNotIn("[demand check]", lowered)
+        self.assertNotIn("task_sys.outcome_frame", skill_text)
+        self.assertNotIn("Task Selection Rule", skill_text)
+        self.assertNotIn("Task Outcome Check", skill_text)
+        self.assertIn("task_sys.side_frame", skill_text)
+        self.assertIn("task_sys.parent_frame", skill_text)
+        self.assertIn("[TASK PROGRESS CHECK]", skill_text)
         self.assertIn("task_sys.list", skill_text)
         self.assertIn("task_sys.get", skill_text)
         self.assertIn("task_sys.close", skill_text)
@@ -86,19 +90,9 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
 
         self.assertIn("On `task_sys.side_frame`, call `task_sys.close`", skill_text)
         self.assertIn("On `task_sys.parent_frame`, complete the requested parent work and call `task_sys.close`", skill_text)
-        self.assertIn("choose at most one", skill_text.lower())
-        self.assertIn("latest demand revision", skill_text.lower())
-        self.assertIn("task_sys.task", skill_text)
-        self.assertIn('{"type":"task_sys.task","ref":{"task_id":"<task_id>"}}', skill_text)
-        self.assertIn("pass the frame's `evidence_ref` unchanged", skill_text.lower())
-        self.assertIn("after any demand mutation", skill_text.lower())
-        self.assertIn("acknowledge its exact returned revision", skill_text.lower())
-        self.assertIn("continue now with the task selection rule", skill_text.lower())
-        self.assertIn("keep the demand live", skill_text.lower())
-        self.assertIn("call `demand_sys.get`", skill_text.lower())
-        self.assertIn("already terminal, do not mutate it", skill_text.lower())
-        self.assertIn("task cancellation does not imply demand cancellation", skill_text.lower())
-        self.assertIn("complete, cancel, revise, or keep", skill_text.lower())
+        self.assertNotIn("choose at most one", skill_text.lower())
+        self.assertNotIn("latest demand revision", skill_text.lower())
+        self.assertNotIn("demand_sys.", skill_text)
         self.assertNotIn("For IM source frames", skill_text)
         self.assertNotIn("message.send(reply_to=...)", skill_text)
         self.assertNotIn("message.mark(..., disposition=absorbed)", skill_text)
@@ -117,30 +111,35 @@ class TaskManagementSkillArchitectureTests(RuntimeWorkspaceTestCase):
         self.assertNotIn(stale_finish, skill_text)
         self.assertNotIn(stale_label, skill_text)
 
-    def test_demand_check_treats_track_provenance_as_context_not_relation_truth(self) -> None:
-        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
-        skill_text = skill_path.read_text(encoding="utf-8")
-        normalized = " ".join(skill_text.split())
+    def test_demand_skills_own_triage_and_orchestration_judgment(self) -> None:
+        triage = (
+            ROOT
+            / "buddyswitch/skills/shared/demand-triage/SKILL.md"
+        ).read_text(encoding="utf-8")
+        orchestration = (
+            ROOT
+            / "buddyswitch/skills/shared/demand-orchestration/SKILL.md"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("Demand source refs are provenance and retrieval context, not Demand identity", skill_text)
-        self.assertIn("`track.comment.added`", skill_text)
-        self.assertIn("use the exact Track id with Track reads", normalized)
-        self.assertIn(
-            "Track thread structure alone never decides whether two Demand rows express the same need",
-            normalized,
-        )
-
-    def test_demand_check_teaches_two_pass_canonicalization_and_active_task_targeting(self) -> None:
-        skill_path = ROOT / "buddyswitch" / "skills" / "shared" / "task-management" / "SKILL.md"
-        normalized = " ".join(skill_path.read_text(encoding="utf-8").split())
-
-        self.assertIn("compare every pending description with the compact live index", normalized)
-        self.assertIn("Only for plausible candidates, call `demand_sys.get_many`", normalized)
-        self.assertIn("revise it, absorb it, keep it independent, or cancel it", normalized)
-        self.assertIn("Before calling `demand_sys.absorb_into`, call `task_sys.list(status=active)`", normalized)
-        self.assertIn("that active Task's Demand must remain the absorption target", normalized)
-        self.assertIn("Never update the active Task's `basis_revision` after absorption", normalized)
-        self.assertIn("reread the latest Demand during progress and outcome checks", normalized)
+        self.assertIn("demand_triage.resolve", triage)
+        self.assertIn("no_action_needed", triage)
+        self.assertIn("merge_intake", triage)
+        self.assertNotIn("needs_parent_judgment", triage)
+        self.assertNotIn("demand_sys__create", triage)
+        self.assertNotIn("output schema", triage.lower())
+        self.assertNotIn("message__send", triage)
+        self.assertIn("select exactly one", orchestration.lower())
+        self.assertIn("task_sys.outcome_frame", orchestration)
+        self.assertIn("task_sys__create", orchestration)
+        for criterion in (
+            "urgency",
+            "user commitment",
+            "blocked downstream work",
+            "continuity",
+            "evidence readiness",
+            "staleness",
+        ):
+            self.assertIn(criterion, orchestration.lower())
 
     def test_task_sys_close_surfaces_use_frame_work_not_source_bound_work(self) -> None:
         close_action = tool_router.get_action_definition("task_sys", "close")

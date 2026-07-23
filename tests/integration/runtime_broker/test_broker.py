@@ -272,6 +272,86 @@ class RuntimeBrokerTests(unittest.TestCase):
         self.assertNotIn("browser.open_url", json.dumps(response.get("allowed_next_actions", []), ensure_ascii=True))
         self.assertEqual(calls, [])
 
+    def test_demand_ingress_resolve_dispatches_only_for_active_instance_actor(self) -> None:
+        dispatcher = _require_module("runtime_kernel.dispatcher")
+        calls: list[dict[str, object]] = []
+
+        class FakeDemandTriageRuntime:
+            class DemandTriageRuntimeError(RuntimeError):
+                def __init__(self) -> None:
+                    super().__init__("unused")
+                    self.code = "E_UNUSED"
+                    self.message = "unused"
+                    self.retriable = False
+
+            @staticmethod
+            def resolve_request(**kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                return {
+                    "decision": "no_action_needed",
+                    "demand_changed": False,
+                }
+
+        instance_json = self._instance_json(
+            actor_id="act-market-triage",
+            role="market",
+        )
+        payload = json.loads(instance_json.read_text(encoding="utf-8"))
+        payload["thread_id"] = "thr-main"
+        instance_json.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        with patch.object(
+            dispatcher,
+            "demand_triage_runtime",
+            FakeDemandTriageRuntime,
+        ):
+            result = self._dispatch(
+                method="demand.ingress.resolve",
+                params={
+                    "capability": "host-capability",
+                    "proposal": {
+                        "decision": "no_action_needed",
+                        "reason": "Acknowledgement only.",
+                        "demand_ref": None,
+                        "description": None,
+                        "detail": None,
+                        "reply_content": None,
+                    },
+                },
+                actor_id="act-market-triage",
+                role="market",
+                instance_json=instance_json,
+            )
+            wrong_actor = self._dispatch(
+                method="demand.ingress.resolve",
+                params={
+                    "actor_id": "act-market-wrong000000",
+                    "capability": "host-capability",
+                    "proposal": {},
+                },
+                actor_id="act-market-triage",
+                role="market",
+                instance_json=instance_json,
+            )
+
+        self.assertEqual(result["decision"], "no_action_needed")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["instance_json"], instance_json)
+        self.assertEqual(
+            calls[0]["instance_record"]["actor_id"],
+            self.workspace.actor_id(
+                role="market",
+                label="act-market-triage",
+            ),
+        )
+        self.assertFalse(wrong_actor["ok"])
+        self.assertEqual(
+            wrong_actor["error"]["code"],
+            "E_RUNTIME_BROKER_PERMISSION",
+        )
+
     def test_browser_acquire_method_has_structured_contract(self) -> None:
         dispatcher = _require_module("runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)

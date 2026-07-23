@@ -464,6 +464,7 @@ def dispatch_env_tool_request(
     instance_payload: dict[str, Any],
     manifest: dict[str, Any],
     manifest_path: Path | None = None,
+    invocation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runtime_actor = _actor_identity_profile_from_dispatch(actor_id=actor_id, active_role=active_role)
     current_identity = runtime_actor.identity.to_payload()
@@ -605,7 +606,23 @@ def dispatch_env_tool_request(
             correctable_fields=["args"],
         )
 
-    from env.tool_runtime.context import ToolContext
+    from env.tool_runtime.context import InvocationFact, ToolContext
+
+    invocation_payload = invocation or {}
+    if not isinstance(invocation_payload, dict):
+        raise ValueError("invocation must be an object")
+    normalized_invocation: dict[str, str | None] = {}
+    for field_name in ("thread_id", "turn_id", "request_id"):
+        value = invocation_payload.get(field_name)
+        if value is not None and (
+            not isinstance(value, str) or not value.strip()
+        ):
+            raise ValueError(
+                f"invocation.{field_name} must be a non-empty string"
+            )
+        normalized_invocation[field_name] = (
+            value.strip() if isinstance(value, str) else None
+        )
 
     context = ToolContext.from_identity_profile(
         actor_identity_profile=runtime_actor,
@@ -613,6 +630,7 @@ def dispatch_env_tool_request(
         instance_payload=dict(instance_payload),
         manifest=dict(manifest),
         manifest_path=manifest_path,
+        invocation=InvocationFact(**normalized_invocation),
     )
     if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED:
         from env.domain import task_sys

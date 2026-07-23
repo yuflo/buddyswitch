@@ -112,36 +112,40 @@ class EnvToolSchemaContractTests(unittest.TestCase):
                         path=f"{tool}.{action}.{field_name}",
                     )
 
-    def test_demand_revision_and_absorb_keep_provenance_domain_owned(self) -> None:
+    def test_demand_actor_surface_hides_concurrency_and_provenance_inputs(self) -> None:
+        create = catalog.get_action_definition("demand_sys", "create").input_schema
         revise = catalog.get_action_definition("demand_sys", "revise").input_schema
-        absorb = catalog.get_action_definition("demand_sys", "absorb_into").input_schema
-        merged_target = absorb["properties"]["merged_target"]
+        complete = catalog.get_action_definition("demand_sys", "complete").input_schema
+        cancel = catalog.get_action_definition("demand_sys", "cancel").input_schema
 
         self.assertEqual(
-            set(revise["properties"]),
-            {"demand_id", "expected_revision", "description", "detail"},
-        )
-        self.assertEqual(
-            revise["required"],
-            ["demand_id", "expected_revision", "description", "detail"],
-        )
-        self.assertEqual(
-            set(merged_target["properties"]),
+            set(create["properties"]),
             {"description", "detail"},
         )
         self.assertEqual(
-            merged_target["required"],
-            ["description", "detail"],
+            set(revise["properties"]),
+            {"demand_ref", "description", "detail", "reason"},
         )
+        self.assertEqual(
+            revise["required"],
+            ["demand_ref", "description", "detail", "reason"],
+        )
+        self.assertEqual(
+            set(complete["properties"]),
+            {"demand_ref", "summary", "evidence_refs"},
+        )
+        self.assertEqual(
+            set(cancel["properties"]),
+            {"demand_ref", "summary"},
+        )
+        serialized = json.dumps(catalog.env_tools_description(), ensure_ascii=True)
+        self.assertNotIn("expected_revision", serialized)
 
     def test_demand_completion_schema_exposes_exact_task_evidence_identity(self) -> None:
-        create = catalog.get_action_definition("demand_sys", "create").input_schema
         complete = catalog.get_action_definition("demand_sys", "complete").input_schema
 
-        source_ref = create["properties"]["source_refs"]["items"]["properties"]["ref"]
         evidence_ref = complete["properties"]["evidence_refs"]["items"]["properties"]["ref"]
 
-        self.assertNotIn("task_id", source_ref["properties"])
         self.assertIn("task_id", evidence_ref["properties"])
         self.assertIn("task_sys.task", evidence_ref["properties"]["task_id"]["description"])
 
@@ -260,10 +264,8 @@ class EnvToolSchemaContractTests(unittest.TestCase):
         self.assertIs(task_sys_create.get("additionalProperties"), False)
         self.assertEqual(set(task_sys_create["properties"]), {"demand_ref", "execution_brief"})
         demand_ref = task_sys_create["properties"]["demand_ref"]
-        self.assertIs(demand_ref.get("additionalProperties"), False)
-        self.assertEqual(demand_ref.get("required"), ["demand_id", "basis_revision"])
-        self.assertEqual(set(demand_ref["properties"]), {"demand_id", "basis_revision"})
-        self.assertEqual(demand_ref["properties"]["basis_revision"].get("minimum"), 1)
+        self.assertEqual(demand_ref.get("type"), "string")
+        self.assertNotIn("properties", demand_ref)
         execution_brief = task_sys_create["properties"]["execution_brief"]
         self.assertIs(execution_brief.get("additionalProperties"), False)
         self.assertEqual(execution_brief.get("required"), ["description", "detail"])

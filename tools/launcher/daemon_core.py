@@ -606,6 +606,107 @@ def dispatch_trigger(
     }
 
 
+def reconcile_handlers(
+    context: daemon_contracts.DaemonContext,
+    state: daemon_state.DaemonState,
+    runtime: Any,
+    handlers: list[Any] | tuple[Any, ...],
+) -> dict[str, Any]:
+    handled_count = 0
+    ignored_count = 0
+    failed_count = 0
+    results: list[dict[str, Any]] = []
+    for handler in handlers:
+        reconcile = getattr(handler, "reconcile", None)
+        if not callable(reconcile):
+            continue
+        handler_name = _handler_name(handler)
+        try:
+            result = reconcile(context, state, runtime)
+        except Exception as exc:
+            message = str(exc)
+            failed_count += 1
+            state.record_handler_error(
+                handler_name,
+                origin_turn_id=None,
+                message=message,
+            )
+            _append_daemon_event(
+                context,
+                "handler_reconcile_failed",
+                handler=handler_name,
+                error_type=type(exc).__name__,
+            )
+            results.append({
+                "handler": handler_name,
+                "status": "failed",
+                "message": message,
+            })
+            continue
+        status = getattr(result, "status", None)
+        message = getattr(result, "message", None)
+        if isinstance(result, dict):
+            status = result.get("status")
+            message = result.get("message")
+        if status not in {"ignored", "handled", "failed"}:
+            message = (
+                "handler reconcile returned invalid result: "
+                f"{type(result).__name__}"
+            )
+            failed_count += 1
+            state.record_handler_error(
+                handler_name,
+                origin_turn_id=None,
+                message=message,
+            )
+            _append_daemon_event(
+                context,
+                "handler_reconcile_failed",
+                handler=handler_name,
+                error_type="invalid_result",
+            )
+            results.append({
+                "handler": handler_name,
+                "status": "failed",
+                "message": message,
+            })
+            continue
+        normalized = daemon_contracts.HandlerResult(
+            status,
+            str(message) if status == "failed" and message else None,
+        )
+        state.record_handler_result(
+            handler_name,
+            normalized,
+            origin_turn_id=None,
+        )
+        if status == "handled":
+            handled_count += 1
+        elif status == "ignored":
+            ignored_count += 1
+        else:
+            failed_count += 1
+        _append_daemon_event(
+            context,
+            "handler_reconcile_result",
+            handler=handler_name,
+            result=status,
+        )
+        row: dict[str, Any] = {
+            "handler": handler_name,
+            "status": status,
+        }
+        if normalized.message:
+            row["message"] = normalized.message
+        results.append(row)
+    return {
+        "reconciled_count": handled_count,
+        "ignored_count": ignored_count,
+        "failed_count": failed_count,
+        "handlers": results,
+    }
+
+
 def sweep_due_scheduled_triggers(
     context: daemon_contracts.DaemonContext,
     state: daemon_state.DaemonState,
@@ -927,14 +1028,27 @@ def run_daemon(
             else:
                 register_daemon_actor(context, identity_route, notify_subscriptions=notify_subscriptions)
             registered = True
+            runtime = daemon_runtime.DaemonRuntime(context=context)
+            reconcile_handlers(
+                context,
+                state,
+                runtime,
+                daemon_handlers,
+            )
             while True:
                 try:
                     notification = client.read_notification()
                 except app_server.AppServerTimeoutError:
+                    reconcile_handlers(
+                        context,
+                        state,
+                        runtime,
+                        daemon_handlers,
+                    )
                     sweep_due_scheduled_triggers(
                         context,
                         state,
-                        daemon_runtime.DaemonRuntime(context=context),
+                        runtime,
                         daemon_handlers,
                     )
                     heartbeat_daemon_actor(context, identity_route)
@@ -946,7 +1060,7 @@ def run_daemon(
                 sweep_due_scheduled_triggers(
                     context,
                     state,
-                    daemon_runtime.DaemonRuntime(context=context),
+                    runtime,
                     daemon_handlers,
                 )
     except app_server.AppServerError as exc:

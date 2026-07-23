@@ -25,7 +25,7 @@ ROOT = REPO_ROOT
 SCRIPTS = ROOT / "scripts"
 
 import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.domain import task_sys  # noqa: E402
+from env.domain import demand_sys, task_sys  # noqa: E402
 from env.tool_runtime import registry as tool_catalog  # noqa: E402
 from env.tool_runtime import results as tool_results  # noqa: E402
 from env.tool_runtime import context as runtime_context  # noqa: E402
@@ -46,7 +46,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         normalized_label = label.replace("_", "-")
         return task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
-            demand_ref={"demand_id": f"demand-response-{normalized_label}", "basis_revision": 1},
+            demand_ref={
+                "demand_id": f"demand-response-{normalized_label}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-response-{normalized_label}",
+            },
             execution_brief={
                 "description": f"Task response fixture: {label}.",
                 "detail": f"Exercise the exact Task response contract for {label}.",
@@ -54,12 +58,28 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         )
 
     @staticmethod
-    def _create_args(*, detail: str = "Read the exact current product contract.") -> dict[str, object]:
+    def _actor_demand_ref(*, actor_id: str, label: str) -> str:
+        actor_target = {"actor_id": actor_id, "role_id": "dev"}
+        created = demand_sys.create(
+            actor_target,
+            f"actor-create:{label}",
+            "Inspect the current product contract.",
+            "Read the exact current product contract.",
+            [{
+                "type": "actor.self_requested",
+                "ref": {"thread_id": "thr-main", "turn_id": f"turn-{label}"},
+            }],
+        )
+        return str(created["demand_ref"])
+
+    @staticmethod
+    def _create_args(
+        *,
+        demand_ref: str,
+        detail: str = "Read the exact current product contract.",
+    ) -> dict[str, object]:
         return {
-            "demand_ref": {
-                "demand_id": "demand-task-sys-create-response",
-                "basis_revision": 2,
-            },
+            "demand_ref": demand_ref,
             "execution_brief": {
                 "description": "Inspect the current product contract.",
                 "detail": detail,
@@ -70,6 +90,8 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-sys-create"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        demand_ref = self._actor_demand_ref(actor_id=actor_id, label="create-response")
+        create_args = self._create_args(demand_ref=demand_ref)
 
         with patch.object(
             runtime_context.TaskSysRuntimeAccess,
@@ -87,7 +109,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 role="dev",
                 tool="task_sys",
                 action="create",
-                args=self._create_args(),
+                args=create_args,
             )
             replay = self._dispatch(
                 instance_json=instance_json,
@@ -95,7 +117,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 role="dev",
                 tool="task_sys",
                 action="create",
-                args=self._create_args(),
+                args=create_args,
             )
 
         self._assert_write_success_contract(created)
@@ -104,7 +126,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self.assertEqual(replay["outcome"], "existing")
         self.assertEqual(replay["task_id"], created["task_id"])
         self.assertEqual(created["task_status"], task_sys.SIDE_PROCESSING)
-        self.assertEqual(created["demand_ref"], self._create_args()["demand_ref"])
+        self.assertEqual(created["demand_ref"]["demand_ref"], demand_ref)
         self.assertEqual(created["runtime"]["action"], "start_side")
         self.assertIs(created["state_changed"], True)
         self.assertIs(replay["state_changed"], False)
@@ -120,6 +142,8 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         active = self._direct_task(actor_id=actor_id, label="existing-active")
+        demand_ref = self._actor_demand_ref(actor_id=actor_id, label="create-conflict")
+        create_args = self._create_args(demand_ref=demand_ref)
 
         with patch.object(
             runtime_context.TaskSysRuntimeAccess,
@@ -133,7 +157,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 role="dev",
                 tool="task_sys",
                 action="create",
-                args=self._create_args(),
+                args=create_args,
             )
 
         self._assert_rejection_contract(active_conflict)
@@ -153,7 +177,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 role="dev",
                 tool="task_sys",
                 action="create",
-                args=self._create_args(),
+                args=create_args,
             )
             source_conflict = self._dispatch(
                 instance_json=instance_json,
@@ -161,7 +185,10 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 role="dev",
                 tool="task_sys",
                 action="create",
-                args=self._create_args(detail="Changed brief for the same immutable source."),
+                args=self._create_args(
+                    demand_ref=demand_ref,
+                    detail="Changed brief for the same immutable source.",
+                ),
             )
 
         self._assert_write_success_contract(created)
@@ -171,7 +198,9 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
 
     def test_task_sys_create_reloads_runtime_failure_state(self) -> None:
         actor_label = "act-dev-task-sys-create-runtime-failure"
+        actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
+        demand_ref = self._actor_demand_ref(actor_id=actor_id, label="runtime-failure")
 
         def fail_side(_access: object, instruction: dict[str, object]) -> dict[str, object]:
             task_sys.record_side_runtime_failure(
@@ -203,7 +232,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
                 role="dev",
                 tool="task_sys",
                 action="create",
-                args=self._create_args(),
+                args=self._create_args(demand_ref=demand_ref),
             )
 
         self._assert_write_success_contract(response)
@@ -296,7 +325,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         created = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
-            demand_ref={"demand_id": "demand-side-close", "basis_revision": 3},
+            demand_ref={
+                "demand_id": "demand-side-close",
+                "basis_revision": 3,
+                "demand_ref": "dref-side-close",
+            },
             execution_brief={
                 "description": "Complete the selected Demand.",
                 "detail": "Perform the bounded side work and record its result.",
@@ -359,7 +392,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         created = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
-            demand_ref={"demand_id": "demand-parent-close", "basis_revision": 1},
+            demand_ref={
+                "demand_id": "demand-parent-close",
+                "basis_revision": 1,
+                "demand_ref": "dref-parent-close",
+            },
             execution_brief={
                 "description": "Complete parent-required Demand work.",
                 "detail": "Use the same Task through handoff and completion.",
@@ -403,7 +440,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         created = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
-            demand_ref={"demand_id": "demand-completion-failure", "basis_revision": 2},
+            demand_ref={
+                "demand_id": "demand-completion-failure",
+                "basis_revision": 2,
+                "demand_ref": "dref-completion-failure",
+            },
             execution_brief={
                 "description": "Complete work before attention failure.",
                 "detail": "The Task truth must remain terminal if parent submission fails.",
@@ -444,7 +485,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         created = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
-            demand_ref={"demand_id": "demand-side-cancel", "basis_revision": 2},
+            demand_ref={
+                "demand_id": "demand-side-cancel",
+                "basis_revision": 2,
+                "demand_ref": "dref-side-cancel",
+            },
             execution_brief={
                 "description": "Attempt the selected Demand.",
                 "detail": "Stop cleanly when the execution route is unavailable.",
@@ -507,7 +552,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         created = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
-            demand_ref={"demand_id": "demand-awaiting-cancel", "basis_revision": 2},
+            demand_ref={
+                "demand_id": "demand-awaiting-cancel",
+                "basis_revision": 2,
+                "demand_ref": "dref-awaiting-cancel",
+            },
             execution_brief={
                 "description": "Attempt a Demand that needs parent resources.",
                 "detail": "Cancel cleanly if the parent handoff cannot start.",
@@ -559,7 +608,11 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         created = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
-            demand_ref={"demand_id": "demand-cancel-failure", "basis_revision": 1},
+            demand_ref={
+                "demand_id": "demand-cancel-failure",
+                "basis_revision": 1,
+                "demand_ref": "dref-cancel-failure",
+            },
             execution_brief={
                 "description": "Attempt work before cancellation.",
                 "detail": "Keep terminal Task truth when outcome submission fails.",

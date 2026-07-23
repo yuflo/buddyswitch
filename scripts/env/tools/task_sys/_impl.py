@@ -212,7 +212,10 @@ def _success(
         source_ref = task.get("source_ref")
         if not isinstance(source_ref, Mapping):
             raise RuntimeError("created Task is missing its DemandRef")
-        extra["demand_ref"] = dict(source_ref)
+        extra["demand_ref"] = {
+            "demand_id": source_ref.get("demand_id"),
+            "demand_ref": source_ref.get("demand_ref"),
+        }
         extra["runtime"] = dict(runtime) if isinstance(runtime, dict) else None
         effect_summary = (
             "Created and started Demand-sourced Task."
@@ -342,9 +345,14 @@ def _actor_owned_task(task_sys: Any, context: Any, task_id: str) -> dict[str, An
 def create(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
     try:
-        result = task_sys.create(
+        demand_sys = context.rules.demand_sys
+        resolved_demand_ref = demand_sys.resolve_demand_ref(
             actor_target=_actor_target(context),
             demand_ref=args.get("demand_ref"),
+        )
+        result = task_sys.create(
+            actor_target=_actor_target(context),
+            demand_ref=resolved_demand_ref,
             execution_brief=args.get("execution_brief"),
         )
     except task_sys.TaskSysError as exc:
@@ -393,7 +401,8 @@ def list_tasks(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 def get(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     task_sys = _task_sys_domain(context)
     task_id = str(args.get("task_id") or "")
-    task = _actor_owned_task(task_sys, context, task_id)
+    _actor_owned_task(task_sys, context, task_id)
+    task = task_sys.actor_task_detail(task_id)
     events = _task_events(task)
     return _read_success(
         "get",

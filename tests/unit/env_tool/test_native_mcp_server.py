@@ -54,14 +54,29 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         self.assertIn("task_sys__need_parent", by_name)
         self.assertNotIn("task_sys__checkpoint_update", by_name)
         self.assertNotIn("task__get", by_name)
+        self.assertNotIn("demand_sys__resolve_ingress", by_name)
+        self.assertNotIn("demand_triage__resolve", by_name)
         self.assertEqual(by_name["message__get"]["inputSchema"]["type"], "object")
         self.assertEqual(by_name["message__list"]["inputSchema"]["type"], "object")
 
     def test_tools_call_dispatches_decoded_env_tool_request(self) -> None:
         calls: list[dict[str, Any]] = []
 
-        def dispatcher(*, tool: str, action: str, args: dict[str, Any]) -> dict[str, Any]:
-            calls.append({"tool": tool, "action": action, "args": args})
+        def dispatcher(
+            *,
+            tool: str,
+            action: str,
+            args: dict[str, Any],
+            invocation: dict[str, str],
+        ) -> dict[str, Any]:
+            calls.append(
+                {
+                    "tool": tool,
+                    "action": action,
+                    "args": args,
+                    "invocation": invocation,
+                }
+            )
             return {"ok": True, "rows": []}
 
         response = self.server.handle_request(
@@ -69,12 +84,31 @@ class EnvNativeMcpServerTests(unittest.TestCase):
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "tools/call",
-                "params": {"name": "message__list", "arguments": {}},
+                "params": {
+                    "name": "message__list",
+                    "arguments": {},
+                    "_meta": {
+                        "threadId": "thr-main",
+                        "x-codex-turn-metadata": {"turn_id": "turn-9"},
+                    },
+                },
             },
             dispatcher=dispatcher,
         )
 
-        self.assertEqual(calls, [{"tool": "message", "action": "list", "args": {}}])
+        self.assertEqual(
+            calls,
+            [{
+                "tool": "message",
+                "action": "list",
+                "args": {},
+                "invocation": {
+                    "thread_id": "thr-main",
+                    "turn_id": "turn-9",
+                    "request_id": "3",
+                },
+            }],
+        )
         result = response["result"]
         self.assertIs(result.get("isError"), False)
         self.assertEqual(result["content"][0]["type"], "text")
@@ -101,7 +135,14 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         self.assertIn("task__get", payload["error"]["message"])
 
     def test_tools_call_returns_broker_error_as_mcp_tool_error_content(self) -> None:
-        def dispatcher(*, tool: str, action: str, args: dict[str, Any]) -> dict[str, Any]:
+        def dispatcher(
+            *,
+            tool: str,
+            action: str,
+            args: dict[str, Any],
+            invocation: dict[str, str],
+        ) -> dict[str, Any]:
+            del tool, action, args, invocation
             raise self.server.McpToolDispatchError(
                 "E_RUNTIME_BROKER_UNAVAILABLE",
                 "runtime broker socket not found",

@@ -15,7 +15,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 HELPER_DIR = Path(__file__).resolve().parent
 SCRIPTS = HELPER_DIR.parents[1] / "scripts"
@@ -732,12 +732,31 @@ def thread_start(
     ephemeral: bool | None = None,
     model: str | None = None,
     model_reasoning_effort: str | None = None,
+    config_overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_instructions = _optional_non_empty_text(developer_instructions, "developer_instructions")
     normalized_model = _optional_non_empty_text(model, "model")
     normalized_effort = _optional_non_empty_text(model_reasoning_effort, "model_reasoning_effort")
     if ephemeral is not None and not isinstance(ephemeral, bool):
         raise AppServerProtocolError("ephemeral must be a boolean")
+    if config_overrides is not None and not isinstance(config_overrides, Mapping):
+        raise AppServerProtocolError("config_overrides must be an object")
+    normalized_config: dict[str, Any] = {}
+    for key, value in (config_overrides or {}).items():
+        if not isinstance(key, str) or not key.strip():
+            raise AppServerProtocolError(
+                "config_overrides keys must be non-empty strings"
+            )
+        normalized_config[key.strip()] = value
+    if (
+        normalized_effort is not None
+        and "model_reasoning_effort" in normalized_config
+    ):
+        raise AppServerProtocolError(
+            "model_reasoning_effort must not also appear in config_overrides"
+        )
+    if normalized_effort is not None:
+        normalized_config["model_reasoning_effort"] = normalized_effort
     params: dict[str, Any] = {
         "cwd": str(workspace_dir),
         "permissions": permissions,
@@ -754,8 +773,8 @@ def thread_start(
         params["ephemeral"] = ephemeral
     if normalized_model is not None:
         params["model"] = normalized_model
-    if normalized_effort is not None:
-        params["config"] = {"model_reasoning_effort": normalized_effort}
+    if normalized_config:
+        params["config"] = normalized_config
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
         result = client.request("thread/start", params)
     return result
@@ -954,18 +973,25 @@ def input_turn(socket_path: Path, thread_id: str, text: str, permissions: str) -
         return {"action": "steer", "turn_id": result.get("turnId"), "expected_turn_id": in_progress_turn_id}
 
 
-def turn_start(socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, Any]:
+def turn_start(
+    socket_path: Path,
+    thread_id: str,
+    text: str,
+    permissions: str,
+    *,
+    output_schema: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     if not permissions:
         raise AppServerProtocolError("turn start requires an explicit permissions profile")
+    params: dict[str, Any] = {
+        "threadId": thread_id,
+        "input": text_input_payload(text),
+        "permissions": permissions,
+    }
+    if output_schema is not None:
+        params["outputSchema"] = dict(output_schema)
     with AppServerClient(socket_path, timeout_seconds=DEFAULT_RPC_TIMEOUT_SECONDS) as client:
-        result = client.request(
-            "turn/start",
-            {
-                "threadId": thread_id,
-                "input": text_input_payload(text),
-                "permissions": permissions,
-            },
-        )
+        result = client.request("turn/start", params)
     turn = result.get("turn")
     turn_id = turn.get("id") if isinstance(turn, dict) else None
     payload = dict(result)

@@ -183,6 +183,82 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 [lambda _context: {"mailbox.deliver": lambda _params: {}}],
             )
 
+    def test_handler_reconciliation_is_optional_isolated_and_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_root = self._instance_root(temp_root)
+            workspace_dir = instance_root / "workspace"
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            instance_json = instance_root / "instance.json"
+            instance_json.write_text(
+                json.dumps({
+                    "actor_id": "act-dev-daed00000001",
+                    "role": "dev",
+                    "status": "active",
+                    "instance_root": str(instance_root),
+                    "workspace_dir": str(workspace_dir),
+                    "thread_id": "thr-main",
+                    "app_server_socket": str(
+                        instance_root / "runtime" / "app-server.sock"
+                    ),
+                }),
+                encoding="utf-8",
+            )
+            context = self.core.load_daemon_context(instance_json)
+            state = daemon_state.DaemonState.load(
+                instance_root=instance_root,
+                actor_id=context.actor_id,
+                main_thread_id=context.main_thread_id,
+            )
+            state.register_handlers(["exploding", "healthy", "trigger-only"])
+            calls: list[str] = []
+
+            class Exploding:
+                name = "exploding"
+
+                def reconcile(self, context: object, state: object, runtime: object) -> object:
+                    del context, state, runtime
+                    calls.append(self.name)
+                    raise RuntimeError("reconcile exploded")
+
+            class Healthy:
+                name = "healthy"
+
+                def reconcile(self, context: object, state: object, runtime: object) -> object:
+                    del context, state, runtime
+                    calls.append(self.name)
+                    return daemon_contracts.HandlerResult.handled()
+
+            class TriggerOnly:
+                name = "trigger-only"
+
+            result = self.core.reconcile_handlers(
+                context,
+                state,
+                object(),
+                [Exploding(), Healthy(), TriggerOnly()],
+            )
+
+            self.assertEqual(calls, ["exploding", "healthy"])
+            self.assertEqual(result["reconciled_count"], 1)
+            self.assertEqual(result["failed_count"], 1)
+            self.assertEqual(
+                [row["handler"] for row in result["handlers"]],
+                ["exploding", "healthy"],
+            )
+            payload = json.loads(
+                daemon_state.daemon_state_file(instance_root).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                payload["handlers"]["exploding"]["last_error"]["message"],
+                "reconcile exploded",
+            )
+            self.assertEqual(
+                payload["handlers"]["healthy"]["last_result"],
+                "handled",
+            )
+
 
 class FakeBindingClient:
     def __init__(self, *, result: dict[str, object] | None = None, error: BaseException | None = None) -> None:

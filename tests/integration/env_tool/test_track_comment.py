@@ -67,7 +67,11 @@ class TrackCommentEnvToolTests(RuntimeWorkspaceTestCase):
         task_id = f"task-0001-{role}-track-comment"
         task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
-            demand_ref={"demand_id": f"demand-track-comment-{role}", "basis_revision": 1},
+            demand_ref={
+                "demand_id": f"demand-track-comment-{role}",
+                "basis_revision": 1,
+                "demand_ref": f"dref-track-comment-{role}",
+            },
             execution_brief={
                 "description": "Track comment fixture.",
                 "detail": f"Exercise Track comment tooling for {task_id}.",

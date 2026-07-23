@@ -888,7 +888,11 @@ with calls_path.open("a", encoding="utf-8") as handle:
     def _seed_active_task(self, *, actor_id: str, role: str) -> None:
         task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
-            demand_ref={"demand_id": "demand-browser-lazy-release", "basis_revision": 1},
+            demand_ref={
+                "demand_id": "demand-browser-lazy-release",
+                "basis_revision": 1,
+                "demand_ref": "dref-browser-lazy-release",
+            },
             execution_brief={
                 "description": "Browser lazy release fixture.",
                 "detail": "Exercise browser lazy release integration.",

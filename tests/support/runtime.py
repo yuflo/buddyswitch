@@ -89,11 +89,13 @@ class RuntimeTestWorkspace:
             detail_parts.append(summary)
         if track_id is not None:
             detail_parts.append(f"Track context: {track_id}")
+        demand_id = _fixture_demand_id(role, actor_id, task_slug)
         result = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
-                "demand_id": _fixture_demand_id(role, actor_id, task_slug),
+                "demand_id": demand_id,
                 "basis_revision": 1,
+                "demand_ref": f"dref-{demand_id.removeprefix('demand-')}",
             },
             execution_brief={
                 "description": title,
@@ -111,11 +113,13 @@ class RuntimeTestWorkspace:
         task_slug: str = "active-task",
     ) -> str:
         del instance_json
+        demand_id = _fixture_demand_id(role, actor_id, task_slug)
         result = task_sys.create(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
-                "demand_id": _fixture_demand_id(role, actor_id, task_slug),
+                "demand_id": demand_id,
                 "basis_revision": 1,
+                "demand_ref": f"dref-{demand_id.removeprefix('demand-')}",
             },
             execution_brief={
                 "description": "Active test Task.",

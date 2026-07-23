@@ -1,68 +1,39 @@
-"""Demand-owned inbound capture and actor-attention adapter."""
+"""Demand-owned adapter from validated source facts to generic daemon schedules."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
-import daemon_contracts
-from env.domain import demand_sys
-from env.repos import runtime_files
+
+DEMAND_INGRESS_TRIAGE_TRIGGER = "demand.ingress.triage"
 
 
-DEMAND_CHECK_PROMPT = """[DEMAND CHECK]
-Actor-owned Demand revisions require attention.
-Call demand_sys.check(). Canonicalize each pending Demand in two passes: compare
-descriptions with the compact live index, then load only plausible candidates
-with demand_sys.get_many. Revise, absorb, keep independent, or cancel as
-warranted, then call demand_sys.complete_check with the exact revisions observed."""
-
-
-def _actor_input_receipt(result: Any) -> dict[str, str]:
-    if not isinstance(result, Mapping):
-        raise RuntimeError("actor input returned a non-object result")
-    action = result.get("action")
-    if action not in {"start", "steer"}:
-        raise RuntimeError("actor input action must be start or steer")
-    try:
-        turn_id = runtime_files.require_id(
-            result.get("turn_id"),
-            "actor input turn_id",
-        )
-    except ValueError as exc:
-        raise RuntimeError(str(exc)) from exc
-    return {"action": action, "turn_id": turn_id}
-
-
-def capture_inbound(
-    context: daemon_contracts.DaemonContext,
-    runtime: Any,
+def enqueue_inbound(
+    state: Any,
     *,
-    intake_key: str,
+    source_key: str,
     description: str,
     detail: str,
     source_refs: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    actor_target = {
-        "actor_id": runtime_files.require_id(context.actor_id, "context.actor_id"),
-        "role_id": runtime_files.require_id(context.role, "context.role"),
+    """Persist one exact source fact as a generic due-now delivery lease."""
+
+    upsert = getattr(state, "upsert_schedule", None)
+    if not callable(upsert):
+        raise ValueError("daemon state does not expose upsert_schedule")
+    payload = {
+        "source_key": source_key,
+        "description": description,
+        "detail": detail,
+        "source_refs": [dict(ref) for ref in source_refs],
     }
-    created = demand_sys.create(
-        actor_target,
-        intake_key,
-        description,
-        detail,
-        source_refs,
+    return dict(
+        upsert(
+            delay_seconds=0,
+            trigger_type=DEMAND_INGRESS_TRIAGE_TRIGGER,
+            payload=payload,
+            source_context={"owner": "demand_sys"},
+            schedule_key=f"demand-ingress:{source_key}",
+        )
     )
-    pending = demand_sys.check(actor_target)
-    actor_input = None
-    if pending["pending_count"] > 0:
-        actor_input = _actor_input_receipt(runtime.input_actor(DEMAND_CHECK_PROMPT))
-    return {
-        "demand_id": created["demand_id"],
-        "revision": created["revision"],
-        "capture_state_changed": created["state_changed"],
-        "pending_count": pending["pending_count"],
-        "attention_requested": pending["pending_count"] > 0,
-        "actor_input": actor_input,
-    }

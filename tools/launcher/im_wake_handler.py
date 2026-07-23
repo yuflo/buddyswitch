@@ -67,7 +67,6 @@ class ImMessageCreatedHandler:
         runtime: Any,
         trigger: Any,
     ) -> Any:
-        del state
         if not self.handles(trigger):
             return daemon_contracts.HandlerResult.ignored()
         try:
@@ -118,10 +117,9 @@ class ImMessageCreatedHandler:
             if not isinstance(content, str) or not content.strip():
                 raise ValueError("IM message content must be a non-empty string")
             normalized_content = content.strip()
-            demand_sys_daemon_adapter.capture_inbound(
-                context,
-                runtime,
-                intake_key=f"im.message.created:{message_id}",
+            demand_sys_daemon_adapter.enqueue_inbound(
+                state,
+                source_key=f"im.message.created:{message_id}",
                 description=normalized_content,
                 detail=normalized_content,
                 source_refs=[{

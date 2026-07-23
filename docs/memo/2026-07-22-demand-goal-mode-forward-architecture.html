@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>BuddySwitch Demand → Goal Mode 三阶段 REBUILD 实施备忘录</title>
+  <style>
+    :root {
+      --paper: #fffefa;
+      --canvas: #f3f1ea;
+      --ink: #1b1c19;
+      --muted: #666960;
+      --line: #d8d4c8;
+      --soft: #ece9df;
+      --daemon: #557b73;
+      --daemon-soft: #e3eeea;
+      --demand: #b66a40;
+      --demand-soft: #f4e7dd;
+      --task: #77639a;
+      --task-soft: #ece7f3;
+      --goal: #3f6f9d;
+      --goal-soft: #e4edf6;
+      --ok: #3d7654;
+      --ok-soft: #e5f0e8;
+      --warn: #a07326;
+      --warn-soft: #f5ecd8;
+      --danger: #a34e45;
+      --danger-soft: #f5e3e0;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --serif: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+      --radius: 7px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    button { font: inherit; }
+    a { color: inherit; }
+    code, pre { font-family: var(--mono); }
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: var(--soft);
+      font-size: .88em;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 920px;
+      margin-bottom: 10px;
+      font-family: var(--serif);
+      font-size: clamp(32px, 5vw, 60px);
+      font-weight: 650;
+      line-height: 1.04;
+      letter-spacing: -.035em;
+    }
+    h2 {
+      margin-bottom: 8px;
+      font-size: clamp(23px, 3vw, 33px);
+      line-height: 1.16;
+      letter-spacing: -.02em;
+    }
+    h3 { margin-bottom: 7px; font-size: 17px; line-height: 1.28; }
+    p:last-child { margin-bottom: 0; }
+
+    .shell { max-width: 1500px; margin: 0 auto; padding: 22px 28px 80px; }
+    .eyebrow {
+      margin-bottom: 11px;
+      color: var(--muted);
+      font: 750 11px/1 var(--mono);
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+    .lede { max-width: 960px; color: var(--muted); font-size: 17px; }
+    .surface {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+    }
+    .hero { padding: 24px 26px 20px; }
+    .hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .button {
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .button:hover, .button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
+    .button:focus-visible, a:focus-visible { outline: 3px solid rgba(63, 111, 157, .25); outline-offset: 2px; }
+
+    .truth-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      margin-top: 20px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--line);
+    }
+    .truth { min-height: 94px; padding: 14px; background: #fff; }
+    .truth strong { display: block; margin: 5px 0 3px; font-size: 16px; }
+    .truth span { color: var(--muted); font-size: 13px; }
+    .truth .value { color: var(--ink); font: 800 21px/1 var(--mono); }
+
+    .architecture {
+      margin-top: 18px;
+      padding: 17px;
+      overflow: hidden;
+    }
+    .architecture-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
+    .architecture-head p { color: var(--muted); font-size: 13px; }
+    .flow-lane {
+      display: grid;
+      grid-template-columns: 1.05fr 36px 1.35fr 36px 1.3fr 36px 1.15fr 36px 1.2fr;
+      align-items: stretch;
+      gap: 0;
+    }
+    .flow-lane + .flow-lane { margin-top: 9px; }
+    .flow-node {
+      position: relative;
+      min-width: 0;
+      min-height: 114px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-top-width: 4px;
+      border-radius: 6px;
+      background: #fff;
+      transition: opacity .16s ease, transform .16s ease, box-shadow .16s ease;
+    }
+    .flow-node strong { display: block; margin: 6px 0 4px; font-size: 15px; }
+    .flow-node p { margin-bottom: 0; color: var(--muted); font-size: 12px; }
+    .flow-node .owner { font: 750 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    .flow-node[data-owner="daemon"] { border-top-color: var(--daemon); }
+    .flow-node[data-owner="daemon"] .owner { color: var(--daemon); }
+    .flow-node[data-owner="demand"] { border-top-color: var(--demand); }
+    .flow-node[data-owner="demand"] .owner { color: var(--demand); }
+    .flow-node[data-owner="task"] { border-top-color: var(--task); }
+    .flow-node[data-owner="task"] .owner { color: var(--task); }
+    .flow-node[data-owner="goal"] { border-top-color: var(--goal); }
+    .flow-node[data-owner="goal"] .owner { color: var(--goal); }
+    .flow-node[data-owner="actor"] { border-top-color: var(--ok); }
+    .flow-node[data-owner="actor"] .owner { color: var(--ok); }
+    .arrow {
+      display: grid;
+      place-items: center;
+      color: #74776e;
+      font: 800 22px/1 var(--mono);
+    }
+    .lane-label {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 0 0 7px;
+      color: var(--muted);
+      font: 750 11px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .lane-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    body[data-owner-focus] .flow-node { opacity: .23; }
+    body[data-owner-focus="daemon"] .flow-node[data-owner="daemon"],
+    body[data-owner-focus="demand"] .flow-node[data-owner="demand"],
+    body[data-owner-focus="task"] .flow-node[data-owner="task"],
+    body[data-owner-focus="goal"] .flow-node[data-owner="goal"],
+    body[data-owner-focus="actor"] .flow-node[data-owner="actor"] {
+      opacity: 1;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(27, 28, 25, .10);
+    }
+    .architecture-foot {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 11px;
+    }
+    .callout { padding: 11px 13px; border-left: 3px solid var(--line); background: #faf9f5; color: var(--muted); font-size: 13px; }
+    .callout strong { color: var(--ink); }
+    .callout.ok { border-left-color: var(--ok); background: var(--ok-soft); }
+    .callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 16px 0;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(243, 241, 234, .94);
+      backdrop-filter: blur(10px);
+    }
+    .nav, .focus-controls { display: flex; flex-wrap: wrap; gap: 6px; }
+    .nav a, .focus-controls button {
+      padding: 6px 9px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: var(--muted);
+      background: transparent;
+      text-decoration: none;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .nav a:hover, .focus-controls button:hover, .focus-controls button[aria-pressed="true"] {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .section { margin-top: 16px; padding: 22px; scroll-margin-top: 76px; }
+    .section-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 440px); gap: 28px; margin-bottom: 17px; }
+    .section-head .summary { color: var(--muted); }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .card { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    .card p, .card li { color: var(--muted); font-size: 13px; }
+    .card ul { margin: 9px 0 0; padding-left: 18px; }
+    .number {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fff;
+      font: 800 12px/1 var(--mono);
+    }
+    .card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: var(--soft);
+      color: var(--muted);
+      font: 750 10px/1 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .tag.confirmed { background: var(--ok-soft); color: var(--ok); }
+    .tag.open { background: var(--warn-soft); color: var(--warn); }
+    .tag.remove { background: var(--danger-soft); color: var(--danger); }
+    .tag.future { background: var(--goal-soft); color: var(--goal); }
+
+    .branch-board {
+      display: grid;
+      grid-template-columns: 1fr 1.65fr;
+      gap: 12px;
+    }
+    .branch-root { display: grid; align-content: center; min-height: 100%; padding: 18px; border: 1px solid var(--demand); border-radius: 6px; background: var(--demand-soft); }
+    .branch-root code { width: fit-content; background: rgba(255,255,255,.65); }
+    .branches { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .branch { padding: 13px; border: 1px solid var(--line); border-left: 4px solid var(--demand); border-radius: 5px; background: #fff; }
+    .branch p { color: var(--muted); font-size: 12px; }
+    .branch code { font-size: 11px; }
+    .branch.no-demand { border-left-color: var(--ok); }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; font-size: 13px; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #f7f5ef; color: var(--muted); font: 750 10px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    td strong { display: block; margin-bottom: 2px; }
+    td .sub { color: var(--muted); font-size: 12px; }
+
+    .trigger-map { display: grid; grid-template-columns: 1fr 46px 1.35fr 46px 1.2fr; align-items: stretch; }
+    .trigger-stack { display: grid; gap: 8px; }
+    .trigger {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
+    }
+    .trigger strong { display: block; font-size: 14px; }
+    .trigger small { color: var(--muted); }
+    .daemon-box { padding: 16px; border: 1px solid var(--daemon); border-radius: 6px; background: var(--daemon-soft); }
+    .actor-box { padding: 16px; border: 1px solid var(--ok); border-radius: 6px; background: var(--ok-soft); }
+    .trigger-arrow { display: grid; place-items: center; color: var(--muted); font: 800 22px/1 var(--mono); }
+
+    .phase-list { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    .phase {
+      display: grid;
+      grid-template-columns: 58px minmax(180px, .9fr) minmax(260px, 1.4fr) minmax(180px, .8fr);
+      gap: 12px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .phase:last-child { border-bottom: 0; }
+    .phase > * { min-width: 0; }
+    .phase-id { color: var(--muted); font: 800 12px/1 var(--mono); }
+    .phase p, .phase ul { margin-bottom: 0; color: var(--muted); font-size: 12px; }
+    .phase strong, .phase p, .phase li { overflow-wrap: anywhere; }
+    .phase ul { padding-left: 16px; }
+    .phase .proof { padding-left: 10px; border-left: 2px solid var(--ok); }
+
+    .delete-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .delete-box, .keep-box { padding: 16px; border-radius: 6px; }
+    .delete-box { border: 1px solid #dbada7; background: var(--danger-soft); }
+    .keep-box { border: 1px solid #a8c4b1; background: var(--ok-soft); }
+    .token-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .token { padding: 5px 7px; border: 1px solid currentColor; border-radius: 4px; font: 700 11px/1 var(--mono); }
+    .delete-box .token { color: var(--danger); background: rgba(255,255,255,.45); }
+    .keep-box .token { color: var(--ok); background: rgba(255,255,255,.45); }
+
+    .decision-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .decision[data-state].hidden { display: none; }
+    .decision h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .decision p { margin-bottom: 8px; }
+    .decision .owner-line { padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font: 700 11px/1.35 var(--mono); }
+
+    details { border: 1px solid var(--line); border-radius: 5px; background: #fff; }
+    details + details { margin-top: 7px; }
+    summary { padding: 11px 13px; cursor: pointer; font-weight: 700; }
+    details .details-body { padding: 0 13px 13px; color: var(--muted); font-size: 13px; }
+    .path { overflow-wrap: anywhere; color: #464840; font: 700 11px/1.45 var(--mono); }
+    .evidence-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .evidence { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
+    .evidence strong { display: block; margin-bottom: 5px; }
+    .evidence p { color: var(--muted); font-size: 12px; }
+    .evidence .path { display: block; margin-top: 7px; }
+
+    .copy-status { min-width: 130px; color: var(--muted); font: 700 11px/1 var(--mono); }
+    footer { padding: 22px 4px 0; color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 1180px) {
+      .flow-lane { grid-template-columns: 1fr 28px 1fr 28px 1fr; }
+      .flow-lane .wide-hide { display: none; }
+      .flow-lane .mobile-row { margin-top: 8px; }
+      .grid-4 { grid-template-columns: 1fr 1fr; }
+      .phase { grid-template-columns: 50px minmax(180px, 1fr) 1.4fr; }
+      .phase .proof { grid-column: 2 / -1; }
+    }
+    @media (max-width: 820px) {
+      .shell { padding: 14px 14px 60px; }
+      .hero { padding: 18px; }
+      .hero-top, .section-head { grid-template-columns: 1fr; display: grid; }
+      .hero-actions { justify-content: flex-start; }
+      .truth-strip, .grid-3, .grid-2, .branch-board, .delete-grid, .evidence-list, .architecture-foot { grid-template-columns: 1fr; }
+      .truth-strip { grid-template-columns: 1fr 1fr; }
+      .trigger-map { grid-template-columns: 1fr; gap: 8px; }
+      .trigger-arrow { transform: rotate(90deg); min-height: 25px; }
+      .phase { grid-template-columns: 42px minmax(0, 1fr); }
+      .phase > :nth-child(n+3) { grid-column: 2; }
+      .flow-lane { grid-template-columns: 1fr; gap: 7px; }
+      .flow-lane .arrow { transform: rotate(90deg); min-height: 22px; }
+      .flow-lane .wide-hide { display: grid; }
+      .toolbar { position: static; }
+      .branches { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .truth-strip, .grid-4 { grid-template-columns: 1fr; }
+      .section { padding: 17px; }
+      th, td { padding: 9px; }
+    }
+    @media print {
+      body { background: #fff; }
+      .shell { max-width: none; padding: 0; }
+      .toolbar, .hero-actions, .decision-controls { display: none !important; }
+      .surface { break-inside: avoid; box-shadow: none; }
+      details { break-inside: avoid; }
+      details > * { display: block !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="surface hero" id="top">
+      <div class="hero-top">
+        <div>
+          <p class="eyebrow">Implementation Handoff Plan · Source-audited target memo · reviewed 2026-07-23</p>
+          <h1>Demand → Goal Mode<br>三阶段 REBUILD 备忘录</h1>
+          <p class="lede">这是一份按当前 BuddySwitch 与 Codex 源码校准后的目标实施 memo，不是已落地现状。三个阶段是连续的可验证纵向切片，不是三种运行模式：每个阶段都先冻结精确 contract，再建立新 owner，并在接受前删除该阶段替换掉的全部旧入口、字段、Skill 与测试残留。</p>
+        </div>
+        <div class="hero-actions">
+          <button class="button" type="button" id="copySummary">复制设计摘要</button>
+          <button class="button" type="button" id="printPage">打印 / 存 PDF</button>
+          <span class="copy-status" id="copyStatus" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <div class="truth-strip" aria-label="已确认的设计真相">
+        <div class="truth"><span class="value">3</span><strong>Vertical Stages</strong><span>Demand intake、Goal execution、多需求调度，逐步形成可观察闭环。</span></div>
+        <div class="truth"><span class="value">1</span><strong>Live Path / Stage</strong><span>阶段可连续，运行路径不可并存；无 feature flag、fallback 或 dual write。</span></div>
+        <div class="truth"><span class="value">1</span><strong>Active Task / Goal</strong><span>当前不实现多 Task、多 thread 或并行 Goal。</span></div>
+        <div class="truth"><span class="value">6</span><strong>Actor Demand Tools</strong><span><code>list/get/create/revise/complete/cancel</code>，仅此六个。</span></div>
+      </div>
+
+      <section class="surface architecture" aria-labelledby="architecture-title">
+        <div class="architecture-head">
+          <div>
+            <p class="eyebrow">Current target architecture</p>
+            <h2 id="architecture-title">一条主链路，五个明确 Owner</h2>
+          </div>
+          <p>点击下方 Owner 按钮可聚焦对应责任边界。</p>
+        </div>
+
+        <div class="lane-label">A · Inbound 并发进入 Demand</div>
+        <div class="flow-lane">
+          <article class="flow-node" data-owner="daemon">
+            <span class="owner">Daemon Service</span>
+            <strong>Inbound Trigger</strong>
+            <p>IM / Track 等 product handler 经通用 trigger dispatch 进入。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="demand">
+            <span class="owner">Demand Skill · Side</span>
+            <strong>Context-complete Triage</strong>
+            <p>isolated side 内完成判断，以 <code>outputSchema</code> 返回结构化 <code>TriageProposal</code>，不调用 Demand mutation tool。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="demand">
+            <span class="owner">Demand-owned Host Adapter</span>
+            <strong>Validate + Apply</strong>
+            <p>校验 proposal 后调用私有 application operation；CAS、provenance、receipt 与冲突重跑都留在 host/domain。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="demand">
+            <span class="owner">Canonical State</span>
+            <strong>Live Demand Pool</strong>
+            <p>不等于 FIFO 队列；保存需求真相，不保存 Task 生命周期。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="daemon">
+            <span class="owner">Daemon Adapter</span>
+            <strong>Pool Changed Attention</strong>
+            <p>有 unfinished Goal 时只合并 pending；idle 时请求 orchestration turn。</p>
+          </article>
+        </div>
+
+        <div class="lane-label" style="margin-top:15px">B · Parent 串行选择并由 Goal 完整执行</div>
+        <div class="flow-lane">
+          <article class="flow-node" data-owner="actor">
+            <span class="owner">Demand Skill · Parent</span>
+            <strong>Reconcile + Select</strong>
+            <p>先判断上一 Task 对 Demand 的影响，再从全部 live Demands 动态选择。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="task">
+            <span class="owner">Task Binding</span>
+            <strong>Minimal Task Record</strong>
+            <p>task_id、DemandRef、selection reason、objective、Goal binding、result。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="goal">
+            <span class="owner">Codex Native Goal</span>
+            <strong>Goal Working</strong>
+            <p>跨 turn continuation、完整性校验、complete / blocked 等原生状态。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="task">
+            <span class="owner">Task Result</span>
+            <strong>Result Commit</strong>
+            <p>推荐先持久化 Task result，再将 Goal 标记 complete；启动与完成握手仍需冻结。</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="flow-node" data-owner="daemon">
+            <span class="owner">Daemon + Goal Bridge</span>
+            <strong>New Main-thread Turn</strong>
+            <p><code>complete</code> 唤醒同一 parent/main thread；其他状态按显式映射处理，不再回传 outcome frame。</p>
+          </article>
+        </div>
+
+        <div class="architecture-foot">
+          <div class="callout ok"><strong>主循环：</strong>Goal complete → 同一 main thread 新 turn → Demand reconciliation → 全量 live pool selection → 新 Task/Goal 或 idle。</div>
+          <div class="callout warn"><strong>边界：</strong>daemon 只负责可靠触发与恢复；Demand 判断由 skill/domain 负责；Goal 只负责当前 Task 执行。</div>
+        </div>
+      </section>
+    </header>
+
+    <div class="toolbar" aria-label="页面导航与 Owner 聚焦">
+      <nav class="nav">
+        <a href="#goals">核心目标</a>
+        <a href="#audit">源码审核</a>
+        <a href="#triage">Demand Triage</a>
+        <a href="#interfaces">接口与暴露</a>
+        <a href="#bridge">触发架构</a>
+        <a href="#skills">Skill 替换</a>
+        <a href="#implementation">三阶段实施</a>
+        <a href="#rebuild">REBUILD Gate</a>
+        <a href="#decisions">关键问题</a>
+        <a href="#verification">验证</a>
+        <a href="#evidence">源码证据</a>
+      </nav>
+      <div class="focus-controls" aria-label="Owner focus">
+        <button type="button" data-owner-button="all" aria-pressed="true">全部 Owner</button>
+        <button type="button" data-owner-button="daemon" aria-pressed="false">Daemon</button>
+        <button type="button" data-owner-button="demand" aria-pressed="false">Demand</button>
+        <button type="button" data-owner-button="actor" aria-pressed="false">Actor</button>
+        <button type="button" data-owner-button="task" aria-pressed="false">Task</button>
+        <button type="button" data-owner-button="goal" aria-pressed="false">Goal</button>
+      </div>
+    </div>
+
+    <section class="surface section" id="goals">
+      <div class="section-head">
+        <div><p class="eyebrow">Four core objectives</p><h2>这一系列改造最终只解决四件事</h2></div>
+        <p class="summary">最终四个模块必须形成一条可运行的 vertical slice。Stage 1 允许尚未替换的 Task frame 继续作为唯一执行器；Stage 2 建立 Goal owner 后，任何模块再依赖旧 frames、capture-first Demand 或隐式 Skill 判断都属于残留。</p>
+      </div>
+      <div class="grid-4">
+        <article class="card">
+          <div class="card-top"><span class="number">1</span><span class="tag confirmed">confirmed</span></div>
+          <h3>多 Demand，单执行槽</h3>
+          <p>N 个 live Demands 经动态 Selection Contract 选择至多一个。当前 Demand 未完成也不自动续占。</p>
+          <ul><li>当前只做 one active Task/Goal</li><li>未来并行只作为 forward constraint</li></ul>
+        </article>
+        <article class="card">
+          <div class="card-top"><span class="number">2</span><span class="tag confirmed">confirmed</span></div>
+          <h3>Demand 产生与管理</h3>
+          <p>Inbound 在 context-complete isolated side 内完成语义判断；只有 demand_change 才写 Demand。</p>
+          <ul><li>proposal-first</li><li>彻底移除 absorb 模型</li></ul>
+        </article>
+        <article class="card">
+          <div class="card-top"><span class="number">3</span><span class="tag confirmed">confirmed</span></div>
+          <h3>Demand ↔ Task 衔接</h3>
+          <p>Inbound commit 与 Goal completion 是两个 trigger source，共用 daemon-service 承载的 orchestration wakeup；非 complete 状态走独立映射。</p>
+          <ul><li>同一 parent/main thread 新 turn</li><li>技能读取 canonical state 决策</li></ul>
+        </article>
+        <article class="card">
+          <div class="card-top"><span class="number">4</span><span class="tag confirmed">confirmed</span></div>
+          <h3>Task 使用 Goal Mode</h3>
+          <p>Task 退化为最小绑定与结果凭证；Codex Goal 接管 continuation 和完成完整性。</p>
+          <ul><li>Goal complete ≠ Demand complete</li><li>删除 Task 自有执行状态机</li></ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="surface section" id="audit">
+      <div class="section-head">
+        <div><p class="eyebrow">Repository audit · current vs target</p><h2>源码审核结论：方向成立，但必须区分“已有基座”和“拟议能力”</h2></div>
+        <p class="summary">当前代码仍完整运行 capture-first Demand 与 side-first Task。目标架构不能写成现状描述；以下差异都是正式改造范围，不是实现细节。</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>审查面</th><th>当前源码事实</th><th>目标修正</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Inbound → Demand</strong></td><td><code>capture_inbound</code> 先调用 <code>demand_sys.create</code>，再 <code>check</code> 并向 main thread 输入 <code>[DEMAND CHECK]</code>。</td><td>先持久化 pending intake，再开 isolated triage side；side 只返回结构化 <code>TriageProposal</code>，由 Demand-owned host adapter 校验并私有提交。</td><td><span class="tag remove">replace</span></td></tr>
+            <tr><td><strong>Demand attention</strong></td><td>Demand record 含 <code>checked_revision</code>；公开 action 有 <code>check</code> 与 <code>complete_check</code>。</td><td>intake receipt + orchestration attention 取代 revision check cursor；删除旧 action 与字段。</td><td><span class="tag remove">delete</span></td></tr>
+            <tr><td><strong>Demand merge</strong></td><td><code>absorb_into</code> 同时改两条 Demand，并产生 <code>absorbed</code> terminal。</td><td><code>merge_intake</code> 只存在于 <code>TriageProposal</code>；host/domain 将 raw intake 合并到一个 live Demand，不创建临时 source Demand。</td><td><span class="tag remove">replace</span></td></tr>
+            <tr><td><strong>Task execution</strong></td><td><code>task_sys.create</code> 持久化 <code>side_processing</code> 并立刻启动 side；另有 parent/outcome frames、Progress Check、<code>need_parent</code>。</td><td>Task 只保存 binding / objective / result；Goal 成为唯一 continuation loop。</td><td><span class="tag remove">replace</span></td></tr>
+            <tr><td><strong>Task identity</strong></td><td>精确 <code>DemandRef</code> 同时充当 source idempotency；同一 Demand revision 不能用不同 brief 创建第二个 Task。</td><td>增加独立 <code>task_key</code> / attempt identity；Task 仍只归属一个 Demand，但一个未完成 Demand 可跨时间产生多个串行 Task。</td><td><span class="tag open">contract</span></td></tr>
+            <tr><td><strong>Side <code>handled</code></strong></td><td><code>message.send</code> 当前不要求 active Task，但多数 Track 写动作受 <code>ACTIVE_TASK_REQUIRED</code> gate 约束；现有 side 也没有通用“source-local handled”权限集。</td><td>按 inbound source 明确 allowlist、receipt 与失败语义；不能把任意 actor tool 都解释为 triage 可直接处理。</td><td><span class="tag open">permission</span></td></tr>
+            <tr><td><strong>Goal bridge</strong></td><td>BuddySwitch 已有 <code>app_server.goal_get/set/clear</code>；generic daemon 已能归一化任意 App Server notification，但 production 尚未注册 Goal handler。</td><td>不再造 RPC wrapper；只增加 Goal-owned binding/recovery 与 <code>thread/goal/updated</code> product handler，并在 composition root 注册。</td><td><span class="tag confirmed">reuse</span></td></tr>
+            <tr><td><strong>Actor exposure</strong></td><td>当前 10 个 Demand actions 全部由 <code>ToolDefinition</code> 投影为 native MCP tools，且所有角色均获授权；<code>create</code> 还要求 Actor 构造 intake/provenance。</td><td>普通 Actor 只保留 <code>list/get/create/revise/complete/cancel</code>；不把 side proposal、intake commit、CAS 或 receipt 暴露为 tool。</td><td><span class="tag remove">cutover</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="architecture-foot">
+        <div class="callout ok"><strong>可直接复用：</strong>Demand actor aggregate 与内部 revision transaction、generic daemon handler/checkpoint/schedule、generic side-thread lifecycle、Actor Session input、App Server Goal RPC，以及 Codex per-turn <code>outputSchema</code>。</div>
+        <div class="callout warn"><strong>尚未存在：</strong>pending intake/triage receipt、BuddySwitch <code>outputSchema</code> 透传与 side-result consumer、私有 proposal apply operation、Actor tool invocation context、minimal Task↔Goal binding、Goal updated handler、orchestration attention/recovery。</div>
+      </div>
+    </section>
+
+    <section class="surface section" id="triage">
+      <div class="section-head">
+        <div><p class="eyebrow">Demand intake · side-owned judgment</p><h2>Demand Triage：先判断，再决定是否形成需求</h2></div>
+        <p class="summary">这是对当前 capture-first 流程的根本替换。Inbound 不再先创建临时 Demand；side 不向 parent 移交判断，也不存在 <code>needs_parent_judgment</code>。</p>
+      </div>
+      <div class="branch-board">
+        <div class="branch-root">
+          <p class="eyebrow">Exact side output</p>
+          <h3><code>TriageProposal</code></h3>
+          <p>语义判断全部在 isolated side 完成；Codex 用 per-turn <code>outputSchema</code> 约束最终消息。Side 不写 Demand，也不处理 intake key、provenance、receipt 或 CAS。</p>
+          <code>decision + semantic payload + reason + optional handled receipt</code>
+        </div>
+        <div class="branches">
+          <article class="branch no-demand"><code>no_action_needed</code><h3>无需形成 Demand</h3><p>纯通知、重复事实、无需回复的确认。记录 triage receipt，side 结束。</p></article>
+          <article class="branch no-demand"><code>handled</code><h3>Side 已完整处理</h3><p>限定的 source-local 动作成功且有 receipt；失败时不得标记 handled。</p></article>
+          <article class="branch"><code>create</code><h3>创建独立 Demand</h3><p>存在尚未满足的新义务，与现有 live Demand 不是同一底层需求。</p></article>
+          <article class="branch"><code>merge_intake</code><h3>补充现有 Demand</h3><p>Side 只指明目标与语义补充；source provenance 合并和原子写入由 host/domain 完成。</p></article>
+          <article class="branch"><code>revise</code><h3>修正需求含义</h3><p>不是简单加法，而是改变目标、边界或约束；保留 provenance。</p></article>
+          <article class="branch"><code>cancel</code><h3>撤回现有 Demand</h3><p>Inbound 明确表明需求不再需要满足；side 给出语义理由，版本校验与 terminal 写入由 host/domain 完成。</p></article>
+        </div>
+      </div>
+
+      <div class="grid-3" style="margin-top:12px">
+        <article class="card"><span class="tag confirmed">context</span><h3 style="margin-top:9px">Side 必须 context-complete</h3><p>完整 inbound fact、必要 conversation window、live index、候选 Demand 详情、active Goal/Task 摘要、允许的 source-local capability。</p></article>
+        <article class="card"><span class="tag confirmed">concurrency</span><h3 style="margin-top:9px">冲突重算，不升级 Parent</h3><p>Host apply 遇到 revision conflict 时，使用最新 Demand context 重新运行 triage side；这是并发 re-evaluation，不是让 Actor 手工重试 CAS。</p></article>
+        <article class="card"><span class="tag remove">removed</span><h3 style="margin-top:9px">Absorb 模型彻底退出</h3><p>删除 action、terminal type、target_demand_id、skill 规则、UI/CLI/测试和架构文档中的现行教学。</p></article>
+      </div>
+    </section>
+
+    <section class="surface section" id="interfaces">
+      <div class="section-head">
+        <div><p class="eyebrow">Demand API + actor-created needs + exposure stack</p><h2>Actor-facing Demand Tool 固定为六个语义入口</h2></div>
+        <p class="summary">普通 Actor 只表达需求意图；side 通过结构化结果提交判断；host/domain 处理 intake、provenance、receipt 与并发。底层函数存在，不等于应该进入 Agent tool catalog。</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Actor Tool</th><th>Agent 表达的意图</th><th>目标输入</th><th>系统必须隐藏</th></tr></thead>
+          <tbody>
+            <tr><td><strong><code>list</code></strong></td><td>查看 actor-owned live / terminal Demands。</td><td>可选 state filter；默认 live。</td><td>check cursor、读取批次、存储位置。</td></tr>
+            <tr><td><strong><code>get</code></strong></td><td>读取一项完整 Demand。</td><td><code>demand_id</code>；返回可原样传回的 opaque <code>demand_ref</code>。</td><td>内部 revision schema 与 CAS 实现。</td></tr>
+            <tr><td><strong><code>create</code></strong></td><td>声明一个独立、尚未满足的新需求。</td><td><code>description</code> + <code>detail</code>。</td><td><code>intake_key</code>、<code>source_refs</code>、provenance/idempotency receipt。</td></tr>
+            <tr><td><strong><code>revise</code></strong></td><td>改变需求目标、边界或约束。</td><td>opaque <code>demand_ref</code> + replacement content + reason。</td><td>数字型 <code>expected_revision</code> 与冲突重试。</td></tr>
+            <tr><td><strong><code>complete</code></strong></td><td>判断需求本身已经满足。</td><td>opaque <code>demand_ref</code> + summary + 公开 Task/Artifact evidence refs。</td><td>Task 状态同步（该工具不拥有）、terminal record 与 CAS 参数。</td></tr>
+            <tr><td><strong><code>cancel</code></strong></td><td>判断需求已撤回或不再要求满足。</td><td>opaque <code>demand_ref</code> + reason。</td><td>terminal record 与 lifecycle transaction。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout ok" style="margin-top:12px"><strong>固定基线：</strong>普通 Actor 的 Demand native tools 只有 <code>list / get / create / revise / complete / cancel</code>。不增加第七个 <code>triage</code>、<code>commit_intake</code> 或 <code>report_outcome</code> tool。</div>
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>非 Actor Tool 层</th><th>接口 / 操作</th><th>调用者</th><th>责任边界</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Side Result Contract</strong></td><td><code>TriageProposal</code></td><td><code>demand-triage</code> side 的最终 assistant message</td><td>由 Codex per-turn <code>outputSchema</code> 约束；只包含 decision、语义 payload、reason 与可选 handled receipt，不写 canonical state。</td></tr>
+            <tr><td><strong>Host Application Operation</strong></td><td><code>capture_intake</code> / <code>apply_triage_proposal</code></td><td>Demand-owned source/daemon adapters</td><td>pending intake、proposal validation、idempotency、原子 apply、失败恢复；名字是应用边界，不进入 ToolDefinition。</td></tr>
+            <tr><td><strong>Domain Primitives</strong></td><td>revision transaction、provenance merge、receipt persistence</td><td>Demand application operation</td><td>实现 canonical mutation；Agent、Skill、runtime prompt 均不直接调用。</td></tr>
+            <tr><td><strong>退役的 Actor Actions</strong></td><td><code>get_many / check / complete_check / absorb_into</code></td><td>无</td><td>删除 action、role permission、native MCP projection、旧 Skill 教学、tests/UI/CLI residues；不保留 alias。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Task actor tool</th><th>目标处理</th><th>Goal 关系</th><th>审核意见</th></tr></thead>
+          <tbody>
+            <tr><td><strong><code>create</code></strong></td><td>保留名称、替换语义：创建 minimal Task binding，不再启动 side frame；输入必须含独立 task identity、DemandRef、objective 与 selection decision。</td><td>随后完成 Goal start/binding handshake。</td><td><span class="tag confirmed">replace semantics</span></td></tr>
+            <tr><td><strong><code>bind_goal</code></strong></td><td>若 Goal 不能由同一 application operation 原子绑定，则新增 exact goal_id/thread_id binding action。</td><td>解决 Task 已建与 Goal 已建之间的恢复关联。</td><td><span class="tag open">handshake-dependent</span></td></tr>
+            <tr><td><strong><code>record_result</code></strong></td><td>新增 durable result/evidence commit；不得直接 complete Demand。</td><td>推荐成功后才允许 native <code>update_goal(complete)</code>。</td><td><span class="tag open">ordering</span></td></tr>
+            <tr><td><strong><code>list / get</code></strong></td><td>保留 actor-owned reads，但 projection 删除 processor、handoff、side lease 与 frame 字段。</td><td>可投影 Goal binding/status，不复制 Goal 的完整状态机。</td><td><span class="tag confirmed">keep reads</span></td></tr>
+            <tr><td><strong><code>close / need_parent</code></strong></td><td>删除。</td><td>Goal continuation 与 complete/blocked 取代旧 frame transition。</td><td><span class="tag remove">delete</span></td></tr>
+            <tr><td><strong><code>cancel</code></strong></td><td>不得原样沿用；只有在 Goal clear/blocked/canceled 的产品映射冻结后才能定义新 contract。</td><td>禁止 Task canceled 而 Goal 仍 active 的分叉。</td><td><span class="tag open">status mapping</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-2" style="margin-top:12px">
+        <article class="card">
+          <span class="tag confirmed">actor-created demand</span>
+          <h3 style="margin-top:9px">Actor 自建 Demand 继续保留直接入口</h3>
+          <p>Actor 在 parent turn 或 Goal working 中发现一个新的、对外有意义的未满足义务时，调用收窄后的 <code>demand_sys.create</code>，只表达 <code>description</code> 与 <code>detail</code>。Host 从调用上下文派生 provenance/idempotency，不要求 Agent 制造 key 或底层 refs。新 Demand 进入同一个 live pool，但不会自动创建 Task、替换当前 Goal 或打断执行。</p>
+          <p><strong>判定线：</strong>若只是满足当前 Demand 的下一执行步骤，不创建新 Demand；让当前 Demand 保持 live，并在下一次 reconciliation 中形成新的 Task objective。只有底层需要独立存在、独立完成时才创建新 Demand。</p>
+        </article>
+        <article class="card">
+          <span class="tag confirmed">one state owner</span>
+          <h3 style="margin-top:9px">Inbound 与 Actor self-demand 共用一个 Demand 真相</h3>
+          <p>两条入口不同，但写入后没有两类 Demand：inbound 通过 <code>capture_intake → TriageProposal → internal apply</code>；Actor self-demand 通过高层 <code>create</code>。二者都进入同一 actor-owned aggregate、同一 revision/lifecycle、同一 selection pool。</p>
+          <p>Goal active 时新增或修改 Demand 只合并 <code>pool_changed</code> attention，不 steer、不 interrupt；Goal complete 后由 orchestration 统一重新比较全部 live Demands。</p>
+        </article>
+      </div>
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>暴露层</th><th>当前代码形态</th><th>目标职责</th><th>不允许拥有</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Native MCP Tool</strong></td><td>当前每个 Demand ActionDefinition 都被自动投影，形成十工具宽表面。</td><td>只投影六个高层语义 actions；mutation 返回公开 receipt/rejection，并把 concurrency token 封装为 opaque <code>demand_ref</code>。</td><td>intake staging、proposal apply、provenance、数字 revision、跨 turn workflow。</td></tr>
+            <tr><td><strong>Side Result Contract</strong></td><td>当前 side 依靠通用 tools 完成状态写入，没有专门 final-output contract。</td><td><code>outputSchema</code> 约束 <code>TriageProposal</code>；host 从完成的 side turn 读取并验证。</td><td>canonical mutation、MCP tool permission、receipt persistence。</td></tr>
+            <tr><td><strong>Installed Skill</strong></td><td>当前只有 <code>task-management</code> 充当跨产品语义桥。</td><td><code>demand-triage</code> 教授如何输出 proposal；<code>demand-orchestration</code> 教授如何使用六个 tools 做 reconciliation/selection。</td><td>私有 schema 副本、状态真相、daemon trigger、Goal continuation。</td></tr>
+            <tr><td><strong>Runtime Prompt</strong></td><td><code>[DEMAND CHECK]</code> 与 Task frame 内含较多流程指令。</td><td>只携带 trigger kind、source/receipt/task ids、reason，并明确触发哪项 Skill。</td><td>完整工作流规则、canonical state 副本、第二套政策 owner。</td></tr>
+            <tr><td><strong>Host / Domain Internal</strong></td><td>当前 domain primitives 被同名或近似 ActionDefinition 直接映射给 Actor。</td><td>持有 pending intake、validation、CAS、provenance、receipt、conflict/recovery；只由 source/daemon adapters 调用。</td><td>Agent judgment、Tool catalog、Skill 教学。</td></tr>
+            <tr><td><strong>Codex Native Goal</strong></td><td><code>create_goal / get_goal / update_goal</code> 与 App Server Goal API。</td><td>当前 Task objective 的 continuation、usage/budget 状态与 complete/blocked 完整性。</td><td>Demand completion、live Demand selection、消息交付证明。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout ok" style="margin-top:12px"><strong>简答：</strong>Tool 是 Actor 的六个需求意图；Skill 是判断规则；<code>TriageProposal</code> 是 side 的结构化结果；host/domain 私有操作负责可靠落盘；prompt 是唤醒 envelope；Goal 负责把当前 Task 做完整。</div>
+    </section>
+
+    <section class="surface section" id="bridge">
+      <div class="section-head">
+        <div><p class="eyebrow">Daemon-hosted trigger architecture</p><h2>Demand 与 Task 的衔接：一套技术唤醒架构</h2></div>
+        <p class="summary">复用现有 daemon-service 的 generic trigger、handler dispatch、schedule/checkpoint、main-thread activity 与 Actor Session；不新增第二个 coordinator service，也不把 Demand 语义写入 generic daemon。</p>
+      </div>
+      <div class="trigger-map">
+        <div class="trigger-stack">
+          <article class="trigger"><span class="tag">source A</span><strong>Demand Pool Changed</strong><small>来自 triage canonical commit</small></article>
+          <article class="trigger"><span class="tag">source B</span><strong>Codex Goal Updated</strong><small><code>thread/goal/updated</code> → complete / mapped attention state</small></article>
+          <article class="trigger"><span class="tag">recovery</span><strong>Daemon Restart Scan</strong><small>terminal Task 未 reconciled / idle + pending attention</small></article>
+        </div>
+        <div class="trigger-arrow">→</div>
+        <div class="daemon-box">
+          <p class="eyebrow">Existing daemon-service</p>
+          <h3>Generic Delivery Mechanics</h3>
+          <ul>
+            <li>注册 Demand-owned handlers/adapters</li>
+            <li>合并重复 pending attention</li>
+            <li>读取 parent activity 与 Goal host fact</li>
+            <li>unfinished Goal 时不 steer、不 interrupt</li>
+            <li>thread idle 后调用 Actor Session input</li>
+          </ul>
+        </div>
+        <div class="trigger-arrow">→</div>
+        <div class="actor-box">
+          <p class="eyebrow">Same parent/main thread</p>
+          <h3>Demand Orchestration Turn</h3>
+          <p>Prompt 只携带 trigger reasons / ids。Skill 自行读取 Task result、最新 Demand 和 live pool，执行 reconciliation + selection。</p>
+        </div>
+      </div>
+      <div class="architecture-foot">
+        <div class="callout ok"><strong>合并规则：</strong>Goal 执行期间多个 inbound 可并发 triage；pool_changed attention 合并，Goal complete 后只启动一次 orchestration turn。</div>
+        <div class="callout warn"><strong>禁止：</strong>直接同步 Demand→Task 调用、通用事件总线、第二套 daemon、在 generic daemon 中 hardcode Demand/Task schema。</div>
+      </div>
+    </section>
+
+    <section class="surface section" id="skills">
+      <div class="section-head">
+        <div><p class="eyebrow">Skills are product behavior</p><h2>Skill 替换不是配套文档，而是改造主体</h2></div>
+        <p class="summary">当前 <code>task-management</code> 同时教授 Demand canonicalization、Task selection、frames、progress 和 outcome。Stage 1 先把 Demand 判断与编排规则迁给两个最终 Skill，并将它收窄为尚未替换的 frame 执行；Stage 2 建立 Goal owner 时再完整删除。任一 checkpoint 都不存在重叠规则。</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>现行规则 / Skill</th><th>新 Owner</th><th>处理方式</th><th>边界</th></tr></thead>
+          <tbody>
+            <tr><td><strong><code>[DEMAND CHECK]</code></strong><span class="sub">capture-first canonicalization</span></td><td><code>demand-triage</code></td><td>Stage 1 替换为 pre-demand side decision</td><td>旧 trigger、prompt 与规则同期删除，不触发 parent judgment</td></tr>
+            <tr><td><strong>Task Selection Rule</strong><span class="sub">choose by current judgment</span></td><td><code>demand-orchestration</code></td><td>Stage 1 迁移为动态 Selection Contract + reason</td><td>从全部 live Demands 选择至多一个；旧 Skill 不再保留副本</td></tr>
+            <tr><td><strong>Task Outcome Check</strong><span class="sub">outcome frame → parent</span></td><td><code>demand-orchestration</code></td><td>Stage 1 迁移判断规则；Stage 2 将触发 transport 从 outcome frame 替换为 Goal terminal event</td><td>始终读取 canonical result，不复制 frame payload 为第二状态</td></tr>
+            <tr><td><strong>Task Frames / Progress</strong><span class="sub">side / parent / check</span></td><td>Codex Goal</td><td>Stage 1 仍是唯一 Task executor；Stage 2 一次性删除并切换 Goal</td><td>从不同时启动 Goal execution path</td></tr>
+            <tr><td><strong><code>task-management</code></strong></td><td>Stage 1 仅剩 frame execution；Stage 2 后无 owner</td><td>Stage 2 从 manifest、role 安装、runtime prompt 与测试删除</td><td>不改名为 legacy Skill，不保留 alias / compatibility forwarding</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid-2" style="margin-top:12px">
+        <article class="card"><span class="tag confirmed">demand-triage</span><h3 style="margin-top:9px">Side 判断 Skill</h3><p>只教授 inbound 语义判断、候选 Demand 读取、exact decision、source-local handling 和 revision conflict re-evaluation。</p></article>
+        <article class="card"><span class="tag confirmed">demand-orchestration</span><h3 style="margin-top:9px">Parent 编排 Skill</h3><p>只教授 terminal Task reconciliation、live pool 动态选择、Selection Decision、Task objective 与 Goal 启动；不教授 Goal continuation。</p></article>
+      </div>
+    </section>
+
+    <section class="surface section" id="implementation">
+      <div class="section-head">
+        <div><p class="eyebrow">Three vertical implementation stages</p><h2>三阶段实施：每一步都形成闭环，每一步都完成替换</h2></div>
+        <p class="summary">Contract 冻结不是单独的 P0，历史清理也不是最后才做的 P5。每一阶段都以 contract / RED proof 开始，以产品验证、替换清理和 residue assertion 结束；只有通过出口 Gate 才能进入下一阶段。</p>
+      </div>
+      <div class="architecture-foot" style="margin-bottom:12px">
+        <div class="callout ok"><strong>阶段含义：</strong>可以是连续 commit/PR 检查点，但不能成为 runtime mode。任一已接受版本，对同一语义只能有一个 owner、一个 write path 和一个 Skill 规则来源。</div>
+        <div class="callout warn"><strong>切换纪律：</strong>不增加 compatibility alias、feature flag、fallback read、dual write、旧 schema 解析器或旧 Skill 转发器；被替换路径必须在本阶段删除。</div>
+      </div>
+      <div class="phase-list">
+        <article class="phase">
+          <div class="phase-id">S1</div>
+          <div><strong>Demand Intake REBUILD</strong><p>把 inbound 串行检查改成 side 并发形成 canonical Demand pool。</p></div>
+          <div>
+            <ul>
+              <li><strong>入口冻结：</strong><code>TriageProposal</code> decisions、source-local <code>handled</code> allowlist、host invocation identity 与六工具 contract。</li>
+              <li><strong>建立：</strong>pending intake、<code>outputSchema</code> 透传/final-output extraction、isolated <code>demand-triage</code>、私有 proposal apply、receipt/CAS/retry。</li>
+              <li><strong>Skill 切分：</strong><code>demand-triage</code> 唯一拥有 intake 判断；<code>demand-orchestration</code> 唯一拥有 selection/reconciliation；旧 <code>task-management</code> 暂时只拥有尚未替换的 Task frame 执行。</li>
+            </ul>
+          </div>
+          <div class="proof"><strong>出口证明 + 删除</strong><p>浏览器多条 inbound 可产生 create / merge_intake / no-demand，side 并发且不 steer parent；idle 时仍能经唯一的 orchestration owner 选择至多一个现行 Task。删除 <code>[DEMAND CHECK]</code>、check cursor、<code>get_many/check/complete_check/absorb_into</code>、raw revision payload 及其权限/教学/测试。</p></div>
+        </article>
+        <article class="phase">
+          <div class="phase-id">S2</div>
+          <div><strong>Single Demand → Goal REBUILD</strong><p>用 Codex Goal 一次性替换 Task 自有执行状态机。</p></div>
+          <div>
+            <ul>
+              <li><strong>入口冻结：</strong>Task/Goal 启动握手、result-before-complete 顺序、<code>complete/blocked/clear</code> 最小状态映射与重启恢复。</li>
+              <li><strong>建立：</strong>独立 task identity、DemandRef、selection reason、objective、Goal/thread binding、durable result；注册 Goal updated handler。</li>
+              <li><strong>主闭环：</strong>idle pool selection → minimal Task → Goal working → terminal receipt → 同一 main thread 新 orchestration turn → Demand reconciliation。</li>
+            </ul>
+          </div>
+          <div class="proof"><strong>出口证明 + 删除</strong><p>一个 Demand 跨 turn 由 Goal 完整执行，拒绝第二个 unfinished Goal，握手任一点重启不产生孤儿。同期删除 side/parent/outcome frames、Progress Check、<code>need_parent/close</code> 旧语义、processor/lease 状态与 <code>task-management</code>。</p></div>
+        </article>
+        <article class="phase">
+          <div class="phase-id">S3</div>
+          <div><strong>Multi-Demand Orchestration + Acceptance</strong><p>在同一组 owner 上扩展多需求调度、恢复和用户交付。</p></div>
+          <div>
+            <ul>
+              <li><strong>入口冻结：</strong>Selection Contract、当前 Demand 连续性规则、pool attention 合并、全部 Goal 非 complete 状态映射与消息交付 evidence。</li>
+              <li><strong>建立：</strong>Goal active 时并发 triage、<code>pool_changed</code> coalescing、terminal 后全量 live pool 比较、keep-live Demand 的后续 Task、daemon/app-server recovery。</li>
+              <li><strong>产品实测：</strong>Market 两独立 + 两补充需求；Dev 自主创建 Demand；最终结果回到 Web 消息会话。</li>
+            </ul>
+          </div>
+          <div class="proof"><strong>出口证明 + 全局审计</strong><p>只启动一个下一 Task/Goal；重复通知与重启不重复执行或丢失 Demand；用户可读正文而非只见 artifact metadata。扫描 schema、actions、role_auth、manifest、skills、roles、runtime prompts、DTO/UI/CLI、tests 与 docs/arch，旧模型仅可出现在 Git、历史 memo 或负向残留断言中。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="surface section" id="rebuild">
+      <div class="section-head">
+        <div><p class="eyebrow">REBUILD acceptance gate</p><h2>分阶段不等于双轨：每个阶段只有一份当前真相</h2></div>
+        <p class="summary">Stage 1 保留旧 Task frame，是因为 Task execution 尚未被替换；它在该阶段仍是唯一执行 owner，不是 Goal 的兼容 fallback。Stage 2 建立 Goal owner 时必须同步删除它。阶段边界按 owner 切换，不按新旧版本并存。</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>已接受状态</th><th>Demand Intake / Canonicalization</th><th>Selection / Reconciliation</th><th>Task Execution</th><th>Terminal Wakeup</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Stage 1</strong><span class="sub">Demand 已切换，Task 尚未替换</span></td><td><code>demand-triage → private apply</code>，唯一写入路径</td><td><code>demand-orchestration</code>，唯一判断 owner</td><td>现行 Task frames，唯一执行器；不存在 Goal execution path</td><td>现行 Task terminal transport 唤醒 <code>demand-orchestration</code></td></tr>
+            <tr><td><strong>Stage 2</strong><span class="sub">Task/Goal 已切换</span></td><td>沿用 Stage 1 唯一路径</td><td><code>demand-orchestration</code>，读取 canonical result</td><td>Codex Goal，唯一 continuation/completion owner</td><td><code>thread/goal/updated</code>，不再存在 outcome frame</td></tr>
+            <tr><td><strong>Stage 3</strong><span class="sub">同一架构扩展并接受</span></td><td>同一 owner，支持 active Goal 期间并发 intake</td><td>同一 owner，全量 live pool 动态选择</td><td>同一 Goal owner，仍只有一个 active slot</td><td>同一 daemon handler，attention 合并与重启恢复</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid-3" style="margin-top:12px">
+        <article class="card"><span class="tag remove">no coexistence</span><h3 style="margin-top:9px">禁止运行时兼容机制</h3><p>不使用 feature flag 在新旧入口间路由；不保留 alias、adapter translation、fallback reader、dual write、shadow state、旧 payload optional field 或旧 Skill 转发。</p></article>
+        <article class="card"><span class="tag confirmed">cutover precondition</span><h3 style="margin-top:9px">切换前清空旧 runtime truth</h3><p>Stage 1 使用新建或重建的目标 actor aggregate，不读取旧 Demand schema；Stage 2 接受前确认没有旧 active Task/side。当前内部本地实例直接 drain、停止或重建；新代码不读取或迁移旧 runtime record。</p></article>
+        <article class="card"><span class="tag confirmed">protected exception</span><h3 style="margin-top:9px">外部数据保护必须另行声明</h3><p>本轮没有已声明的外部持久兼容义务。未来若必须保护真实用户数据，应单独进入 Protected mode，明确 owner、迁移窗口、移除触发器与区别性测试，不能混入本轮 Sharp path。</p></article>
+      </div>
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>阶段出口 Gate</th><th>必须证明</th><th>失败即不得进入下一阶段</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Reachability</strong></td><td>新入口是唯一可调用入口；旧 action/trigger/frame 不可注册、不可路由、不可恢复。</td><td>仍可通过 MCP、daemon、CLI、UI 或 prompt 到达旧行为。</td></tr>
+            <tr><td><strong>State / Schema</strong></td><td>canonical record 只含新字段；只有一个 write path；失败无部分写入。</td><td>存在 fallback read、dual write、旧 enum/field 或 schema translation。</td></tr>
+            <tr><td><strong>Exposure / Guidance</strong></td><td>tool catalog、role_auth、manifest、Skills、role bootstrap 与 runtime prompt 只教授当前 owner。</td><td>Agent 仍能发现或被指导调用旧 action/Skill。</td></tr>
+            <tr><td><strong>Tests / Fixtures</strong></td><td>focused product/contract proof 通过；负向 residue assertion 能识别退休术语或入口。</td><td>测试仍把旧行为当成支持能力，或只验证字段而未走消费路径。</td></tr>
+            <tr><td><strong>Operations</strong></td><td>旧 active runtime 已 drain/停止/重建；无 side lease、processor、socket、checkpoint 或重复 attention 残留。</td><td>必须依赖旧 reader、旧 worker 或人工修复才能继续运行。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>机器化残留证明</th><th>精确断言</th><th>允许出现旧术语的位置</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Stage 1 Demand surface</strong></td><td>Native MCP catalog 与 role authorization 的 Demand action 集合精确等于六工具；active schema 无 <code>checked_revision/absorbed</code>；active prompts 无 <code>[DEMAND CHECK]</code>。</td><td>历史 <code>docs/memo</code>、Git 与专门证明“不存在”的负向测试。</td></tr>
+            <tr><td><strong>Stage 1 Skill ownership</strong></td><td><code>task-management</code> 不含 triage、selection 或 reconciliation 规则；两项新 Skill 不复制 schema、daemon trigger 或 Goal continuation。</td><td>迁移审查说明可以引用原规则，但不能被 manifest/role 安装。</td></tr>
+            <tr><td><strong>Stage 2 Task surface</strong></td><td>Task action/schema/projection 无 frame、processor、lease、Progress Check、<code>need_parent/outcome</code>；manifest、role 与 runtime source 不再发现 <code>task-management</code>。</td><td>历史 memo 与负向 residue assertion。</td></tr>
+            <tr><td><strong>Stage 2 Runtime reachability</strong></td><td>只有 Goal handler 能推进 Task execution/terminal；旧 Task runtime instruction、frame dispatcher 与 outcome wakeup 未注册且不可恢复。</td><td>无 live exception。</td></tr>
+            <tr><td><strong>Stage 3 Repository acceptance</strong></td><td>对 code/contracts/skills/docs/arch/manifest/roles/tests/CLI/UI 做 scoped residue scan，并由真实 Web consumer flow 证明唯一主链路。</td><td><code>docs/memo</code> 仅作历史证据，不构成当前政策。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn" style="margin-top:12px"><strong>重要：</strong>“先加新路径，最后统一删旧路径”不满足本设计。正确顺序是：在一个阶段内部先建立新 owner，切换所有当前消费者，立即删除该阶段被替换的旧 owner，再运行出口 proof；Stage 3 只做全局漏网审计，不承担前两阶段本应完成的清理。</div>
+
+      <div class="delete-grid">
+        <div class="keep-box">
+          <span class="tag confirmed">keep semantics</span>
+          <h3 style="margin-top:10px">迁移到新 Owner</h3>
+          <div class="token-list">
+            <span class="token">one active Goal</span><span class="token">exact DemandRef</span><span class="token">latest Demand reread</span><span class="token">selection reason</span><span class="token">terminal evidence</span><span class="token">restart recovery</span>
+          </div>
+        </div>
+        <div class="delete-box">
+          <span class="tag remove">delete live model</span>
+          <h3 style="margin-top:10px">不保留兼容路径</h3>
+          <div class="token-list">
+            <span class="token">get_many</span><span class="token">check</span><span class="token">complete_check</span><span class="token">checked_revision</span><span class="token">absorb_into</span><span class="token">absorbed terminal</span><span class="token">Actor-managed intake key</span><span class="token">raw expected_revision</span><span class="token">side_frame</span><span class="token">parent_frame</span><span class="token">outcome_frame</span><span class="token">Progress Check</span><span class="token">need_parent</span><span class="token">processor state</span><span class="token">task-management</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="surface section" id="decisions">
+      <div class="section-head">
+        <div><p class="eyebrow">Decision ledger</p><h2>已确认与仍需冻结的关键问题</h2></div>
+        <p class="summary">下列“待冻结”不是允许旧架构继续存在，而是实现前必须确定的精确 contract；否则恢复、消息交付或 Goal 非 complete 状态会出现无 owner 区域。</p>
+      </div>
+      <div class="decision-controls">
+        <button class="button" type="button" data-decision-filter="all" aria-pressed="true">全部</button>
+        <button class="button" type="button" data-decision-filter="confirmed" aria-pressed="false">仅已确认</button>
+        <button class="button" type="button" data-decision-filter="open" aria-pressed="false">仅待冻结</button>
+      </div>
+      <div class="grid-3" id="decisionGrid">
+        <article class="card decision" data-state="confirmed"><h3>当前只做单 Task / Goal <span class="tag confirmed">confirmed</span></h3><p>多 Demand 管理与 Task 生命周期解耦；不实现并行 thread 或多执行槽。</p><div class="owner-line">OWNER · Demand orchestration + Codex Goal</div></article>
+        <article class="card decision" data-state="confirmed"><h3>Inbound 全部在 Side 判断 <span class="tag confirmed">confirmed</span></h3><p>删除 needs_parent_judgment；提供显式 bounded context，冲突后重新 side triage。</p><div class="owner-line">OWNER · demand-triage</div></article>
+        <article class="card decision" data-state="confirmed"><h3>不再存在 Absorb <span class="tag confirmed">confirmed</span></h3><p>merge_intake 合并 raw inbound 到现有 Demand；不制造临时 Demand 或 absorbed terminal。</p><div class="owner-line">OWNER · Demand domain</div></article>
+        <article class="card decision" data-state="confirmed"><h3>Actor Demand Tool 只有六个 <span class="tag confirmed">confirmed</span></h3><p><code>list/get/create/revise/complete/cancel</code> 是完整表面；triage proposal、intake apply、provenance、receipt 与 CAS 均不是 Agent tool。</p><div class="owner-line">OWNER · Demand public contract</div></article>
+        <article class="card decision" data-state="confirmed"><h3>复用 daemon-service <span class="tag confirmed">confirmed</span></h3><p>通用 daemon 只承载触发/恢复；Demand-owned adapters 与 skills 持有产品语义。</p><div class="owner-line">OWNER · daemon host + product adapters</div></article>
+        <article class="card decision" data-state="confirmed"><h3>Active Goal 不被 Demand 变化打断 <span class="tag confirmed">confirmed</span></h3><p>任何 canonical Demand create/revise/cancel/merge 只合并 pool_changed attention；不 steer、不 interrupt。Goal complete 后再统一 reconciliation。</p><div class="owner-line">OWNER · Demand orchestration adapter</div></article>
+        <article class="card decision" data-state="confirmed"><h3>三个 Stage 不是三种运行模式 <span class="tag confirmed">confirmed</span></h3><p>阶段只用于连续实现和验收；每个已接受 checkpoint 对同一语义只有一个 owner、一个 write path，不设置新旧切换开关。</p><div class="owner-line">OWNER · implementation acceptance</div></article>
+        <article class="card decision" data-state="confirmed"><h3>旧 Task 仅保留到自身被替换 <span class="tag confirmed">confirmed</span></h3><p>Stage 1 的现行 Task frame 是尚未替换的唯一执行器，不是 Goal fallback；Stage 2 建立 Goal owner时在同一阶段完整删除。</p><div class="owner-line">OWNER · Task → Goal cutover</div></article>
+        <article class="card decision" data-state="confirmed"><h3>不迁移内部旧 runtime record <span class="tag confirmed">confirmed</span></h3><p>Stage 1 使用新建/重建 aggregate，Stage 2 drain 或重建含旧 active Task 的本地 actor instance；除非另行声明 Protected contract，新代码不加入 legacy reader 或 record translator。</p><div class="owner-line">OWNER · cutover operations</div></article>
+        <article class="card decision" data-state="open"><h3>Task binding / Goal set 启动握手 <span class="tag open">open</span></h3><p>需要冻结 task record、native Goal 创建、goal_id/thread binding 的写入顺序，以及任一步失败或 daemon 重启后的单路径恢复；不能留下“Task 已建但无 Goal”或“Goal 已跑但无 Task”。</p><div class="owner-line">OWNER NEEDED · Task binding + Goal adapter</div></article>
+        <article class="card decision" data-state="open"><h3>Task result / Goal complete 顺序 <span class="tag open">open</span></h3><p>推荐 invariant：Task result receipt durable commit 成功后，才允许 <code>update_goal(complete)</code>；Goal complete 再成为 Task completion truth。需冻结失败恢复细节。</p><div class="owner-line">OWNER NEEDED · Task binding / Goal adapter</div></article>
+        <article class="card decision" data-state="open"><h3>Goal 非 complete 状态映射 <span class="tag open">open</span></h3><p><code>blocked / paused / usageLimited / budgetLimited / clear</code> 如何映射 Task 与 Demand attention，尚需逐一规定。</p><div class="owner-line">OWNER NEEDED · Goal adapter + orchestration</div></article>
+        <article class="card decision" data-state="open"><h3><code>handled</code> 的外部动作权限 <span class="tag open">open</span></h3><p>需要列出 side 可直接执行的 source-local actions、成功 receipt 和失败后行为。</p><div class="owner-line">OWNER NEEDED · Source product + demand-triage</div></article>
+        <article class="card decision" data-state="open"><h3>Actor <code>create</code> 的 invocation identity <span class="tag open">open</span></h3><p>目标不允许 Agent 提供 <code>intake_key/source_refs</code>；但当前 MCP bridge 丢弃 request meta，<code>ToolContext</code> 也没有 thread/turn/call identity。实现必须补 host-owned invocation context 与 receipt，不能把 key 再塞回 tool payload。</p><div class="owner-line">OWNER NEEDED · Native MCP adapter + ToolContext</div></article>
+        <article class="card decision" data-state="open"><h3>来源消息的用户可见交付 <span class="tag open">open</span></h3><p>Demand/Task 完成仍不能自动证明 Web/IM 用户收到结果；回复义务与 evidence owner 必须落地。</p><div class="owner-line">OWNER NEEDED · Demand completion contract</div></article>
+      </div>
+    </section>
+
+    <section class="surface section" id="verification">
+      <div class="section-head">
+        <div><p class="eyebrow">Acceptance &amp; operational proof</p><h2>验证必须覆盖产品闭环，而不只是字段和状态</h2></div>
+        <p class="summary">测试入口仍只使用 <code>./buddyswitch-test focused ...</code>；下表是 proof class，不是额外测试框架。</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Proof</th><th>核心主张</th><th>最接近的观测边界</th><th>失败 / 清理路径</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Product</strong></td><td>用户发入多个 inbound，side 并发完成 triage；Goal complete 后 Actor 只选择一个下一 Task。</td><td>Web message + Demand view + Goal/Task view</td><td>用户可见回复不能被 artifact 或 terminal 状态替代。</td></tr>
+            <tr><td><strong>Contract</strong></td><td>no-demand 不建 Demand；<code>TriageProposal</code> 本身无写权限；六个 Actor tools 不含底层字段；Goal complete 不自动 complete Demand。</td><td>Side final output + Demand public tool/domain + Goal adapter responses</td><td>invalid proposal / revision conflict 无部分写入；Task result/Goal 状态不分叉。</td></tr>
+            <tr><td><strong>Architecture</strong></td><td>daemon 不复制 Demand 判断；Side Result、Actor Tool、Skill、host/domain private operations 各自只有一个 owner；Goal 是唯一 execution loop。</td><td>依赖测试 + native MCP catalog assertion + live guidance residue scan</td><td>禁止旧 actions、aliases、frames、fallback readers。</td></tr>
+            <tr><td><strong>Replacement</strong></td><td>每阶段替换的旧路径在同阶段退出注册、schema、auth、Skill、prompt、tests 与 runtime；阶段之间不靠兼容层衔接。</td><td>reachability probes + repository residue assertions + fresh actor instance</td><td>禁止 feature flag、dual write、fallback read、旧 record translator 或历史 fixture 继续定义支持行为。</td></tr>
+            <tr><td><strong>Operations</strong></td><td>多次 pool_changed 合并；daemon / app-server 重启后 completed-goal reconciliation 可恢复。</td><td>runtime event log + daemon handler checkpoint</td><td>无残留 side lease、socket、processor 或重复 parent turn。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="surface section" id="evidence">
+      <div class="section-head">
+        <div><p class="eyebrow">Source evidence</p><h2>当前事实与改造触点</h2></div>
+        <p class="summary">这些路径用于审查“当前是什么”与“需要替换什么”。本页是设计汇总，不替代 tool schema、domain code 或 Codex Goal 官方协议。</p>
+      </div>
+      <div class="evidence-list">
+        <article class="evidence"><strong>Demand 当前字段与 capture-first 路径</strong><p>当前 record 含 intake_key、description/detail/source refs、revision、checked_revision、terminal；adapter 在 actor check 前先 create Demand。</p><span class="path">scripts/env/domain/demand_sys.py:14–26, 244–300, 389–475<br>tools/launcher/demand_sys_daemon_adapter.py:13–68</span></article>
+        <article class="evidence"><strong>当前 Demand Tool Actions</strong><p>当前包含 create/revise/list/get/get_many/check/complete_check/absorb_into/complete/cancel；Native MCP projection 会遍历全部 ActionDefinition，role_auth 又将十项权限授予所有 manifest roles。目标必须直接缩为六个高层 actions。</p><span class="path">scripts/env/tools/demand_sys/tool.py:166–343<br>scripts/env/tool_runtime/native_mcp.py:80–97<br>scripts/env/tool_runtime/role_auth.py:25–34</span></article>
+        <article class="evidence"><strong>当前 Actor Payload 泄漏底层责任</strong><p><code>create</code> 要求 Agent 提供 <code>intake_key/source_refs</code>；revise/complete/cancel 要求数字型 <code>expected_revision</code>。目标由 host 派生 provenance/idempotency，并用 opaque <code>demand_ref</code> 保留并发保护。</p><span class="path">scripts/env/tools/demand_sys/tool.py:182–216, 307–340<br>scripts/env/tools/demand_sys/_impl.py:220–262</span></article>
+        <article class="evidence"><strong>Host-derived invocation context 尚有传输缺口</strong><p>当前 MCP server 只把 tool/action/args 送入 broker，忽略 <code>params._meta</code> 与 request identity；<code>ToolContext</code> 也没有 thread/turn/call 字段。因此移除 Actor-supplied intake key 时，必须同步补充 host invocation identity，而不是假设上下文已经存在。</p><span class="path">tools/launcher/env_tool_mcp_server.py:107–152<br>scripts/env/tool_runtime/context.py:444–532</span></article>
+        <article class="evidence"><strong>当前跨产品判断 Skill</strong><p>Task Selection Rule、Outcome Check 与 Task frames 目前集中在一个 skill，是本次 owner 迁移的主要 live guidance。</p><span class="path">buddyswitch/skills/shared/task-management/SKILL.md<br>buddyswitch/manifest.toml</span></article>
+        <article class="evidence"><strong>当前 Task Runtime 与 identity coupling</strong><p>side/parent/outcome frame、progress check、active-task gate 和 runtime instructions 是 Goal mode 需要替换删除的主体；DemandRef 目前同时承担 source idempotency。</p><span class="path">scripts/env/domain/task_sys.py:13–32, 80–103, 229–274<br>scripts/env/tools/task_sys/tool.py:20–121<br>tools/launcher/task_sys_runtime.py</span></article>
+        <article class="evidence"><strong>Daemon 产品中立边界</strong><p>daemon 已拥有 generic trigger、handler dispatch、schedule、checkpoint、parent activity 与 Actor Session input。</p><span class="path">docs/arch/daemon-service-architecture.md<br>tools/launcher/daemon_runtime.py</span></article>
+        <article class="evidence"><strong>BuddySwitch 已有 Goal RPC 基座</strong><p><code>app_server.py</code> 已封装 get/set/clear；daemon loop 已读取并归一化 App Server notifications。缺的是 Goal product handler、binding 与 recovery，不是另一个 transport。</p><span class="path">tools/launcher/app_server.py:1018–1044<br>tools/launcher/daemon_core.py:909–950<br>tools/launcher/daemon_triggers.py:102–145</span></article>
+        <article class="evidence"><strong>Codex Native Goal Contract</strong><p>持久 thread goal、get/set/clear、updated/cleared notifications 与原生 continuation runtime 是新 Task execution owner；Goal 只支持 materialized thread，正好对齐当前 main-thread scope。</p><span class="path">/Users/chen/Dev/codex/codex-rs/app-server/README.md:154–158, 623–682<br>/Users/chen/Dev/codex/codex-rs/ext/goal/src/spec.rs<br>/Users/chen/Dev/codex/codex-rs/ext/goal/src/runtime.rs</span></article>
+        <article class="evidence"><strong>Codex Structured Side Output 可复用</strong><p>Codex <code>turn/start</code> 原生支持 per-turn <code>outputSchema</code>；BuddySwitch 当前 wrapper 尚未透传该字段，也没有 side final-output consumer。这是替代 <code>commit_intake</code> Actor Tool 的最短能力增量。</p><span class="path">/Users/chen/Dev/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:143–146<br>/Users/chen/Dev/codex/codex-rs/app-server/README.md:771–814<br>tools/launcher/app_server.py:957–974</span></article>
+        <article class="evidence"><strong>Tool / Skill / Bootstrap 当前暴露</strong><p>native MCP actions 来自 ToolDefinition；task-management 通过 manifest 安装；role AGENTS 与 context runtime_sources 仍列出旧 Task surface，必须同步切换为六工具 catalog 与两项 Demand Skills。</p><span class="path">scripts/env/tool_runtime/native_mcp.py<br>buddyswitch/manifest.toml:179–266<br>tools/launcher/assets/roles/*/AGENTS.md<br>scripts/env/tool_runtime/context.py:173–182</span></article>
+        <article class="evidence"><strong><code>handled</code> 受当前 tool gate 限制</strong><p>Message 写入当前是 task-free，而 Track 多数写入要求 active Task；因此 triage side 的 source-local action 必须逐 source 设计，不能假定现有工具都可直接处理。</p><span class="path">scripts/env/tools/message/tool.py:92–189<br>scripts/env/tools/track/tool.py:141–477<br>scripts/env/tool_runtime/registry.py:370–404</span></article>
+      </div>
+      <details style="margin-top:12px">
+        <summary>明确的非目标与未来约束</summary>
+        <div class="details-body">
+          <ul>
+            <li>当前不实现 actor multi-thread、并行 Task、多 Goal 调度或 Task 之间通信。</li>
+            <li>未来若 actor instance 支持多 main-like threads，可将“一个 thread 一个 Goal”扩展为多执行槽；本轮不为此引入 scheduler framework。</li>
+            <li>Hosted cloud / pathless ThreadStore 的 Goal 兼容边界不属于当前本地 BuddySwitch cutover 的接受范围。</li>
+            <li>历史模型留在 Git 与历史 memo；当前 docs、skills、tests 和运行时不保留兼容教学。</li>
+          </ul>
+        </div>
+      </details>
+    </section>
+
+    <footer>
+      <p><strong>Memo job：</strong>把 BuddySwitch Demand 多需求管理到 Codex Goal 单任务执行的改造拆成三个可快速实现与验证的纵向阶段，并用逐阶段单真相矩阵、删除清单与 REBUILD Gate 保证阶段推进不产生历史残留、兼容双轨或第二套 owner；实现完成后由 code/contracts/skills/docs/arch 成为当前真相。</p>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      const body = document.body;
+      const ownerButtons = [...document.querySelectorAll('[data-owner-button]')];
+      ownerButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const owner = button.dataset.ownerButton;
+          if (owner === 'all') body.removeAttribute('data-owner-focus');
+          else body.setAttribute('data-owner-focus', owner);
+          ownerButtons.forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+          document.getElementById('architecture-title').scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+      });
+
+      const filterButtons = [...document.querySelectorAll('[data-decision-filter]')];
+      const decisions = [...document.querySelectorAll('.decision[data-state]')];
+      filterButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const filter = button.dataset.decisionFilter;
+          decisions.forEach((card) => card.classList.toggle('hidden', filter !== 'all' && card.dataset.state !== filter));
+          filterButtons.forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+        });
+      });
+
+      const summary = [
+        'BuddySwitch Demand → Goal Mode 三阶段 REBUILD',
+        'S1 Demand Intake：proposal-first isolated triage、六个 Actor tools、private apply；同阶段删除 DEMAND CHECK、check/get_many/absorb 与 raw revision surface。',
+        'S2 Single Demand → Goal：minimal Task binding、Goal continuation、terminal reconciliation；同阶段删除 Task frames、Progress Check、need_parent、outcome frame 与 task-management。',
+        'S3 Multi-Demand Acceptance：active Goal 期间并发 triage、attention coalescing、全量 live pool selection、重启恢复与 Web 用户可见交付。',
+        '阶段是实现/验收检查点，不是 runtime mode；任一已接受版本只有一个 owner、一个 write path、一个 Skill policy source。',
+        '禁止 compatibility alias、feature flag、fallback read、dual write、旧 schema translator、旧 Skill 转发与历史 fixture 支持行为。',
+        'Contract 冻结属于每阶段入口；被替换路径清理属于每阶段出口。Stage 3 只做全局漏网审计，不替前两阶段偿还清理债务。'
+      ].join('\n');
+      const copyButton = document.getElementById('copySummary');
+      const copyStatus = document.getElementById('copyStatus');
+      copyButton.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(summary);
+          copyStatus.textContent = '已复制';
+        } catch (_error) {
+          const textarea = document.createElement('textarea');
+          textarea.value = summary;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+          copyStatus.textContent = '已复制（兼容模式）';
+        }
+        window.setTimeout(() => { copyStatus.textContent = ''; }, 2200);
+      });
+      document.getElementById('printPage').addEventListener('click', () => window.print());
+    })();
+  </script>
+</body>
+</html>

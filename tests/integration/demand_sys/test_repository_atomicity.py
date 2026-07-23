@@ -32,11 +32,14 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
         env["PYTHONPATH"] = os.pathsep.join(python_paths)
         return env
 
-    def test_absent_actor_state_loads_one_empty_schema_v2_aggregate(self) -> None:
+    def test_absent_actor_state_loads_one_empty_schema_v4_aggregate(self) -> None:
         expected = {
-            "schema_version": 2,
+            "schema_version": 4,
             "actor_target": ACTOR_TARGET,
             "demands": {},
+            "demand_pool_revision": 0,
+            "ingress_receipts": {},
+            "actor_creation_receipts": {},
         }
 
         first = demands.load_actor_state(ACTOR_TARGET)
@@ -66,9 +69,12 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
         self.assertEqual(
             demands.load_actor_state(ACTOR_TARGET),
             {
-                "schema_version": 2,
+                "schema_version": 4,
                 "actor_target": ACTOR_TARGET,
                 "demands": {demand_id: {"id": demand_id}},
+                "demand_pool_revision": 0,
+                "ingress_receipts": {},
+                "actor_creation_receipts": {},
             },
         )
 
@@ -104,7 +110,7 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
 
     def test_changed_transaction_validates_complete_aggregate_before_write(self) -> None:
         def corrupt_aggregate(state: dict[str, object]) -> tuple[bool, None]:
-            state["schema_version"] = 3
+            state["schema_version"] = 2
             return True, None
 
         with self.assertRaisesRegex(ValueError, "schema_version"):
@@ -232,9 +238,12 @@ demands.transact_actor_state(actor_target, mutate)
                 "demands": {},
             },
             "wrong actor target": {
-                "schema_version": 2,
+                "schema_version": 4,
                 "actor_target": {"actor_id": "act-pm-other", "role_id": "pm"},
                 "demands": {},
+                "demand_pool_revision": 0,
+                "ingress_receipts": {},
+                "actor_creation_receipts": {},
             },
         }
         for label, payload in invalid_aggregates.items():
@@ -249,7 +258,7 @@ demands.transact_actor_state(actor_target, mutate)
                     mutator_called = True
                     return True, None
 
-                with self.assertRaisesRegex(ValueError, "schema_version must be 2|actor_target"):
+                with self.assertRaisesRegex(ValueError, "schema_version must be 4|actor_target"):
                     demands.transact_actor_state(ACTOR_TARGET, must_not_run)
 
                 self.assertFalse(mutator_called)

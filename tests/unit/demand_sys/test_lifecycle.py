@@ -1,4 +1,4 @@
-"""Demand completed, canceled, and absorbed lifecycle contracts."""
+"""Demand completed and canceled lifecycle contracts."""
 
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
 
     def _create(self, label: str) -> dict[str, Any]:
         self._sequence += 1
-        intake_key = f"actor-self:{label}-{self._sequence}"
+        creation_key = f"actor-self:{label}-{self._sequence}"
         receipt = demand_sys.create(
             self.actor_target,
-            intake_key,
+            creation_key,
             f"Demand {label}.",
             f"Detailed requirement for {label}.",
-            [{"type": "actor.self_requested", "ref": {"key": intake_key}}],
+            [{"type": "actor.self_requested", "ref": {"key": creation_key}}],
         )
         return demand_sys.get(self.actor_target, receipt["changes"][0]["demand_id"])
 
@@ -53,8 +53,7 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
 
         receipt = demand_sys.complete(
             self.actor_target,
-            record["id"],
-            1,
+            record["demand_ref"],
             "Acceptance evidence is complete.",
             evidence_refs,
         )
@@ -62,7 +61,7 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(
             receipt["changes"],
-            [{"demand_id": record["id"], "revision": 2, "kind": "completed"}],
+            [{"demand_id": record["id"], "kind": "completed"}],
         )
         self.assertEqual(
             terminal,
@@ -81,8 +80,7 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
             demand_sys.DemandPayloadError,
             lambda: demand_sys.complete(
                 self.actor_target,
-                record["id"],
-                1,
+                record["demand_ref"],
                 "Evidence is required before completion.",
                 None,
             ),
@@ -96,15 +94,14 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
 
         receipt = demand_sys.cancel(
             self.actor_target,
-            record["id"],
-            1,
+            record["demand_ref"],
             "Requirement was withdrawn.",
         )
         terminal = demand_sys.get(self.actor_target, record["id"])["terminal"]
 
         self.assertEqual(
             receipt["changes"],
-            [{"demand_id": record["id"], "revision": 2, "kind": "canceled"}],
+            [{"demand_id": record["id"], "kind": "canceled"}],
         )
         self.assertEqual(
             terminal,
@@ -120,8 +117,7 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
         evidence_refs = [{"type": "task_sys.task", "ref": {"task_id": "task-replay"}}]
         demand_sys.complete(
             self.actor_target,
-            record["id"],
-            1,
+            record["demand_ref"],
             "Satisfied.",
             evidence_refs,
         )
@@ -129,15 +125,20 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
 
         replay = demand_sys.complete(
             self.actor_target,
-            record["id"],
-            1,
+            record["demand_ref"],
             "Satisfied.",
             evidence_refs,
         )
 
         self.assertEqual(
             replay,
-            {"state_changed": False, "changes": [], "check_required": False},
+            {
+                "state_changed": False,
+                "changes": [],
+                "demand_id": record["id"],
+                "demand_ref": replay["demand_ref"],
+                "demand_pool_revision": 2,
+            },
         )
         self.assertEqual(self._bytes(), before)
 
@@ -145,8 +146,7 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
         record = self._create("terminal-conflict")
         demand_sys.cancel(
             self.actor_target,
-            record["id"],
-            1,
+            record["demand_ref"],
             "Requirement was withdrawn.",
         )
 
@@ -154,10 +154,9 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
             demand_sys.DemandTerminalConflict,
             lambda: demand_sys.complete(
                 self.actor_target,
-                record["id"],
-                1,
+                record["demand_ref"],
                 "Cannot complete a canceled Demand.",
-                [],
+                [{"type": "task_sys.task", "ref": {"task_id": "task-conflict"}}],
             ),
         )
         self.assertEqual(raised.code, "E_DEMAND_TERMINAL")

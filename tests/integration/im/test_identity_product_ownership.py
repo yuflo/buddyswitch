@@ -61,7 +61,11 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestCase):
 
         result = task_sys.create(
             actor_target={"actor_id": actor["actor_id"], "role_id": actor["role_id"]},
-            demand_ref={"demand_id": "demand-identity-owned-task", "basis_revision": 1},
+            demand_ref={
+                "demand_id": "demand-identity-owned-task",
+                "basis_revision": 1,
+                "demand_ref": "dref-identity-owned-task",
+            },
             execution_brief={
                 "description": "Identity-owned Task.",
                 "detail": "Verify Task ownership uses the actor identity route.",

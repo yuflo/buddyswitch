@@ -72,3 +72,17 @@ class DaemonHandler(Protocol):
         trigger: "DaemonTrigger",
     ) -> HandlerResult | dict[str, Any]:
         """Handle one owned trigger and return the observable daemon result."""
+
+
+class DaemonReconciler(Protocol):
+    """Optional product-neutral lifecycle hook invoked during bounded polling."""
+
+    name: str
+
+    def reconcile(
+        self,
+        context: DaemonContext,
+        state: Any,
+        runtime: Any,
+    ) -> HandlerResult | dict[str, Any]:
+        """Reconcile durable product state without relying on a notification."""

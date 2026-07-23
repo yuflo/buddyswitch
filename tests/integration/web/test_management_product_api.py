@@ -497,6 +497,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                 demand_ref={
                     "demand_id": f"demand-web-console-terminal-{index}",
                     "basis_revision": 1,
+                    "demand_ref": f"dref-web-console-terminal-{index}",
                 },
                 execution_brief={
                     "description": f"Web console terminal fixture {index}.",
@@ -511,7 +512,11 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
 
         task_result = task_sys.create(
             actor_target={"actor_id": "act-pm-demo", "role_id": "pm"},
-            demand_ref={"demand_id": "demand-web-console", "basis_revision": 1},
+            demand_ref={
+                "demand_id": "demand-web-console",
+                "basis_revision": 1,
+                "demand_ref": "dref-web-console",
+            },
             execution_brief={
                 "description": "Web console fixture.",
                 "detail": "Exercise the management console Task projection.",

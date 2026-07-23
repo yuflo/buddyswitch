@@ -11,7 +11,7 @@ import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 NowFn = Callable[[], str]
@@ -91,6 +91,20 @@ def _validate_side_identity(parent_thread_id: str, side_thread_id: str) -> tuple
     return parent, side
 
 
+def _normalize_binding(value: Mapping[str, Any] | None) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or not value:
+        raise SideThreadRegistryError("Side thread binding must be a non-empty object")
+    normalized: dict[str, str] = {}
+    for key, item in value.items():
+        normalized[_require_id(key, "Side thread binding key")] = _require_id(
+            item,
+            f"Side thread binding {key}",
+        )
+    return normalized
+
+
 def register_side_thread(
     instance_json: Path,
     *,
@@ -101,6 +115,8 @@ def register_side_thread(
     purpose: str | None = None,
     turn_id: str | None = None,
     turn_kind: str | None = None,
+    capability_hash: str | None = None,
+    binding: Mapping[str, Any] | None = None,
     now: NowFn | None = None,
 ) -> dict[str, Any]:
     actor = _require_id(actor_id, "Actor id")
@@ -123,6 +139,19 @@ def register_side_thread(
             row["turn_id"] = _require_id(turn_id, "Turn id")
         if turn_kind is not None:
             row["turn_kind"] = _require_id(turn_kind, "Turn kind")
+        normalized_binding = _normalize_binding(binding)
+        if capability_hash is not None:
+            row["capability_hash"] = _require_id(
+                capability_hash,
+                "Side thread capability hash",
+            )
+            row["capability_state"] = "open"
+        if normalized_binding is not None:
+            if capability_hash is None:
+                raise SideThreadRegistryError(
+                    "Side thread binding requires a capability hash"
+                )
+            row["binding"] = normalized_binding
         payload["side_threads"] = [item for item in _side_rows(payload) if item.get("thread_id") != side]
         payload["side_threads"].append(row)
         payload["updated_at"] = timestamp
@@ -231,6 +260,91 @@ def require_side_thread(
         if row.get("thread_id") == side and row.get("parent_thread_id") == parent and row.get("status") == "open":
             return row
     raise SideThreadRegistryError(f"Side thread is not registered for this instance: {side}")
+
+
+def find_side_threads_by_capability_hash(
+    instance_json: Path,
+    *,
+    actor_id: str,
+    capability_hash: str,
+) -> list[dict[str, Any]]:
+    actor = _require_id(actor_id, "Actor id")
+    normalized_hash = _require_id(
+        capability_hash,
+        "Side thread capability hash",
+    )
+    payload = _load_payload(Path(instance_json), actor)
+    return [
+        row
+        for row in _side_rows(payload)
+        if row.get("status") == "open"
+        and row.get("capability_hash") == normalized_hash
+    ]
+
+
+def find_side_threads_by_purpose(
+    instance_json: Path,
+    *,
+    actor_id: str,
+    parent_thread_id: str,
+    purpose: str,
+) -> list[dict[str, Any]]:
+    actor = _require_id(actor_id, "Actor id")
+    parent = _require_id(parent_thread_id, "Parent thread id")
+    normalized_purpose = _require_id(purpose, "Side thread purpose")
+    payload = _load_payload(Path(instance_json), actor)
+    return [
+        row
+        for row in _side_rows(payload)
+        if row.get("status") == "open"
+        and row.get("parent_thread_id") == parent
+        and row.get("purpose") == normalized_purpose
+    ]
+
+
+def consume_side_thread_capability(
+    instance_json: Path,
+    *,
+    actor_id: str,
+    side_thread_id: str,
+    capability_hash: str,
+    now: NowFn | None = None,
+) -> dict[str, Any]:
+    actor = _require_id(actor_id, "Actor id")
+    side = _require_id(side_thread_id, "Side thread id")
+    normalized_hash = _require_id(
+        capability_hash,
+        "Side thread capability hash",
+    )
+    with _write_lock(Path(instance_json)):
+        payload = _load_payload(Path(instance_json), actor)
+        timestamp = _now_value(now)
+        consumed: dict[str, Any] | None = None
+        rows: list[dict[str, Any]] = []
+        for row in _side_rows(payload):
+            if (
+                row.get("thread_id") == side
+                and row.get("status") == "open"
+                and row.get("capability_hash") == normalized_hash
+            ):
+                if row.get("capability_state") != "open":
+                    raise SideThreadRegistryError(
+                        f"Side thread capability is not open: {side}"
+                    )
+                consumed = dict(row)
+                consumed["capability_state"] = "consumed"
+                consumed["updated_at"] = timestamp
+                rows.append(consumed)
+                continue
+            rows.append(row)
+        if consumed is None:
+            raise SideThreadRegistryError(
+                f"Side thread capability is not registered: {side}"
+            )
+        payload["side_threads"] = rows
+        payload["updated_at"] = timestamp
+        _write_payload(Path(instance_json), payload)
+        return consumed
 
 
 def find_task_side_thread(

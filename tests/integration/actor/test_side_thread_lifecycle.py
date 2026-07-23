@@ -73,6 +73,7 @@ class FakeAppServer(types.ModuleType):
         ephemeral: bool | None = None,
         model: str | None = None,
         model_reasoning_effort: str | None = None,
+        config_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             {
@@ -85,6 +86,7 @@ class FakeAppServer(types.ModuleType):
                 "ephemeral": ephemeral,
                 "model": model,
                 "model_reasoning_effort": model_reasoning_effort,
+                "config_overrides": config_overrides,
             }
         )
         return {"thread": {"id": "thr-side-1"}}
@@ -95,8 +97,23 @@ class FakeAppServer(types.ModuleType):
             raise self.thread_read_error
         return {"thread": {"id": thread_id, "status": self.thread_read_status}}
 
-    def turn_start(self, socket_path: Path, thread_id: str, text: str, permissions: str) -> dict[str, object]:
-        self.calls.append({"helper": "turn_start", "socket_path": socket_path, "thread_id": thread_id, "text": text, "permissions": permissions})
+    def turn_start(
+        self,
+        socket_path: Path,
+        thread_id: str,
+        text: str,
+        permissions: str,
+        *,
+        output_schema: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append({
+            "helper": "turn_start",
+            "socket_path": socket_path,
+            "thread_id": thread_id,
+            "text": text,
+            "permissions": permissions,
+            "output_schema": output_schema,
+        })
         if self.before_turn_start is not None:
             self.before_turn_start()
         return {"action": "start", "turn": {"id": "turn-side-started"}, "turn_id": "turn-side-started"}
@@ -260,6 +277,11 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 shared_project_workspace_dir=self.project_workspace_dir,
                 permissions="buddyswitch-runtime",
                 task_id="task-controlled-inbound-abc123",
+                output_schema={
+                    "type": "object",
+                    "required": ["decision"],
+                    "properties": {"decision": {"type": "string"}},
+                },
             )
 
             self.assertEqual(
@@ -268,6 +290,14 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             )
             self.assertEqual(self.app_server.calls[0]["developer_instructions"], "isolated side instructions")
             self.assertIs(self.app_server.calls[0]["ephemeral"], True)
+            self.assertEqual(
+                self.app_server.calls[1]["output_schema"],
+                {
+                    "type": "object",
+                    "required": ["decision"],
+                    "properties": {"decision": {"type": "string"}},
+                },
+            )
             self.assertEqual(result["action"], "start")
             self.assertEqual(result["purpose"], "task_sys.side_frame")
             self.assertEqual(result["parent_thread_id"], "thr-main")
@@ -314,6 +344,62 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
             row = self._payload(instance_json)["side_threads"][0]
             self.assertNotIn("model", row)
             self.assertNotIn("model_reasoning_effort", row)
+
+    def test_start_side_thread_registers_hashed_capability_before_turn_and_forwards_thread_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance_json = self._instance_json(temp_root)
+            config_overrides = {
+                "mcp_servers.buddyswitch-env.enabled_tools": [
+                    "demand_sys__list",
+                    "demand_sys__get",
+                ],
+                "mcp_servers.buddyswitch-demand-triage": {
+                    "command": "/usr/bin/python3",
+                    "env": {
+                        "BUDDYSWITCH_DEMAND_TRIAGE_CAPABILITY": "raw-secret",
+                    },
+                },
+            }
+
+            def assert_capability_lease_is_visible() -> None:
+                row = self._payload(instance_json)["side_threads"][0]
+                self.assertEqual(row["capability_hash"], "sha256:abc123")
+                self.assertEqual(row["capability_state"], "open")
+                self.assertEqual(
+                    row["binding"],
+                    {
+                        "source_key": "im.message.created:msg-1",
+                        "attempt_id": "attempt-1",
+                    },
+                )
+                self.assertNotIn("raw-secret", json.dumps(row, sort_keys=True))
+
+            self.app_server.before_turn_start = assert_capability_lease_is_visible
+
+            self.lifecycle.start_side_thread(
+                socket_path=self.socket_path,
+                instance_json=instance_json,
+                actor_id="act-dev-side",
+                parent_thread_id="thr-main",
+                text="Resolve Demand ingress.",
+                purpose="demand-triage",
+                workspace_dir=self.workspace_dir,
+                shared_project_workspace_dir=self.project_workspace_dir,
+                permissions="buddyswitch-runtime",
+                config_overrides=config_overrides,
+                capability_hash="sha256:abc123",
+                binding={
+                    "source_key": "im.message.created:msg-1",
+                    "attempt_id": "attempt-1",
+                },
+            )
+
+            self.assertEqual(
+                self.app_server.calls[0]["config_overrides"],
+                config_overrides,
+            )
+            persisted = instance_json.read_text(encoding="utf-8")
+            self.assertNotIn("raw-secret", persisted)
 
     def test_start_side_thread_accepts_lease_consumed_before_turn_start_returns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

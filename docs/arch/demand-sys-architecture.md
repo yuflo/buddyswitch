@@ -2,144 +2,155 @@
 
 ## Purpose
 
-Demand Sys is the local product module that captures and canonicalizes needs
-owned by one actor. A Demand records what requires attention. It is not an
-execution record and does not imply that work has started.
+Demand Sys owns the actor's canonical needs. A Demand is an obligation whose
+meaning and lifecycle are independent of execution work.
 
-The implemented inbound paths are:
-
-```text
-IM message fact -> IM handler -> Demand daemon adapter -> Demand domain
-Track comment fact -> Track handler -> Demand daemon adapter -> Demand domain
-                                             |
-                                             -> generic input_actor -> actor Demand Check
-
-actor judgment -> demand_sys action -> Demand domain
-```
-
-Each inbound handler validates one exact target-visible source fact and maps it
-deterministically to Demand intake. The Demand daemon adapter coordinates
-capture, checks durable pending attention, and supplies one fixed Demand Check
-prompt through generic actor input. It does not decide canonical identity,
-select execution, or own storage.
-
-## One canonical Demand set
-
-The actor aggregate uses schema v2. It stores its actor target once and one
-canonical Demand set keyed by Demand id. Each Demand carries its intake
-identity, descriptive content, provenance, revision/check cursor, lifecycle
-terminal, and timestamps. A null terminal means live. The only terminal
-outcomes are completed, canceled, or absorbed into another live canonical
-Demand.
-
-`scripts/env/domain/demand_sys.py` is the single semantic owner for capture,
-revision, attention, canonicalization, and lifecycle. It is the only caller of
-the aggregate transaction operation. `scripts/env/repos/demands.py` is the
-single storage owner at:
+The current ingress path is:
 
 ```text
-buddyswitch/objects/demand-sys/actors/<actor-id>-<role-id>.json
+validated IM or Track fact
+  -> source-keyed private ingress receipt
+  -> isolated demand-triage side
+  -> thread-only demand_triage.resolve
+  -> Demand-owned atomic resolution
+  -> canonical Demand pool
+  -> durable demand_pool_revision attention
+  -> parent demand-orchestration
+  -> at most one current Task
 ```
 
-The Domain validates current records and every mutation input before returning
-a next state. The repository takes an exclusive actor-scoped lock, validates
-the aggregate envelope, and atomically replaces the file only when state
-changes. Normal reads accept schema v2 only. There is no aggregate discovery,
-cross-actor fallback, older-schema translation, or second write path.
+The receipt is private recovery metadata inside the Demand aggregate. It has no
+product identity, actor tool, read model, Web panel, CLI surface, or selectable
+queue.
 
-## Two-pass actor canonicalization
+## One aggregate and one write path
 
-Inbound and actor sources always capture a new need before semantic judgment.
-On Demand Check the actor performs two-pass actor canonicalization:
+The schema-v4 actor aggregate contains:
 
-1. compare every pending description with the compact live index;
-2. load complete records only for plausible candidates;
-3. revise the row, absorb it into the same canonical need, keep it independently
-   live, or cancel it;
-4. acknowledge only the exact revisions actually observed.
+- canonical Demands;
+- monotonic `demand_pool_revision`;
+- source-keyed `ingress_receipts`;
+- actor-create idempotency receipts.
 
-`absorb_into` is the only cross-record semantic mutation. It validates two
-distinct live rows and both expected revisions in one transaction. The actor
-provides the merged target description and detail. The domain merges provenance
-in target-first unique order, advances the target, and makes the source an
-immutable absorbed terminal pointing to the target Demand id.
+`scripts/env/domain/demand_sys.py` owns receipt state, triage application,
+Demand mutation, opaque references, and lifecycle.
+`scripts/env/repos/demands.py` owns actor-scoped locking, full aggregate
+validation, and atomic replacement. One resolution transaction updates the
+receipt and any affected Demand together.
 
-Source references are provenance and retrieval context, not canonical identity.
-For a Track-backed Demand the actor may use the stored Track identity to read
-more source context. Track thread structure never decides canonical Demand
-identity.
+There is no compatibility reader, fallback schema, dual write, shadow queue,
+or second Demand owner.
 
-Before absorption, the Actor + installed task-management skill reads active
-Task state. If exactly one of the two Demand rows is already represented by the
-active Task, that row remains the absorption target. This is actor workflow
-guidance, not a Demand domain dependency. The Task keeps its original opaque
-DemandRef snapshot; the actor rereads the latest Demand during later progress
-and outcome checks.
+## Isolated triage and direct resolution
 
-## Attention and lifecycle
+IM and Track owners validate and materialize their exact source facts, then use
+the Demand adapter to create a due-now generic `demand.ingress.triage`
+schedule. The registered Demand handler claims the source key and starts an
+ephemeral isolated side.
 
-`check` is read-only. It returns every revision newer than its check cursor, a
-compact id/description index of live Demands, and the pending count.
-`complete_check` advances only revisions the actor actually observed, so a
-concurrent newer revision remains pending. This cursor is Demand attention
-state, not Task progress and not a daemon subscription.
+That side receives:
 
-Demand completion is independent of Task completion. A terminal Task produces
-an outcome frame, after which the actor rereads the latest Demand and explicitly
-decides whether the need is satisfied, canceled, revised, or still live. A
-Task outcome never mutates Demand state by implication.
+- read-only `demand_sys__list` and `demand_sys__get`;
+- source-local `message__get` and `message__conversation`;
+- one dedicated `demand_triage.resolve` MCP tool.
 
-The actor tool exposes capture, revision, reads, attention acknowledgement,
-absorption, completion, and cancellation. Exact payloads and response contracts
-belong to `scripts/env/tools/demand_sys/tool.py`; this document does not mirror
-them. Existing-record writes are expected-revision guarded. Exact intake and
-terminal replays are idempotent; conflicting or stale writes leave the
-aggregate unchanged.
+It does not receive Message send, Demand mutation, Task, or unrelated product
+tools. The host mints a one-side capability, stores only its hash and binding
+in the side lease, and passes the raw token only to that side's MCP process.
+The runtime broker validates the active actor, main/side identity, exact
+purpose, source key, attempt, and open capability before calling the Demand
+owner.
 
-## Product boundaries
-
-The only actor tool id is `demand_sys`. Its adapter derives actor identity and
-role from `ToolContext` and reaches the owner only through
-`ToolContext.rules.demand_sys`. It has no repository, Task runtime, daemon,
-inbound, actor-override, alias, or fallback capability.
-
-Public reads use `scripts/env/domain/demand_read.py`, which projects an
-actor-scoped allowlist and omits private detail and provenance. The CLI remains
-read-only:
+The resolver schema has six flat required fields and uses null for values that
+do not apply. The decisions are:
 
 ```text
-buddyswitch-codex demand list --actor <actor-id>
-buddyswitch-codex demand get <demand-id> --actor <actor-id>
+no_action_needed
+handled
+create
+merge_intake
+revise
+cancel
 ```
 
-Task Sys stores only the opaque DemandRef `{demand_id, basis_revision}` selected by the
-actor. Task implementation does not import, read, validate, call, subscribe to,
-or mutate Demand state. Generic daemon infrastructure delivers opaque trigger
-and actor-input mechanics; it contains no Demand rule.
+`handled` is valid only for an exact IM source. The dedicated runtime finds an
+existing actor reply by `reply_to` or sends it once through the Message owner,
+verifies the stored Message, and only then supplies verified evidence to the
+Demand transaction. The side cannot forge a Message receipt.
 
-Allowed dependencies:
+The turn has no `outputSchema`, final-message JSON parser, item-completed
+consumer, or turn-completed consumer. A stale Demand reference returns the
+source receipt to pending without partial mutation.
+
+## Recovery and pool attention
+
+The generic daemon core optionally invokes each registered handler's
+`reconcile(context, state, runtime)` hook after actor registration and on
+bounded timeout polling. It records results and isolates handler failures, but
+does not know Demand states, revisions, prompts, or side purposes.
+
+`DemandTriageHandler.reconcile` alone:
+
+- starts pending source receipts;
+- recovers a resolving receipt whose side lease was never registered;
+- detects idle or system-error sides that ended without resolving;
+- removes settled side leases;
+- compares `demand_pool_revision` with its durable handler checkpoint;
+- requests one duplicate-safe parent attention turn when no Task is active and
+  the parent is idle.
+
+If a Task is active or the parent is busy, the revision remains deferred. A
+later poll rereads the one-active-Task and parent-activity invariants before
+starting work. Resolution remains durable when the instance daemon is stopped
+because the dedicated MCP process commits through the still-live runtime
+broker; daemon reconciliation catches up from canonical state after restart.
+
+## Actor tool boundary
+
+The actor-facing `demand_sys` tool exposes exactly:
 
 ```text
-Demand domain -> Demand repository -> runtime file primitives
-Demand read projection -> Demand domain
-Demand tool adapter -> ToolContext.rules.demand_sys
-public CLI -> Demand read projection
-IM/Track handler -> owning source read + Demand daemon adapter
-Demand daemon adapter -> Demand domain + generic input_actor
-Actor workflow -> independent Demand Sys and Task Sys actions
+list
+get
+create
+revise
+complete
+cancel
 ```
+
+The adapter derives actor ownership, provenance, idempotency, source
+references, and concurrency from host context. The actor never supplies
+storage paths, receipt keys, numeric revisions, terminal record structures, or
+resolution authority. Mutations use the current opaque `demand_ref` returned
+by `get`. `demand_pool_revision` and ingress receipts never appear in actor
+responses.
+
+Direct actor `create` declares a canonical independent Demand immediately. It
+does not create an ingress receipt, but it increments the same private pool
+revision and therefore enters the same serialized orchestration path.
+
+## Demand and Task boundary
+
+Demand completion and Task completion are independent. A terminal Task is
+evidence; it never mutates a Demand automatically. The parent workflow rereads
+the latest Demand and explicitly completes, cancels, revises, or leaves it live.
+
+During the Phase 1 cutover, Task Sys retains its current execution lifecycle,
+while Demand ingress and selection use only the architecture above. Phase 2
+replaces that executor with native Codex Goal and removes the old Task frames;
+it does not add a parallel Task path.
+
+Task domain code does not import or mutate Demand state. Demand domain code
+does not import or mutate Task state. The parent workflow is the semantic
+composition point.
 
 ## Explicit non-goals
 
-- No cross-Demand graph, hierarchy, prerequisite network, or general semantic
-  taxonomy.
-- No queue, scheduler, automatic work selection, or automatic Demand-to-Task
-  transition.
-- No Demand-to-Task callback and no Task-to-Demand completion callback.
-- No business rule in generic daemon infrastructure.
-- No schema compatibility reader, alias, dual write, shadow state, or migration
-  framework.
-
-These boundaries are enforced by
-`tests/unit/architecture/test_demand_sys_boundaries.py` plus direct domain,
-repository, tool, inbound, and process tests.
+- No Demand graph, hierarchy, prerequisite engine, or semantic taxonomy.
+- No first-class pre-Demand product object or second queue.
+- No parent triage or semantic interrupt path.
+- No automatic Demand completion from Task state.
+- No Demand business rule in generic daemon-service code.
+- No resolver in the six-action actor tool catalog.
+- No alias, fallback, compatibility schema, dual read, or dual write for the
+  retired triage path.

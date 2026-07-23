@@ -32,6 +32,22 @@ class TaskSysActorCreateTests(RuntimeWorkspaceTestCase):
         return {
             "demand_id": demand_id,
             "basis_revision": basis_revision,
+            "demand_ref": f"dref-{demand_id.removeprefix('demand-')}-{basis_revision}",
+        }
+
+    def _actor_demand_ref(
+        self,
+        *,
+        demand_id: str = "demand-phase3-create",
+        basis_revision: int = 3,
+    ) -> dict[str, str]:
+        demand_ref = self._demand_ref(
+            demand_id=demand_id,
+            basis_revision=basis_revision,
+        )
+        return {
+            "demand_id": str(demand_ref["demand_id"]),
+            "demand_ref": str(demand_ref["demand_ref"]),
         }
 
     def _execution_brief(self) -> dict[str, str]:
@@ -77,7 +93,7 @@ class TaskSysActorCreateTests(RuntimeWorkspaceTestCase):
         self.assertEqual(instruction["task_id"], task["id"])
         self.assertEqual(instruction["frame"]["source"], {
             "type": "demand",
-            "ref": self._demand_ref(),
+            "ref": self._actor_demand_ref(),
         })
         self.assertEqual(
             instruction["frame"]["context"],
@@ -207,7 +223,11 @@ if not gate_path.exists():
 try:
     result = task_sys.create(
         actor_target=actor_target,
-        demand_ref={"demand_id": f"demand-race-{index}", "basis_revision": 1},
+        demand_ref={
+            "demand_id": f"demand-race-{index}",
+            "basis_revision": 1,
+            "demand_ref": f"dref-race-{index}",
+        },
         execution_brief={
             "description": f"Concurrent need {index}.",
             "detail": f"Only one concurrent need may become a Task: {index}.",
@@ -284,7 +304,7 @@ except task_sys.TaskActiveConflict as exc:
                 "kind": "task_sys.outcome_frame",
                 "task_id": created["task_id"],
                 "status": task_sys.COMPLETED,
-                "source": {"type": "demand", "ref": self._demand_ref()},
+                "source": {"type": "demand", "ref": self._actor_demand_ref()},
                 "evidence_ref": {
                     "type": "task_sys.task",
                     "ref": {"task_id": created["task_id"]},
@@ -315,7 +335,7 @@ except task_sys.TaskActiveConflict as exc:
                 "kind": "task_sys.outcome_frame",
                 "task_id": created["task_id"],
                 "status": task_sys.CANCELED,
-                "source": {"type": "demand", "ref": self._demand_ref()},
+                "source": {"type": "demand", "ref": self._actor_demand_ref()},
                 "evidence_ref": {
                     "type": "task_sys.task",
                     "ref": {"task_id": created["task_id"]},

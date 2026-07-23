@@ -652,7 +652,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
         "demands": {
             "description": "Actor-owned Demand needs, unchecked revisions, and canonical live state.",
             "scope": "active actor Demand state",
-            "source_of_truth": "demand_sys.list / demand_sys.get / demand_sys.check / demand_sys.get_many via runtime env tools",
+            "source_of_truth": "demand_sys.list / demand_sys.get via runtime env tools",
         },
         "artifacts": {
             "description": "Readable artifact summaries for private drafts and shared track materials/proofs.",

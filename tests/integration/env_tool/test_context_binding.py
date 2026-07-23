@@ -73,6 +73,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             demand_ref={
                 "demand_id": f"demand-context-{runtime_files.slugify(source_type)}",
                 "basis_revision": 1,
+                "demand_ref": f"dref-context-{runtime_files.slugify(source_type)}",
             },
             execution_brief={
                 "description": "Context binding fixture.",
@@ -454,7 +455,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(candidate_task.get("source_type"), "demand")
         self.assertEqual(
             candidate_task.get("source_ref"),
-            {"demand_id": "demand-context-test-context-active", "basis_revision": 1},
+            {
+                "demand_id": "demand-context-test-context-active",
+                "demand_ref": "dref-context-test-context-active",
+            },
         )
         self.assertEqual(candidate_task.get("status"), "in_progress.side_processing")
         self.assertNotIn("task_desc", candidate_task)
@@ -667,7 +671,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIn("tasks", sources)
         self.assertIn("demands", sources)
         demand_source_text = json.dumps(sources["demands"], ensure_ascii=True, sort_keys=True)
-        for action in ("demand_sys.list", "demand_sys.get", "demand_sys.check", "demand_sys.get_many"):
+        for action in ("demand_sys.list", "demand_sys.get"):
             self.assertIn(action, demand_source_text)
         task_source = sources["tasks"]
         task_source_text = json.dumps(task_source, ensure_ascii=True, sort_keys=True)

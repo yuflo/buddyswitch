@@ -1,8 +1,10 @@
-"""Canonical actor-owned Demand lifecycle and canonicalization owner."""
+"""Canonical actor-owned Demand and private ingress-resolution owner."""
 
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
+import hashlib
 import json
 from typing import Any, Mapping
 from uuid import uuid4
@@ -11,16 +13,33 @@ from env.repos import demands
 from env.repos import runtime_files
 
 
-TERMINAL_TYPES = ("completed", "canceled", "absorbed")
-_RECORD_FIELDS = {
+TERMINAL_TYPES = ("completed", "canceled")
+TRIAGE_DECISIONS = (
+    "no_action_needed",
+    "handled",
+    "create",
+    "merge_intake",
+    "revise",
+    "cancel",
+)
+INGRESS_RECEIPT_STATES = ("pending", "resolving", "settled", "failed")
+_DEMAND_FIELDS = {
     "id",
-    "intake_key",
     "description",
     "detail",
     "source_refs",
     "revision",
-    "checked_revision",
     "terminal",
+    "created_at",
+    "updated_at",
+}
+_INGRESS_RECEIPT_FIELDS = {
+    "fingerprint",
+    "fact",
+    "state",
+    "attempt_id",
+    "outcome",
+    "last_failure",
     "created_at",
     "updated_at",
 }
@@ -38,8 +57,8 @@ class DemandRevisionConflict(DemandError):
     code = "E_DEMAND_REVISION_CONFLICT"
 
 
-class DemandIntakeConflict(DemandError):
-    code = "E_DEMAND_INTAKE_CONFLICT"
+class DemandIngressConflict(DemandError):
+    code = "E_DEMAND_INGRESS_CONFLICT"
 
 
 class DemandTerminalConflict(DemandError):
@@ -76,27 +95,27 @@ def _require_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def _require_revision(value: Any, field: str = "expected_revision") -> int:
+def _require_revision(value: Any, field: str = "revision") -> int:
     if type(value) is not int or value < 1:
         raise _payload_error(f"{field} must be a positive integer")
     return value
 
 
-def _require_checked_revision(value: Any, revision: int) -> int:
-    if type(value) is not int or value < 0 or value > revision:
-        raise _payload_error(
-            "demand.checked_revision must be an integer between zero and revision"
-        )
-    return value
-
-
-def _require_demand_id(value: Any, field: str = "demand_id") -> str:
-    if not isinstance(value, str) or not value.startswith("demand-"):
-        raise _payload_error(f"{field} must be a Demand id")
+def _require_id(value: Any, prefix: str, field: str) -> str:
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise _payload_error(f"{field} must start with {prefix}")
     try:
         return runtime_files.require_id(value, field)
     except ValueError as exc:
         raise _payload_error(str(exc)) from exc
+
+
+def _require_demand_id(value: Any, field: str = "demand_id") -> str:
+    return _require_id(value, "demand-", field)
+
+
+def _require_attempt_id(value: Any, field: str = "attempt_id") -> str:
+    return _require_id(value, "attempt-", field)
 
 
 def _json_object_copy(value: Any, field: str) -> dict[str, Any]:
@@ -118,13 +137,123 @@ def _normalize_refs(value: Any, field: str) -> list[dict[str, Any]]:
     for index, raw_ref in enumerate(value):
         ref = _require_mapping(raw_ref, f"{field}[{index}]")
         _require_exact_fields(ref, {"type", "ref"}, f"{field}[{index}]")
-        refs.append(
-            {
-                "type": _require_text(ref.get("type"), f"{field}[{index}].type"),
-                "ref": _json_object_copy(ref.get("ref"), f"{field}[{index}].ref"),
-            }
-        )
+        normalized = {
+            "type": _require_text(ref.get("type"), f"{field}[{index}].type"),
+            "ref": _json_object_copy(ref.get("ref"), f"{field}[{index}].ref"),
+        }
+        if normalized not in refs:
+            refs.append(normalized)
     return refs
+
+
+def _merge_refs(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    for group in groups:
+        for ref in group:
+            if ref not in merged:
+                merged.append(deepcopy(ref))
+    return merged
+
+
+def _normalized_ingress_fact(
+    description: Any,
+    detail: Any,
+    source_refs: Any,
+) -> dict[str, Any]:
+    return {
+        "description": _require_text(description, "description"),
+        "detail": _require_text(detail, "detail"),
+        "source_refs": _normalize_refs(source_refs, "source_refs"),
+    }
+
+
+def _ingress_fingerprint(fact: Mapping[str, Any]) -> str:
+    body = json.dumps(
+        dict(fact),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _normalize_ingress_receipt(value: Any) -> dict[str, Any]:
+    receipt = _require_mapping(value, "ingress receipt")
+    _require_exact_fields(receipt, _INGRESS_RECEIPT_FIELDS, "ingress receipt")
+    fingerprint = _require_text(
+        receipt.get("fingerprint"),
+        "ingress receipt.fingerprint",
+    )
+    if len(fingerprint) != 64 or any(char not in "0123456789abcdef" for char in fingerprint):
+        raise _payload_error(
+            "ingress receipt.fingerprint must be a lowercase sha256 hex digest"
+        )
+    fact = _require_mapping(receipt.get("fact"), "ingress receipt.fact")
+    _require_exact_fields(
+        fact,
+        {"description", "detail", "source_refs"},
+        "ingress receipt.fact",
+    )
+    normalized_fact = _normalized_ingress_fact(
+        fact.get("description"),
+        fact.get("detail"),
+        fact.get("source_refs"),
+    )
+    if _ingress_fingerprint(normalized_fact) != fingerprint:
+        raise _payload_error("ingress receipt fingerprint does not match its fact")
+    state = receipt.get("state")
+    if state not in INGRESS_RECEIPT_STATES:
+        raise _payload_error(
+            "ingress receipt.state must be one of "
+            + ", ".join(INGRESS_RECEIPT_STATES)
+        )
+    attempt_id = receipt.get("attempt_id")
+    if attempt_id is not None:
+        attempt_id = _require_attempt_id(
+            attempt_id,
+            "ingress receipt.attempt_id",
+        )
+    outcome = receipt.get("outcome")
+    if outcome is not None:
+        outcome = _json_object_copy(outcome, "ingress receipt.outcome")
+    last_failure = receipt.get("last_failure")
+    if last_failure is not None:
+        last_failure = _json_object_copy(
+            last_failure,
+            "ingress receipt.last_failure",
+        )
+    if state == "pending" and (attempt_id is not None or outcome is not None):
+        raise _payload_error(
+            "pending ingress receipt must not contain attempt_id or outcome"
+        )
+    if state == "resolving" and (attempt_id is None or outcome is not None):
+        raise _payload_error(
+            "resolving ingress receipt requires attempt_id and no outcome"
+        )
+    if state == "settled" and (attempt_id is None or outcome is None):
+        raise _payload_error(
+            "settled ingress receipt requires attempt_id and outcome"
+        )
+    if state == "failed" and (attempt_id is not None or outcome is not None):
+        raise _payload_error(
+            "failed ingress receipt must not contain attempt_id or outcome"
+        )
+    return {
+        "fingerprint": fingerprint,
+        "fact": normalized_fact,
+        "state": state,
+        "attempt_id": attempt_id,
+        "outcome": outcome,
+        "last_failure": last_failure,
+        "created_at": _require_text(
+            receipt.get("created_at"),
+            "ingress receipt.created_at",
+        ),
+        "updated_at": _require_text(
+            receipt.get("updated_at"),
+            "ingress receipt.updated_at",
+        ),
+    }
 
 
 def _normalize_terminal(value: Any) -> dict[str, Any] | None:
@@ -138,25 +267,15 @@ def _normalize_terminal(value: Any) -> dict[str, Any] | None:
         )
     if terminal_type == "completed":
         fields = {"type", "at", "summary", "evidence_refs"}
-    elif terminal_type == "canceled":
-        fields = {"type", "at", "summary"}
     else:
-        fields = {"type", "at", "summary", "target_demand_id"}
+        fields = {"type", "at", "summary"}
     _require_exact_fields(terminal, fields, "demand.terminal")
     normalized: dict[str, Any] = {
         "type": terminal_type,
         "at": _require_text(terminal.get("at"), "demand.terminal.at"),
-        "summary": _require_text(
-            terminal.get("summary"),
-            "demand.terminal.summary",
-        ),
+        "summary": _require_text(terminal.get("summary"), "demand.terminal.summary"),
     }
-    if "target_demand_id" in fields:
-        normalized["target_demand_id"] = _require_demand_id(
-            terminal.get("target_demand_id"),
-            "demand.terminal.target_demand_id",
-        )
-    if "evidence_refs" in fields:
+    if terminal_type == "completed":
         normalized["evidence_refs"] = _normalize_refs(
             terminal.get("evidence_refs"),
             "demand.terminal.evidence_refs",
@@ -164,25 +283,65 @@ def _normalize_terminal(value: Any) -> dict[str, Any] | None:
     return normalized
 
 
-def _normalize_record(value: Any) -> dict[str, Any]:
+def _normalize_demand(value: Any) -> dict[str, Any]:
     record = _require_mapping(value, "demand")
-    _require_exact_fields(record, _RECORD_FIELDS, "demand")
-    revision = _require_revision(record.get("revision"), "demand.revision")
+    _require_exact_fields(record, _DEMAND_FIELDS, "demand")
     return {
         "id": _require_demand_id(record.get("id"), "demand.id"),
-        "intake_key": _require_text(record.get("intake_key"), "demand.intake_key"),
         "description": _require_text(record.get("description"), "demand.description"),
         "detail": _require_text(record.get("detail"), "demand.detail"),
         "source_refs": _normalize_refs(record.get("source_refs"), "demand.source_refs"),
-        "revision": revision,
-        "checked_revision": _require_checked_revision(
-            record.get("checked_revision"),
-            revision,
-        ),
+        "revision": _require_revision(record.get("revision"), "demand.revision"),
         "terminal": _normalize_terminal(record.get("terminal")),
         "created_at": _require_text(record.get("created_at"), "demand.created_at"),
         "updated_at": _require_text(record.get("updated_at"), "demand.updated_at"),
     }
+
+
+def _normalize_ingress_proposal(value: Any) -> dict[str, Any]:
+    proposal = _require_mapping(value, "proposal")
+    fields = {
+        "decision",
+        "reason",
+        "demand_ref",
+        "description",
+        "detail",
+        "reply_content",
+    }
+    _require_exact_fields(proposal, fields, "proposal")
+    decision = proposal.get("decision")
+    if decision not in TRIAGE_DECISIONS:
+        raise _payload_error(
+            f"proposal.decision must be one of {', '.join(TRIAGE_DECISIONS)}"
+        )
+    applicable: set[str] = set()
+    if decision == "handled":
+        applicable.add("reply_content")
+    elif decision == "create":
+        applicable.update({"description", "detail"})
+    elif decision in {"merge_intake", "revise"}:
+        applicable.update({"demand_ref", "description", "detail"})
+    elif decision == "cancel":
+        applicable.add("demand_ref")
+    normalized: dict[str, Any] = {
+        "decision": decision,
+        "reason": _require_text(proposal.get("reason"), "proposal.reason"),
+        "demand_ref": None,
+        "description": None,
+        "detail": None,
+        "reply_content": None,
+    }
+    for field in ("demand_ref", "description", "detail", "reply_content"):
+        if field in applicable:
+            normalized[field] = _require_text(
+                proposal.get(field),
+                f"proposal.{field}",
+            )
+        elif proposal.get(field) is not None:
+            raise _payload_error(
+                f"proposal.{field} must be null for {decision}"
+            )
+    return normalized
 
 
 def _records(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -190,35 +349,60 @@ def _records(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     if not isinstance(raw_records, Mapping):
         raise _payload_error("Demand actor aggregate demands must be an object")
     normalized: dict[str, dict[str, Any]] = {}
-    intake_keys: set[str] = set()
     for indexed_id, raw_record in raw_records.items():
         demand_id = _require_demand_id(indexed_id, "Demand aggregate key")
-        record = _normalize_record(raw_record)
+        record = _normalize_demand(raw_record)
         if record["id"] != demand_id:
             raise _payload_error("Demand aggregate key must match demand.id")
-        if record["intake_key"] in intake_keys:
-            raise _payload_error("Demand intake_key values must be unique per actor")
-        intake_keys.add(record["intake_key"])
         normalized[demand_id] = record
     return normalized
 
 
-def _receipt(*, state_changed: bool, changes: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "state_changed": state_changed,
-        "changes": changes,
-        "check_required": bool(changes),
-    }
+def _ingress_receipts(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_receipts = state.get("ingress_receipts")
+    if not isinstance(raw_receipts, Mapping):
+        raise _payload_error(
+            "Demand actor aggregate ingress_receipts must be an object"
+        )
+    normalized: dict[str, dict[str, Any]] = {}
+    for raw_source_key, raw_receipt in raw_receipts.items():
+        source_key = _require_text(raw_source_key, "ingress receipt source key")
+        normalized[source_key] = _normalize_ingress_receipt(raw_receipt)
+    return normalized
 
 
-def _new_demand_id(records: Mapping[str, Any]) -> str:
-    while True:
-        demand_id = f"demand-{uuid4().hex[:12]}"
+def _creation_receipts(
+    state: Mapping[str, Any],
+    records: Mapping[str, dict[str, Any]],
+) -> dict[str, str]:
+    raw = state.get("actor_creation_receipts")
+    if not isinstance(raw, Mapping):
+        raise _payload_error(
+            "Demand actor aggregate actor_creation_receipts must be an object"
+        )
+    normalized: dict[str, str] = {}
+    for raw_key, raw_demand_id in raw.items():
+        key = _require_text(raw_key, "actor creation receipt key")
+        demand_id = _require_demand_id(
+            raw_demand_id,
+            "actor creation receipt demand id",
+        )
         if demand_id not in records:
-            return demand_id
+            raise _payload_error(
+                "actor creation receipt must reference a stored Demand"
+            )
+        normalized[key] = demand_id
+    return normalized
 
 
-def _find_record(
+def _new_id(prefix: str, occupied: Mapping[str, Any]) -> str:
+    while True:
+        identifier = f"{prefix}-{uuid4().hex[:12]}"
+        if identifier not in occupied:
+            return identifier
+
+
+def _find_demand(
     records: Mapping[str, dict[str, Any]],
     demand_id: str,
 ) -> dict[str, Any]:
@@ -228,121 +412,194 @@ def _find_record(
     return record
 
 
-def _require_expected_revision(record: Mapping[str, Any], expected_revision: int) -> None:
-    if record["revision"] != expected_revision:
-        raise DemandRevisionConflict(
-            f"Demand {record['id']} is at revision {record['revision']}; "
-            f"expected {expected_revision}. Read the current Demand and retry."
-        )
-
-
 def _require_live(record: Mapping[str, Any]) -> None:
     if record["terminal"] is not None:
         raise DemandTerminalConflict(f"Demand {record['id']} is terminal")
 
 
+def _encode_ref(demand_id: str, revision: int) -> str:
+    body = json.dumps(
+        {"demand_id": demand_id, "revision": revision},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(body).decode("ascii").rstrip("=")
+    checksum = hashlib.sha256(body).hexdigest()[:16]
+    return f"dref-{encoded}.{checksum}"
+
+
+def _decode_ref(value: Any) -> tuple[str, int]:
+    token = _require_text(value, "demand_ref")
+    if not token.startswith("dref-") or "." not in token:
+        raise _payload_error("demand_ref must be an opaque Demand reference")
+    encoded, checksum = token[len("dref-"):].rsplit(".", 1)
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        body = base64.urlsafe_b64decode((encoded + padding).encode("ascii"))
+        payload = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _payload_error("demand_ref is invalid") from exc
+    if hashlib.sha256(body).hexdigest()[:16] != checksum:
+        raise _payload_error("demand_ref checksum is invalid")
+    row = _require_mapping(payload, "demand_ref payload")
+    _require_exact_fields(
+        row,
+        {"demand_id", "revision"},
+        "demand_ref payload",
+    )
+    return (
+        _require_demand_id(row.get("demand_id"), "demand_ref demand_id"),
+        _require_revision(row.get("revision"), "demand_ref revision"),
+    )
+
+
+def _project_with_ref(record: Mapping[str, Any]) -> dict[str, Any]:
+    projected = deepcopy(dict(record))
+    projected["demand_ref"] = _encode_ref(
+        str(record["id"]),
+        int(record["revision"]),
+    )
+    return projected
+
+
+def resolve_demand_ref(
+    actor_target: Mapping[str, Any],
+    demand_ref: Any,
+    *,
+    require_live: bool = True,
+) -> dict[str, Any]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    demand_id, basis_revision = _decode_ref(demand_ref)
+    record = _find_demand(
+        _records(demands.load_actor_state(normalized_target)),
+        demand_id,
+    )
+    if record["revision"] != basis_revision:
+        raise DemandRevisionConflict(
+            f"Demand {demand_id} changed after this demand_ref was read"
+        )
+    if require_live:
+        _require_live(record)
+    return {
+        "demand_id": demand_id,
+        "basis_revision": basis_revision,
+        "demand_ref": _encode_ref(demand_id, basis_revision),
+    }
+
+
+def _new_demand_record(
+    records: Mapping[str, Any],
+    *,
+    description: str,
+    detail: str,
+    source_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    now = runtime_files.now_iso()
+    return {
+        "id": _new_id("demand", records),
+        "description": description,
+        "detail": detail,
+        "source_refs": deepcopy(source_refs),
+        "revision": 1,
+        "terminal": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _change(demand_id: str, kind: str) -> dict[str, str]:
+    return {"demand_id": demand_id, "kind": kind}
+
+
+def _increment_pool_revision(state: dict[str, Any]) -> int:
+    current = state.get("demand_pool_revision")
+    if type(current) is not int or current < 0:
+        raise _payload_error(
+            "Demand actor aggregate demand_pool_revision must be a non-negative integer"
+        )
+    next_revision = current + 1
+    state["demand_pool_revision"] = next_revision
+    return next_revision
+
+
+def actor_creation_key(
+    actor_target: Mapping[str, Any],
+    *,
+    thread_id: Any,
+    turn_id: Any,
+    description: Any,
+    detail: Any,
+) -> str:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    payload = {
+        "actor_id": normalized_target["actor_id"],
+        "role_id": normalized_target["role_id"],
+        "thread_id": _require_text(thread_id, "thread_id"),
+        "turn_id": _require_text(turn_id, "turn_id"),
+        "action": "demand_sys.create",
+        "description": _require_text(description, "description"),
+        "detail": _require_text(detail, "detail"),
+    }
+    body = json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "actor-create:" + hashlib.sha256(body).hexdigest()
+
+
 def create(
     actor_target: Mapping[str, Any],
-    intake_key: Any,
+    creation_key: Any,
     description: Any,
     detail: Any,
     source_refs: Any,
 ) -> dict[str, Any]:
     normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_intake_key = _require_text(intake_key, "intake_key")
+    normalized_key = _require_text(creation_key, "creation_key")
     normalized_description = _require_text(description, "description")
     normalized_detail = _require_text(detail, "detail")
-    normalized_source_refs = _normalize_refs(source_refs, "source_refs")
+    normalized_refs = _normalize_refs(source_refs, "source_refs")
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         records = _records(state)
-        for record in records.values():
-            if record["intake_key"] != normalized_intake_key:
-                continue
-            same_input = (
-                record["description"] == normalized_description
-                and record["detail"] == normalized_detail
-                and record["source_refs"] == normalized_source_refs
-            )
-            if same_input:
-                return False, {
-                    **_receipt(state_changed=False, changes=[]),
-                    "demand_id": record["id"],
-                    "revision": record["revision"],
-                }
-            raise DemandIntakeConflict(
-                f"Demand intake_key already exists with different content: {normalized_intake_key}"
-            )
-        demand_id = _new_demand_id(records)
-        now = runtime_files.now_iso()
-        record = {
-            "id": demand_id,
-            "intake_key": normalized_intake_key,
-            "description": normalized_description,
-            "detail": normalized_detail,
-            "source_refs": normalized_source_refs,
-            "revision": 1,
-            "checked_revision": 0,
-            "terminal": None,
-            "created_at": now,
-            "updated_at": now,
-        }
-        state["demands"][demand_id] = record
-        return True, {
-            **_receipt(
-                state_changed=True,
-                changes=[{"demand_id": demand_id, "revision": 1, "kind": "created"}],
-            ),
-            "demand_id": demand_id,
-            "revision": 1,
-        }
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
-def revise(
-    actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
-    description: Any,
-    detail: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_id = _require_demand_id(demand_id)
-    normalized_revision = _require_revision(expected_revision)
-    normalized_description = _require_text(description, "description")
-    normalized_detail = _require_text(detail, "detail")
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state)
-        record = _find_record(records, normalized_id)
-        _require_live(record)
-        _require_expected_revision(record, normalized_revision)
-        if (
-            record["description"] == normalized_description
-            and record["detail"] == normalized_detail
-        ):
-            return False, _receipt(state_changed=False, changes=[])
-        next_revision = record["revision"] + 1
-        stored = state["demands"][normalized_id]
-        stored.update(
-            {
-                "description": normalized_description,
-                "detail": normalized_detail,
-                "revision": next_revision,
-                "updated_at": runtime_files.now_iso(),
+        receipts = _creation_receipts(state, records)
+        existing_id = receipts.get(normalized_key)
+        if existing_id is not None:
+            existing = _find_demand(records, existing_id)
+            if (
+                existing["description"] != normalized_description
+                or existing["detail"] != normalized_detail
+                or existing["source_refs"] != normalized_refs
+            ):
+                raise DemandIngressConflict(
+                    "actor creation key already exists with different content"
+                )
+            return False, {
+                "state_changed": False,
+                "changes": [],
+                "demand_id": existing_id,
+                "demand_ref": _encode_ref(existing_id, existing["revision"]),
+                "demand_pool_revision": state["demand_pool_revision"],
             }
+        record = _new_demand_record(
+            records,
+            description=normalized_description,
+            detail=normalized_detail,
+            source_refs=normalized_refs,
         )
-        return True, _receipt(
-            state_changed=True,
-            changes=[
-                {
-                    "demand_id": normalized_id,
-                    "revision": next_revision,
-                    "kind": "revised",
-                }
-            ],
-        )
+        state["demands"][record["id"]] = record
+        state["actor_creation_receipts"][normalized_key] = record["id"]
+        pool_revision = _increment_pool_revision(state)
+        return True, {
+            "state_changed": True,
+            "changes": [_change(record["id"], "created")],
+            "demand_id": record["id"],
+            "demand_ref": _encode_ref(record["id"], 1),
+            "demand_pool_revision": pool_revision,
+        }
 
     return demands.transact_actor_state(normalized_target, mutate)
 
@@ -359,320 +616,588 @@ def list_demands(
         records = [record for record in records if record["terminal"] is None]
     elif state == "terminal":
         records = [record for record in records if record["terminal"] is not None]
-    return sorted(records, key=lambda record: (record["created_at"], record["id"]))
+    return sorted(
+        (_project_with_ref(record) for record in records),
+        key=lambda record: (record["created_at"], record["id"]),
+    )
 
 
 def get(actor_target: Mapping[str, Any], demand_id: Any) -> dict[str, Any]:
     normalized_target = demands.normalize_actor_target(actor_target)
     normalized_id = _require_demand_id(demand_id)
-    records = _records(demands.load_actor_state(normalized_target))
-    return _find_record(records, normalized_id)
-
-
-def get_many(
-    actor_target: Mapping[str, Any],
-    demand_ids: Any,
-) -> list[dict[str, Any]]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    if not isinstance(demand_ids, list):
-        raise _payload_error("demand_ids must be a list")
-    normalized_ids = [
-        _require_demand_id(value, f"demand_ids[{index}]")
-        for index, value in enumerate(demand_ids)
-    ]
-    if len(normalized_ids) != len(set(normalized_ids)):
-        raise _payload_error("demand_ids must contain unique Demand ids")
-    records = _records(demands.load_actor_state(normalized_target))
-    return [_find_record(records, demand_id) for demand_id in normalized_ids]
-
-
-def check(actor_target: Mapping[str, Any]) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    records = list(_records(demands.load_actor_state(normalized_target)).values())
-    attention_items = sorted(
-        [record for record in records if record["revision"] > record["checked_revision"]],
-        key=lambda record: (record["created_at"], record["id"]),
+    record = _find_demand(
+        _records(demands.load_actor_state(normalized_target)),
+        normalized_id,
     )
-    live_records = sorted(
-        [record for record in records if record["terminal"] is None],
-        key=lambda record: (record["created_at"], record["id"]),
-    )
-    return {
-        "attention_items": attention_items,
-        "live_index": [
-            {"id": record["id"], "description": record["description"]}
-            for record in live_records
-        ],
-        "pending_count": len(attention_items),
-    }
+    return _project_with_ref(record)
 
 
-def complete_check(
-    actor_target: Mapping[str, Any],
-    observed: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    if not isinstance(observed, list):
-        raise _payload_error("observed must be a list")
-    normalized_observed: list[dict[str, Any]] = []
-    observed_ids: set[str] = set()
-    for index, raw_observation in enumerate(observed):
-        observation = _require_mapping(raw_observation, f"observed[{index}]")
-        _require_exact_fields(
-            observation,
-            {"demand_id", "revision"},
-            f"observed[{index}]",
-        )
-        demand_id = _require_demand_id(
-            observation.get("demand_id"),
-            f"observed[{index}].demand_id",
-        )
-        if demand_id in observed_ids:
-            raise _payload_error("observed must contain unique demand_id values")
-        observed_ids.add(demand_id)
-        normalized_observed.append(
-            {
-                "demand_id": demand_id,
-                "revision": _require_revision(
-                    observation.get("revision"),
-                    f"observed[{index}].revision",
-                ),
-            }
-        )
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state)
-        for observation in normalized_observed:
-            record = _find_record(records, observation["demand_id"])
-            if observation["revision"] > record["revision"]:
-                raise DemandRevisionConflict(
-                    f"Observed revision {observation['revision']} is newer than Demand "
-                    f"{record['id']} revision {record['revision']}"
-                )
-        changed = False
-        for observation in normalized_observed:
-            record = records[observation["demand_id"]]
-            if observation["revision"] > record["checked_revision"]:
-                state["demands"][record["id"]]["checked_revision"] = observation[
-                    "revision"
-                ]
-                record["checked_revision"] = observation["revision"]
-                changed = True
-        still_pending = [
-            {"demand_id": record["id"], "revision": record["revision"]}
-            for observation in normalized_observed
-            for record in [records[observation["demand_id"]]]
-            if record["revision"] > record["checked_revision"]
-        ]
-        result = {
-            "acknowledged": deepcopy(normalized_observed),
-            "still_pending": still_pending,
-            "state_changed": changed,
-            "check_required": False,
-        }
-        return changed, result
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
-def _next_revision(stored: dict[str, Any], *, now: str) -> int:
-    revision = int(stored["revision"]) + 1
-    stored["revision"] = revision
-    stored["updated_at"] = now
-    return revision
-
-
-def _change(demand_id: str, revision: int, kind: str) -> dict[str, Any]:
-    return {"demand_id": demand_id, "revision": revision, "kind": kind}
-
-
-def _normalize_merged_target(value: Any) -> dict[str, Any]:
-    merged = _require_mapping(value, "merged_target")
-    _require_exact_fields(
-        merged,
-        {"description", "detail"},
-        "merged_target",
-    )
-    return {
-        "description": _require_text(
-            merged.get("description"),
-            "merged_target.description",
-        ),
-        "detail": _require_text(merged.get("detail"), "merged_target.detail"),
-    }
-
-
-def _absorbed_terminal_matches(
-    record: Mapping[str, Any],
-    target_demand_id: str,
-    summary: str,
+def _revise_record(
+    stored: dict[str, Any],
+    *,
+    description: str,
+    detail: str,
+    source_refs: list[dict[str, Any]] | None = None,
 ) -> bool:
-    terminal = record.get("terminal")
-    return bool(
-        isinstance(terminal, Mapping)
-        and terminal.get("type") == "absorbed"
-        and terminal.get("target_demand_id") == target_demand_id
-        and terminal.get("summary") == summary
+    merged_refs = (
+        _merge_refs(stored["source_refs"], source_refs)
+        if source_refs is not None
+        else deepcopy(stored["source_refs"])
     )
+    if (
+        stored["description"] == description
+        and stored["detail"] == detail
+        and stored["source_refs"] == merged_refs
+    ):
+        return False
+    stored.update(
+        {
+            "description": description,
+            "detail": detail,
+            "source_refs": merged_refs,
+            "revision": int(stored["revision"]) + 1,
+            "updated_at": runtime_files.now_iso(),
+        }
+    )
+    return True
 
 
-def absorb_into(
+def revise(
     actor_target: Mapping[str, Any],
-    source_id: Any,
-    source_revision: Any,
-    target_id: Any,
-    target_revision: Any,
-    merged_target: Any,
-    summary: Any,
+    demand_ref: Any,
+    description: Any,
+    detail: Any,
+    reason: Any,
 ) -> dict[str, Any]:
     normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_source_id = _require_demand_id(source_id, "source_id")
-    normalized_source_revision = _require_revision(
-        source_revision,
-        "source_revision",
-    )
-    normalized_target_id = _require_demand_id(target_id, "target_id")
-    if normalized_source_id == normalized_target_id:
-        raise _payload_error("source_id and target_id must identify different Demands")
-    normalized_target_revision = _require_revision(
-        target_revision,
-        "target_revision",
-    )
-    normalized_merged_target = _normalize_merged_target(merged_target)
-    normalized_summary = _require_text(summary, "summary")
+    demand_id, basis_revision = _decode_ref(demand_ref)
+    normalized_description = _require_text(description, "description")
+    normalized_detail = _require_text(detail, "detail")
+    normalized_reason = _require_text(reason, "reason")
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         records = _records(state)
-        source = _find_record(records, normalized_source_id)
-        target = _find_record(records, normalized_target_id)
-        merged_source_refs: list[dict[str, Any]] = []
-        for source_ref in [*target["source_refs"], *source["source_refs"]]:
-            if source_ref not in merged_source_refs:
-                merged_source_refs.append(deepcopy(source_ref))
-        if source["terminal"] is not None:
-            if (
-                _absorbed_terminal_matches(
-                    source,
-                    normalized_target_id,
-                    normalized_summary,
-                )
-                and target["description"] == normalized_merged_target["description"]
-                and target["detail"] == normalized_merged_target["detail"]
-                and target["source_refs"] == merged_source_refs
-            ):
-                return False, _receipt(state_changed=False, changes=[])
-            raise DemandTerminalConflict(f"Demand {normalized_source_id} is terminal")
-        _require_live(target)
-        _require_expected_revision(source, normalized_source_revision)
-        _require_expected_revision(target, normalized_target_revision)
-        now = runtime_files.now_iso()
-        stored_target = state["demands"][normalized_target_id]
-        stored_target.update(
-            {
-                **deepcopy(normalized_merged_target),
-                "source_refs": merged_source_refs,
-            }
+        record = _find_demand(records, demand_id)
+        _require_live(record)
+        if record["revision"] != basis_revision:
+            raise DemandRevisionConflict(
+                f"Demand {demand_id} changed after this demand_ref was read"
+            )
+        stored = state["demands"][demand_id]
+        changed = _revise_record(
+            stored,
+            description=normalized_description,
+            detail=normalized_detail,
         )
-        next_target_revision = _next_revision(stored_target, now=now)
-        stored_source = state["demands"][normalized_source_id]
-        stored_source["terminal"] = {
-            "type": "absorbed",
-            "at": now,
-            "target_demand_id": normalized_target_id,
-            "summary": normalized_summary,
+        pool_revision = (
+            _increment_pool_revision(state)
+            if changed
+            else state["demand_pool_revision"]
+        )
+        return changed, {
+            "state_changed": changed,
+            "changes": [_change(demand_id, "revised")] if changed else [],
+            "demand_id": demand_id,
+            "demand_ref": _encode_ref(demand_id, int(stored["revision"])),
+            "reason": normalized_reason,
+            "demand_pool_revision": pool_revision,
         }
-        next_source_revision = _next_revision(stored_source, now=now)
-        return True, _receipt(
-            state_changed=True,
-            changes=[
-                _change(normalized_target_id, next_target_revision, "revised"),
-                _change(normalized_source_id, next_source_revision, "absorbed"),
-            ],
-        )
 
     return demands.transact_actor_state(normalized_target, mutate)
 
 
-def _terminalize_single(
-    actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
-    summary: Any,
+def _terminal_matches(
+    record: Mapping[str, Any],
     *,
     terminal_type: str,
+    summary: str,
+    evidence_refs: list[dict[str, Any]] | None,
+) -> bool:
+    terminal = record.get("terminal")
+    if not isinstance(terminal, Mapping):
+        return False
+    if terminal.get("type") != terminal_type or terminal.get("summary") != summary:
+        return False
+    if terminal_type == "completed":
+        return terminal.get("evidence_refs") == evidence_refs
+    return True
+
+
+def _terminalize(
+    actor_target: Mapping[str, Any],
+    demand_ref: Any,
+    *,
+    terminal_type: str,
+    summary: Any,
     evidence_refs: Any = None,
 ) -> dict[str, Any]:
     normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_id = _require_demand_id(demand_id)
-    normalized_revision = _require_revision(expected_revision)
+    demand_id, basis_revision = _decode_ref(demand_ref)
     normalized_summary = _require_text(summary, "summary")
-    normalized_evidence_refs = (
+    normalized_evidence = (
         _normalize_refs(evidence_refs, "evidence_refs")
         if terminal_type == "completed"
         else None
     )
+    if terminal_type == "completed" and not normalized_evidence:
+        raise _payload_error("evidence_refs must contain at least one reference")
 
     def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         records = _records(state)
-        record = _find_record(records, normalized_id)
-        expected_terminal: dict[str, Any] = {
-            "type": terminal_type,
-            "summary": normalized_summary,
-        }
-        if normalized_evidence_refs is not None:
-            expected_terminal["evidence_refs"] = normalized_evidence_refs
-        terminal = record["terminal"]
-        if terminal is not None:
-            if all(terminal.get(key) == value for key, value in expected_terminal.items()):
-                return False, _receipt(state_changed=False, changes=[])
-            raise DemandTerminalConflict(f"Demand {normalized_id} is terminal")
-        _require_expected_revision(record, normalized_revision)
+        record = _find_demand(records, demand_id)
+        if record["terminal"] is not None:
+            if (
+                record["revision"] == basis_revision + 1
+                and _terminal_matches(
+                    record,
+                    terminal_type=terminal_type,
+                    summary=normalized_summary,
+                    evidence_refs=normalized_evidence,
+                )
+            ):
+                return False, {
+                    "state_changed": False,
+                    "changes": [],
+                    "demand_id": demand_id,
+                    "demand_ref": _encode_ref(demand_id, record["revision"]),
+                    "demand_pool_revision": state["demand_pool_revision"],
+                }
+            raise DemandTerminalConflict(f"Demand {demand_id} is terminal")
+        if record["revision"] != basis_revision:
+            raise DemandRevisionConflict(
+                f"Demand {demand_id} changed after this demand_ref was read"
+            )
+        stored = state["demands"][demand_id]
         now = runtime_files.now_iso()
-        stored = state["demands"][normalized_id]
-        next_terminal: dict[str, Any] = {
+        terminal: dict[str, Any] = {
             "type": terminal_type,
             "at": now,
             "summary": normalized_summary,
         }
-        if normalized_evidence_refs is not None:
-            next_terminal["evidence_refs"] = deepcopy(normalized_evidence_refs)
-        stored["terminal"] = next_terminal
-        revision = _next_revision(stored, now=now)
-        return True, _receipt(
-            state_changed=True,
-            changes=[_change(normalized_id, revision, terminal_type)],
+        if terminal_type == "completed":
+            terminal["evidence_refs"] = normalized_evidence
+        stored.update(
+            {
+                "revision": int(stored["revision"]) + 1,
+                "terminal": terminal,
+                "updated_at": now,
+            }
         )
+        pool_revision = _increment_pool_revision(state)
+        return True, {
+            "state_changed": True,
+            "changes": [_change(demand_id, terminal_type)],
+            "demand_id": demand_id,
+            "demand_ref": _encode_ref(demand_id, int(stored["revision"])),
+            "demand_pool_revision": pool_revision,
+        }
 
     return demands.transact_actor_state(normalized_target, mutate)
 
 
 def complete(
     actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
+    demand_ref: Any,
     summary: Any,
     evidence_refs: Any,
 ) -> dict[str, Any]:
-    return _terminalize_single(
+    return _terminalize(
         actor_target,
-        demand_id,
-        expected_revision,
-        summary,
+        demand_ref,
         terminal_type="completed",
+        summary=summary,
         evidence_refs=evidence_refs,
     )
 
 
 def cancel(
     actor_target: Mapping[str, Any],
-    demand_id: Any,
-    expected_revision: Any,
-    summary: Any,
+    demand_ref: Any,
+    reason: Any,
 ) -> dict[str, Any]:
-    return _terminalize_single(
+    return _terminalize(
         actor_target,
-        demand_id,
-        expected_revision,
-        summary,
+        demand_ref,
         terminal_type="canceled",
+        summary=reason,
     )
+
+
+def claim_ingress(
+    actor_target: Mapping[str, Any],
+    source_key: Any,
+    description: Any,
+    detail: Any,
+    source_refs: Any,
+) -> dict[str, Any]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    normalized_source_key = _require_text(source_key, "source_key")
+    normalized_fact = _normalized_ingress_fact(
+        description,
+        detail,
+        source_refs,
+    )
+    fingerprint = _ingress_fingerprint(normalized_fact)
+
+    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        receipts = _ingress_receipts(state)
+        existing = receipts.get(normalized_source_key)
+        if existing is not None:
+            if existing["fingerprint"] != fingerprint:
+                raise DemandIngressConflict(
+                    "Demand ingress source_key already exists with different content: "
+                    f"{normalized_source_key}"
+                )
+            return False, {
+                "state_changed": False,
+                "source_key": normalized_source_key,
+                "state": existing["state"],
+            }
+        now = runtime_files.now_iso()
+        state["ingress_receipts"][normalized_source_key] = {
+            "fingerprint": fingerprint,
+            "fact": normalized_fact,
+            "state": "pending",
+            "attempt_id": None,
+            "outcome": None,
+            "last_failure": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        return True, {
+            "state_changed": True,
+            "source_key": normalized_source_key,
+            "state": "pending",
+        }
+
+    return demands.transact_actor_state(normalized_target, mutate)
+
+
+def get_ingress_receipt(
+    actor_target: Mapping[str, Any],
+    source_key: Any,
+) -> dict[str, Any]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    normalized_source_key = _require_text(source_key, "source_key")
+    receipt = _ingress_receipts(
+        demands.load_actor_state(normalized_target)
+    ).get(normalized_source_key)
+    if receipt is None:
+        raise DemandNotFound(
+            f"Demand ingress receipt not found: {normalized_source_key}"
+        )
+    return deepcopy(receipt)
+
+
+def list_unsettled_ingress(
+    actor_target: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    receipts = _ingress_receipts(demands.load_actor_state(normalized_target))
+    return sorted(
+        (
+            {
+                "source_key": source_key,
+                **deepcopy(receipt),
+            }
+            for source_key, receipt in receipts.items()
+            if receipt["state"] in {"pending", "resolving"}
+        ),
+        key=lambda receipt: (receipt["created_at"], receipt["source_key"]),
+    )
+
+
+def pool_snapshot(actor_target: Mapping[str, Any]) -> dict[str, int]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    state = demands.load_actor_state(normalized_target)
+    records = _records(state)
+    return {
+        "demand_pool_revision": state["demand_pool_revision"],
+        "live_demand_count": sum(
+            1 for record in records.values() if record["terminal"] is None
+        ),
+    }
+
+
+def begin_ingress_resolution(
+    actor_target: Mapping[str, Any],
+    source_key: Any,
+) -> dict[str, Any]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    normalized_source_key = _require_text(source_key, "source_key")
+
+    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        receipt = _ingress_receipts(state).get(normalized_source_key)
+        if receipt is None:
+            raise DemandNotFound(
+                f"Demand ingress receipt not found: {normalized_source_key}"
+            )
+        if receipt["state"] == "resolving":
+            return False, {
+                "state_changed": False,
+                "source_key": normalized_source_key,
+                "attempt_id": receipt["attempt_id"],
+            }
+        if receipt["state"] in {"settled", "failed"}:
+            raise DemandTerminalConflict(
+                f"Demand ingress receipt {normalized_source_key} is {receipt['state']}"
+            )
+        attempt_id = _new_id("attempt", {})
+        state["ingress_receipts"][normalized_source_key].update(
+            {
+                "state": "resolving",
+                "attempt_id": attempt_id,
+                "outcome": None,
+                "updated_at": runtime_files.now_iso(),
+            }
+        )
+        return True, {
+            "state_changed": True,
+            "source_key": normalized_source_key,
+            "attempt_id": attempt_id,
+        }
+
+    return demands.transact_actor_state(normalized_target, mutate)
+
+
+def _apply_ingress_target_change(
+    state: dict[str, Any],
+    records: dict[str, dict[str, Any]],
+    *,
+    receipt: dict[str, Any],
+    proposal: dict[str, Any],
+) -> tuple[bool, dict[str, Any]] | None:
+    demand_id, basis_revision = _decode_ref(proposal["demand_ref"])
+    record = _find_demand(records, demand_id)
+    _require_live(record)
+    if record["revision"] != basis_revision:
+        return None
+    stored = state["demands"][demand_id]
+    decision = proposal["decision"]
+    if decision in {"merge_intake", "revise"}:
+        changed = _revise_record(
+            stored,
+            description=proposal["description"],
+            detail=proposal["detail"],
+            source_refs=receipt["fact"]["source_refs"],
+        )
+        return changed, {
+            "decision": decision,
+            "demand_changed": changed,
+            "demand_id": demand_id,
+            "demand_ref": _encode_ref(demand_id, int(stored["revision"])),
+        }
+    if decision == "cancel":
+        now = runtime_files.now_iso()
+        stored.update(
+            {
+                "source_refs": _merge_refs(
+                    stored["source_refs"],
+                    receipt["fact"]["source_refs"],
+                ),
+                "revision": int(stored["revision"]) + 1,
+                "terminal": {
+                    "type": "canceled",
+                    "at": now,
+                    "summary": proposal["reason"],
+                },
+                "updated_at": now,
+            }
+        )
+        return True, {
+            "decision": "cancel",
+            "demand_changed": True,
+            "demand_id": demand_id,
+            "demand_ref": _encode_ref(demand_id, int(stored["revision"])),
+            "reason": proposal["reason"],
+        }
+    raise _payload_error(f"unsupported ingress target decision: {decision}")
+
+
+def resolve_ingress(
+    actor_target: Mapping[str, Any],
+    source_key: Any,
+    attempt_id: Any,
+    proposal: Any,
+    *,
+    handled_verified: Any,
+) -> dict[str, Any]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    normalized_source_key = _require_text(source_key, "source_key")
+    normalized_attempt_id = _require_attempt_id(attempt_id)
+    normalized_proposal = _normalize_ingress_proposal(proposal)
+    if type(handled_verified) is not bool:
+        raise _payload_error("handled_verified must be a boolean")
+
+    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        records = _records(state)
+        receipt = _ingress_receipts(state).get(normalized_source_key)
+        if receipt is None:
+            raise DemandNotFound(
+                f"Demand ingress receipt not found: {normalized_source_key}"
+            )
+        if receipt["state"] == "settled":
+            if receipt["attempt_id"] != normalized_attempt_id:
+                raise DemandRevisionConflict(
+                    f"Demand ingress receipt {normalized_source_key} resolution attempt changed"
+                )
+            outcome = deepcopy(receipt["outcome"])
+            if not isinstance(outcome, dict):
+                raise _payload_error(
+                    "settled ingress receipt outcome must be an object"
+                )
+            return False, {
+                "state_changed": False,
+                "source_key": normalized_source_key,
+                **outcome,
+            }
+        if (
+            receipt["state"] != "resolving"
+            or receipt["attempt_id"] != normalized_attempt_id
+        ):
+            raise DemandRevisionConflict(
+                f"Demand ingress receipt {normalized_source_key} resolution attempt changed"
+            )
+        decision = normalized_proposal["decision"]
+        if decision == "handled" and not handled_verified:
+            raise _payload_error(
+                "handled proposal requires verified source-local handling"
+            )
+
+        demand_changed = False
+        outcome: dict[str, Any]
+        if decision in {"no_action_needed", "handled"}:
+            outcome = {
+                "decision": decision,
+                "demand_changed": False,
+                "demand_pool_revision": state["demand_pool_revision"],
+            }
+        elif decision == "create":
+            record = _new_demand_record(
+                records,
+                description=normalized_proposal["description"],
+                detail=normalized_proposal["detail"],
+                source_refs=receipt["fact"]["source_refs"],
+            )
+            state["demands"][record["id"]] = record
+            demand_changed = True
+            outcome = {
+                "decision": "create",
+                "demand_changed": True,
+                "demand_id": record["id"],
+                "demand_ref": _encode_ref(record["id"], 1),
+                "demand_pool_revision": _increment_pool_revision(state),
+            }
+        else:
+            target_change = _apply_ingress_target_change(
+                state,
+                records,
+                receipt=receipt,
+                proposal=normalized_proposal,
+            )
+            if target_change is None:
+                state["ingress_receipts"][normalized_source_key].update(
+                    {
+                        "state": "pending",
+                        "attempt_id": None,
+                        "outcome": None,
+                        "last_failure": {
+                            "code": "stale_demand_ref",
+                            "message": (
+                                "The target Demand changed after triage read it."
+                            ),
+                            "at": runtime_files.now_iso(),
+                        },
+                        "updated_at": runtime_files.now_iso(),
+                    }
+                )
+                return True, {
+                    "state_changed": True,
+                    "source_key": normalized_source_key,
+                    "retry_required": True,
+                    "reason": "stale_demand_ref",
+                    "demand_pool_revision": state["demand_pool_revision"],
+                }
+            demand_changed, outcome = target_change
+            outcome["demand_pool_revision"] = (
+                _increment_pool_revision(state)
+                if demand_changed
+                else state["demand_pool_revision"]
+            )
+
+        if demand_changed is False and outcome["demand_pool_revision"] != state["demand_pool_revision"]:
+            raise _payload_error("receipt-only resolution changed Demand pool revision")
+        state["ingress_receipts"][normalized_source_key].update(
+            {
+                "state": "settled",
+                "outcome": deepcopy(outcome),
+                "last_failure": None,
+                "updated_at": runtime_files.now_iso(),
+            }
+        )
+        return True, {
+            "state_changed": True,
+            "source_key": normalized_source_key,
+            **outcome,
+        }
+
+    return demands.transact_actor_state(normalized_target, mutate)
+
+
+def fail_ingress_resolution(
+    actor_target: Mapping[str, Any],
+    source_key: Any,
+    attempt_id: Any,
+    failure: Any,
+    *,
+    retriable: Any,
+) -> dict[str, Any]:
+    normalized_target = demands.normalize_actor_target(actor_target)
+    normalized_source_key = _require_text(source_key, "source_key")
+    normalized_attempt_id = _require_attempt_id(attempt_id)
+    normalized_failure = _require_mapping(failure, "failure")
+    _require_exact_fields(normalized_failure, {"code", "message"}, "failure")
+    failure_code = _require_text(normalized_failure.get("code"), "failure.code")
+    failure_message = _require_text(
+        normalized_failure.get("message"),
+        "failure.message",
+    )
+    if type(retriable) is not bool:
+        raise _payload_error("retriable must be a boolean")
+
+    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        receipt = _ingress_receipts(state).get(normalized_source_key)
+        if receipt is None:
+            raise DemandNotFound(
+                f"Demand ingress receipt not found: {normalized_source_key}"
+            )
+        if (
+            receipt["state"] != "resolving"
+            or receipt["attempt_id"] != normalized_attempt_id
+        ):
+            raise DemandRevisionConflict(
+                f"Demand ingress receipt {normalized_source_key} resolution attempt changed"
+            )
+        next_state = "pending" if retriable else "failed"
+        now = runtime_files.now_iso()
+        state["ingress_receipts"][normalized_source_key].update(
+            {
+                "state": next_state,
+                "attempt_id": None,
+                "outcome": None,
+                "last_failure": {
+                    "code": failure_code,
+                    "message": failure_message,
+                    "at": now,
+                },
+                "updated_at": now,
+            }
+        )
+        return True, {
+            "state_changed": True,
+            "source_key": normalized_source_key,
+            "state": next_state,
+            "retry_required": retriable,
+        }
+
+    return demands.transact_actor_state(normalized_target, mutate)
