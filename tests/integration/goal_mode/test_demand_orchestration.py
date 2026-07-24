@@ -130,7 +130,10 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
         prompt = runtime.inputs[0]
         self.assertIn("Use $demand-orchestration", prompt)
         self.assertIn("independent parent turn", prompt)
-        self.assertIn("select exactly one", prompt)
+        self.assertIn("process the current canonical attention", prompt)
+        self.assertNotIn("select exactly one", prompt)
+        self.assertNotIn("self-contained native Goal objective", prompt)
+        self.assertNotIn("Task completion is evidence", prompt)
         self.assertNotIn("task_sys.outcome_frame", prompt)
         self.assertNotIn("need_parent", prompt)
         checkpoint = state.handler_state("demand_orchestration")["checkpoint"]
@@ -196,7 +199,7 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
         self.assertEqual(demand_sys.list_demands(self.actor_target), before)
         self.assertEqual(len(runtime.inputs), 1)
         self.assertIn(task["task_id"], runtime.inputs[0])
-        self.assertIn("terminal Task", runtime.inputs[0])
+        self.assertIn("newly_terminal_task_ids", runtime.inputs[0])
         self.assertEqual(
             state.handler_state("demand_orchestration")["checkpoint"]["terminal_task_ids"],
             [task["task_id"]],
@@ -246,4 +249,6 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(result.status, "handled")
         self.assertEqual(len(restarted_runtime.inputs), 1)
-        self.assertIn("select exactly one", restarted_runtime.inputs[0])
+        self.assertIn("Use $demand-orchestration", restarted_runtime.inputs[0])
+        self.assertIn("process the current canonical attention", restarted_runtime.inputs[0])
+        self.assertNotIn("select exactly one", restarted_runtime.inputs[0])

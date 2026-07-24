@@ -1,45 +1,54 @@
 ---
 name: demand-orchestration
-description: Use in an independent parent turn when terminal Tasks need Demand reconciliation or live Demands need serialized native-Goal Task selection.
+description: Reconcile newly terminal Tasks against their latest Demands and fill the single empty Task slot from the complete current live Demand pool.
 ---
 
 # Demand orchestration
 
-Own the Actor judgment between the canonical Demand pool and one native-Goal
-Task slot. Task completion is evidence, not Demand completion. One Task per
-Demand is the current Phase 2 constraint; Demand and Task lifecycles remain
-decoupled.
+This Skill runs only in an independent parent Demand-orchestration turn. It
+owns Actor judgment between the canonical Demand pool and one native-Goal Task
+slot. Task completion is evidence, not Demand completion. One Task per Demand
+is the current constraint; Demand and Task lifecycles remain decoupled.
 
 Use native BuddySwitch env MCP tools. Read exact contracts from
 `context.get.tool_catalog`.
 
-## Run this exact loop
+Do not call `create_goal` or `update_goal` in this turn. Task Sys owns Goal
+reconciliation after Task creation, and Task Goal work owns Goal completion.
 
-1. Call `task_sys__list(status="terminal")`. For each newly terminal Task,
-   call `task_sys__get`.
-2. Call `demand_sys__get` with that Task's opaque Demand reference and judge
-   the latest need, not the old Task objective.
-3. Apply the IM delivery invariant below whenever the Demand has an
-   `im.message.created` source. Use `demand_sys__complete` only when the latest
-   need and its required delivery are both satisfied, and cite Task,
-   deliverable, and reply evidence. Otherwise use `demand_sys__cancel`,
-   `demand_sys__revise`, or deliberately leave the Demand live. Do not
+## Reconcile newly terminal Tasks
+
+For every listed terminal Task:
+
+1. Read the exact Task with `task_sys__get`.
+2. Read its latest canonical Demand with `demand_sys__get`.
+3. Verify actual deliverables and required user-facing delivery through their
+   owning products. Task or Goal status alone is not proof.
+4. Use `demand_sys__complete` only when the latest complete need is satisfied
+   by exact durable evidence; use `demand_sys__cancel` only for withdrawal or
+   invalidation; use `demand_sys__revise` only when remaining canonical
+   meaning changed; otherwise deliberately leave the Demand live. Do not
    automatically complete or cancel a Demand from Task status.
-4. Call `task_sys__list(status="active")`. If one Task is active, stop; native
-   Goal execution owns that slot.
-5. Call `demand_sys__list(status="live")`.
-6. If no live Demand exists, stop without creating a Task.
-7. Compare every live Demand by urgency, user commitment, blocked downstream
-   work, continuity, evidence readiness, and staleness.
-8. When any live Demand exists and the slot is empty, select exactly one.
-   Reread it with `demand_sys__get`; choosing none is not a steady-state result.
-9. Write a self-contained objective with an observable completion result,
-   required user-facing delivery, and the rule to call native `update_goal`
-   with `complete` only after delivery. The Goal must not reconcile the Demand
-   or select later work. For an IM-origin Demand, construct the objective using
-   the exact source and verification rules below.
-10. Call `task_sys__create` once with only `demand_ref`, `objective`, and
-    `selection_reason`.
+
+## Fill the Task slot
+
+1. Read active Tasks with `task_sys__list(status="active")`.
+2. If one Task is active, stop. If more than one is active, surface the
+   invariant failure and create nothing.
+3. If the slot is empty, call `demand_sys__list(state="live")` and read every
+   candidate in full with `demand_sys__get`.
+4. Compare only grounded facts: explicit urgency or deadline, user commitment,
+   blocked downstream work, continuity, evidence readiness, and staleness. Do
+   not invent priority, deadlines, dependencies, or commitments.
+5. When live Demands exist, select exactly one and state the decisive grounded
+   comparison in `selection_reason`.
+6. Convert that Demand into one Task-sized execution commitment using the
+   exact runtime field contract of `task_sys__create`.
+7. Call `task_sys__create` once and follow its feedback.
+
+The Task objective must not reconcile the Demand or select later work. Native
+Goal completion is allowed only after the objective's observable result,
+durable user-facing delivery, evidence, and checks are complete.
 
 ## IM delivery invariant
 
@@ -67,6 +76,5 @@ When a Demand's `source_refs` contains `type="im.message.created"`:
    reply as evidence. Use an `im.message.reply` evidence ref with `id` equal to
    the reply message id and `key` equal to `reply_to:<source message_id>`.
 
-Do not call `create_goal` or `update_goal` in this orchestration turn. Task Sys
-binds the objective to the persistent main-thread native Goal after Task
-creation.
+Task Sys binds the objective to the persistent main-thread native Goal after
+Task creation.

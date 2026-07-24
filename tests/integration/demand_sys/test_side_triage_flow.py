@@ -254,6 +254,16 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         self.assertEqual(receipt["state"], "resolving")
         self.assertNotIn("outputSchema", start["text"])
         self.assertIn("demand_triage.resolve", start["text"])
+        self.assertIn("Use $demand-triage", start["text"])
+        self.assertIn("Investigate AI market demand", start["text"])
+        for duplicated_policy in (
+            "no_action_needed",
+            "merge_intake",
+            "all six schema fields",
+            "ask the parent",
+            "return a JSON proposal",
+        ):
+            self.assertNotIn(duplicated_policy, start["text"])
 
     def test_side_start_failure_returns_receipt_to_pending_and_schedules_retry(self) -> None:
         context = SimpleNamespace(
@@ -423,6 +433,37 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         self.assertEqual(
             replies["replies"][0]["content"],
             "The work is on track.",
+        )
+
+    def test_invalid_handled_proposal_is_rejected_before_message_delivery(self) -> None:
+        fact, inbound = self._im_fact()
+        token, _attempt = self._claim_and_bind(fact=fact)
+        invalid = {
+            "decision": "handled",
+            "reason": "",
+            "demand_ref": None,
+            "description": None,
+            "detail": None,
+            "reply_content": "This reply must never be sent.",
+        }
+
+        with self.assertRaises(demand_sys.DemandPayloadError):
+            self._resolve(token, invalid)
+
+        replies = message_service.list_im_replies(
+            identity={"id": self.actor_id, "type": "actor"},
+            message_id=inbound["message"]["id"],
+        )
+        self.assertTrue(replies["ok"], replies)
+        self.assertEqual(replies["count"], 0)
+        receipt = demand_sys.get_ingress_receipt(
+            self.actor_target,
+            fact["source_key"],
+        )
+        self.assertEqual(receipt["state"], "resolving")
+        self.assertEqual(
+            self._read_instance()["side_threads"][0]["capability_state"],
+            "open",
         )
 
     def test_retry_after_message_write_reuses_reply_without_duplicate(self) -> None:

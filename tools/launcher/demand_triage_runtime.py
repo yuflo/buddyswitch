@@ -341,18 +341,19 @@ def resolve_request(
         actor_target=actor_target,
         row=row,
     )
+    normalized_proposal = demand_sys.validate_ingress_proposal(proposal)
     handled_message_id: str | None = None
-    if proposal.get("decision") == "handled":
+    if normalized_proposal["decision"] == "handled":
         handled_message_id = _ensure_handled_reply(
             actor_id=actor_target["actor_id"],
             receipt=receipt,
-            proposal=proposal,
+            proposal=normalized_proposal,
         )
     result = demand_sys.resolve_ingress(
         actor_target,
         source_key,
         attempt_id,
-        dict(proposal),
+        normalized_proposal,
         handled_verified=handled_message_id is not None,
     )
     side_thread_registry.consume_side_thread_capability(

@@ -61,6 +61,54 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         self.assertEqual(by_name["message__get"]["inputSchema"]["type"], "object")
         self.assertEqual(by_name["message__list"]["inputSchema"]["type"], "object")
 
+        actor_contracts = {
+            "demand_sys__list": {"state"},
+            "demand_sys__get": {"demand_id"},
+            "demand_sys__create": {"description", "detail"},
+            "demand_sys__revise": {"demand_ref", "description", "detail", "reason"},
+            "demand_sys__complete": {"demand_ref", "summary", "evidence_refs"},
+            "demand_sys__cancel": {"demand_ref", "summary"},
+            "task_sys__list": {"status", "limit"},
+            "task_sys__get": {"task_id"},
+            "task_sys__create": {"demand_ref", "objective", "selection_reason"},
+            "task_sys__cancel": {"task_id", "reason"},
+        }
+
+        def assert_described(schema: dict[str, Any], path: str) -> None:
+            properties = schema.get("properties", {})
+            self.assertIsInstance(properties, dict, msg=path)
+            for field, field_schema in properties.items():
+                with self.subTest(field=f"{path}.{field}"):
+                    self.assertIsInstance(field_schema, dict)
+                    description = field_schema.get("description")
+                    self.assertIsInstance(description, str)
+                    self.assertTrue(description.strip())
+                    if field_schema.get("type") == "object":
+                        assert_described(field_schema, f"{path}.{field}")
+                    items = field_schema.get("items")
+                    if isinstance(items, dict) and items.get("type") == "object":
+                        item_description = items.get("description")
+                        self.assertIsInstance(item_description, str)
+                        self.assertTrue(item_description.strip())
+                        assert_described(items, f"{path}.{field}[]")
+
+        for tool_name, expected_fields in actor_contracts.items():
+            with self.subTest(tool=tool_name):
+                tool = by_name[tool_name]
+                self.assertTrue(tool["description"].strip())
+                schema = tool["inputSchema"]
+                self.assertEqual(set(schema["properties"]), expected_fields)
+                assert_described(schema, tool_name)
+
+        self.assertIn(
+            "does not create Task work or a native Goal",
+            by_name["demand_sys__create"]["description"],
+        )
+        self.assertIn(
+            "does not mutate, satisfy, or reprioritize a Demand",
+            by_name["task_sys__create"]["description"],
+        )
+
     def test_tools_call_dispatches_decoded_env_tool_request(self) -> None:
         calls: list[dict[str, Any]] = []
 

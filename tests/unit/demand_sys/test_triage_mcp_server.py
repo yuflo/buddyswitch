@@ -52,6 +52,31 @@ class DemandTriageMcpServerTests(unittest.TestCase):
         for forbidden in ("oneOf", "anyOf", "allOf", "if", "then", "else"):
             self.assertNotIn(f'"{forbidden}"', encoded)
 
+    def test_resolve_catalog_exposes_one_shot_contract_and_described_arguments(self) -> None:
+        response = self.server.handle_request(
+            {"jsonrpc": "2.0", "id": 11, "method": "tools/list", "params": {}},
+            dispatcher=lambda **_: {},
+        )
+        tool = response["result"]["tools"][0]
+        self.assertIn("one-shot capability", tool["description"].lower())
+        self.assertIn("never creates Task work", tool["description"])
+
+        properties = tool["inputSchema"]["properties"]
+        self.assertEqual(
+            set(properties),
+            {
+                "decision",
+                "reason",
+                "demand_ref",
+                "description",
+                "detail",
+                "reply_content",
+            },
+        )
+        for field in properties:
+            explanation = properties[field].get("description", "").lower()
+            self.assertTrue(explanation, msg=field)
+
     def test_resolve_forwards_host_capability_and_model_proposal(self) -> None:
         calls: list[dict[str, object]] = []
         proposal = {

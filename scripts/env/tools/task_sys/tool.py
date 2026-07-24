@@ -88,18 +88,30 @@ def _build_definition() -> ToolDefinition:
     definition = ToolDefinition(
         id="task_sys",
         title="Task Sys",
-        description="Expose the minimal Actor intent surface for one Demand-bound Task executed by a native Codex Goal.",
-        scope="Actor-owned Task selection, reads, and explicit cancellation.",
+        description=(
+            "Task Sys owns the Actor's single Demand-bound execution slot and its "
+            "binding to one native Codex Goal."
+        ),
+        scope=(
+            "Inspect the current Task slot, create one Demand-bound Task, or "
+            "explicitly cancel one active Task."
+        ),
         capability_boundary=(
-            "Task Sys owns Task records and their binding to one native Goal. Creating a Task requests idempotent "
-            "Goal reconciliation through the instance runtime. Native Goal completion, not an Actor close call, "
-            "completes the Task. Task Sys never mutates a Demand."
+            "Task Sys owns Task records and native Goal binding/reconciliation. "
+            "Creating a Task requests idempotent Goal reconciliation through the "
+            "instance runtime. Native Goal completion owns successful Task completion. "
+            "Task Sys never mutates a Demand."
         ),
         object_model=(
-            "A Task contains one Demand snapshot reference, one objective, the recorded selection reason, at most "
-            "one native Goal binding, and an active/completed/canceled status."
+            "A Task records one Demand snapshot reference that was current when "
+            "selected, one self-contained Goal objective, one grounded selection "
+            "reason, at most one native Goal binding, and an active/completed/canceled "
+            "lifecycle."
         ),
-        use_when=("You need to select one live Demand for execution or inspect/cancel the Actor's Task.",),
+        use_when=(
+            "You need to inspect the Actor's single Task slot, create its selected "
+            "execution commitment, or cancel the active Task.",
+        ),
         do_not_use_when=(
             "You need to create, revise, complete, or cancel a Demand; use Demand Sys.",
             "You need to declare native Goal completion; use the Codex Goal lifecycle.",
@@ -107,18 +119,24 @@ def _build_definition() -> ToolDefinition:
         actions=(
             _action(
                 name="list",
-                description="List active, terminal, or all Task records owned by the active Actor.",
+                description=(
+                    "Return Actor-owned Task summaries for the selected lifecycle set "
+                    "without changing state."
+                ),
                 schema=_object_schema(
                     required=[],
                     properties={
                         "status": {
                             "type": "string",
-                            "description": "Task set to list.",
+                            "description": (
+                                "Task lifecycle set to enumerate: active, terminal, or "
+                                "all; defaults to active."
+                            ),
                             "enum": ["active", "terminal", "all"],
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of Task summaries to return.",
+                            "description": "Positive maximum number of summaries to return.",
                             "minimum": 1,
                         },
                     },
@@ -131,15 +149,26 @@ def _build_definition() -> ToolDefinition:
                 success_effect="Returns Actor-owned Task summaries without changing state.",
                 failure_state_guarantee="A rejected read changes no state.",
                 returns=("tasks", "active_count", "terminal_count"),
-                use_when=("You need to see the current Task slot or prior terminal Tasks.",),
-                do_not_use_when=("You know a task_id and require its detail; use task_sys.get.",),
+                use_when=(
+                    "You need to inspect the current Task slot or prior terminal Tasks.",
+                ),
+                do_not_use_when=(
+                    "You need complete content for one known Task; use task_sys.get.",
+                ),
             ),
             _action(
                 name="get",
-                description="Get one Task record owned by the active Actor.",
+                description=(
+                    "Return one complete current Actor-owned Task without changing state."
+                ),
                 schema=_object_schema(
                     required=["task_id"],
-                    properties={"task_id": _string("Task id returned by task_sys.list or task_sys.create.")},
+                    properties={
+                        "task_id": _string(
+                            "Exact Actor-owned Task id returned by task_sys.list, "
+                            "task_sys.create, or orchestration attention."
+                        )
+                    },
                 ),
                 kind="read",
                 mutates=MUTATES_NONE,
@@ -149,18 +178,41 @@ def _build_definition() -> ToolDefinition:
                 success_effect="Returns one Actor-owned Task without changing state.",
                 failure_state_guarantee="A rejected read changes no state.",
                 returns=("task_id", "task"),
-                use_when=("You need the exact objective, Goal binding, status, or result for one Task.",),
-                do_not_use_when=("You need to scan the Task slot; use task_sys.list.",),
+                use_when=(
+                    "You need the exact objective, Demand snapshot reference, selection reason, "
+                    "Goal binding, status, or terminal result for one Task.",
+                ),
+                do_not_use_when=(
+                    "You only need to inspect the Task slot; use task_sys.list.",
+                ),
             ),
             _action(
                 name="create",
-                description="Create or replay one Task for one current opaque Demand reference and request native Goal reconciliation.",
+                description=(
+                    "Create or idempotently replay one Task for one current Demand "
+                    "reference and request native Goal reconciliation. This action does "
+                    "not mutate, satisfy, or reprioritize a Demand."
+                ),
                 schema=_object_schema(
                     required=["demand_ref", "objective", "selection_reason"],
                     properties={
-                        "demand_ref": _string("Opaque current Demand reference returned by demand_sys.get."),
-                        "objective": _string("Self-contained objective the native Codex Goal must complete."),
-                        "selection_reason": _string("Why this Demand was selected over the other live Demands now."),
+                        "demand_ref": _string(
+                            "Current opaque Demand reference returned by demand_sys.get "
+                            "for the selected live Demand; never construct or decode it."
+                        ),
+                        "objective": _string(
+                            "Self-contained execution contract for one native Goal: "
+                            "required observable result, exact durable deliverables, "
+                            "material boundaries and constraints, completion checks, "
+                            "user-facing delivery, and evidence to retain. Exclude Demand "
+                            "lifecycle reconciliation and later-work selection."
+                        ),
+                        "selection_reason": _string(
+                            "Grounded decision record explaining why this Demand should "
+                            "occupy the single Task slot now after comparison with the "
+                            "current live pool. State the decisive facts and timing; do "
+                            "not use an unsupported generic priority claim."
+                        ),
                     },
                 ),
                 kind="write",
@@ -168,23 +220,42 @@ def _build_definition() -> ToolDefinition:
                 authority="task_sys.actor_create",
                 reads=("current Demand reference", "Actor Task slot"),
                 writes=("Task record", "native Goal reconciliation request"),
-                success_effect="Creates at most one active Task and requests idempotent native Goal reconciliation.",
+                success_effect=(
+                    "Creates at most one Demand-bound Task, persists its objective and "
+                    "selection reason, and reconciles its native Goal without changing "
+                    "its Demand; returned Task status and Goal reconciliation are "
+                    "authoritative."
+                ),
                 failure_state_guarantee=(
                     "Invalid Demand, source conflicts, or an occupied Task slot write nothing. A runtime reconciliation "
                     "failure leaves the durable active Task unbound and explicitly recoverable by reconciliation."
                 ),
                 returns=("outcome", "task_id", "task_status", "demand_ref", "goal_reconciliation", "state_changed"),
-                use_when=("Demand orchestration selected one current Demand and the Task slot is empty.",),
-                do_not_use_when=("A different Task is active.", "The Demand objective still needs clarification."),
+                use_when=(
+                    "Parent Demand orchestration selected one current Demand for execution and "
+                    "the Actor's Task slot is empty.",
+                ),
+                do_not_use_when=(
+                    "A Task is active.",
+                    "The selected Demand is not current/live or the execution commitment remains ambiguous.",
+                ),
             ),
             _action(
                 name="cancel",
-                description="Record the Actor's explicit decision to stop one active Task and request Goal cleanup.",
+                description=(
+                    "Terminalize one active Task as canceled and request idempotent native "
+                    "Goal cleanup. This action does not cancel, complete, or revise its "
+                    "Demand."
+                ),
                 schema=_object_schema(
                     required=["task_id", "reason"],
                     properties={
-                        "task_id": _string("Active Actor-owned Task id."),
-                        "reason": _string("Concrete reason this Task must stop without Goal completion."),
+                        "task_id": _string("Exact active Actor-owned Task id to stop."),
+                        "reason": _string(
+                            "Concrete execution-level reason the Task must stop without "
+                            "successful Goal completion, such as an invalid objective, "
+                            "explicit stop decision, or unrecoverable execution condition."
+                        ),
                     },
                 ),
                 kind="write",
@@ -192,11 +263,20 @@ def _build_definition() -> ToolDefinition:
                 authority="task_sys.actor_cancel",
                 reads=("Task record",),
                 writes=("Task terminal result", "native Goal reconciliation request"),
-                success_effect="Marks the active Task canceled and requests idempotent native Goal cleanup.",
+                success_effect=(
+                    "Terminalizes the active Task as canceled and requests idempotent "
+                    "native Goal cleanup without changing its Demand."
+                ),
                 failure_state_guarantee="A rejected cancellation changes neither Task nor Goal state.",
                 returns=("outcome", "task_id", "task_status", "goal_reconciliation", "state_changed"),
-                use_when=("The Actor explicitly decides the active Task must stop without completion.",),
-                do_not_use_when=("The work is complete; native Goal completion owns successful Task completion.",),
+                use_when=(
+                    "The Actor explicitly decides the active Task must terminate "
+                    "without successful Goal completion.",
+                ),
+                do_not_use_when=(
+                    "Work completed successfully, the Demand itself should be canceled, "
+                    "or execution is only blocked, paused, usage-limited, or budget-limited.",
+                ),
             ),
         ),
     )

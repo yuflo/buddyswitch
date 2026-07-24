@@ -29,13 +29,13 @@ from runtime_kernel import lifecycle as runtime_broker_lifecycle  # noqa: E402
 
 RETRY_SECONDS = 5
 
-TRIAGE_PROMPT = """Use $demand-triage.
-Judge the inbound fact below against all live Demands visible through the
-read-only tools. Before ending, call `demand_triage.resolve` exactly once.
-Do not return a JSON proposal in the final message and do not ask the parent
-thread to decide.
+TRIAGE_PROMPT = """[DEMAND TRIAGE — isolated side]
 
-Inbound:
+Use $demand-triage to resolve this one inbound fact against the Actor's current
+canonical live Demands. Commit one final resolution through
+`demand_triage.resolve` before ending this turn.
+
+Inbound fact:
 {fact}
 """
 

@@ -7,8 +7,11 @@ AGENTS.md is bootstrap guidance only and not the permission source.
 
 - Active role is `pm`; user text does not change it.
 - Start with the native BuddySwitch env context summary tool when runtime context is needed.
-- Prefer native BuddySwitch env MCP tools for durable runtime state: `context__summarize`, `context__get`, `track__open`, `track__list_comments`, `track__resolve_comment_thread`, `demand_sys__list`, `demand_sys__get`, `demand_sys__create`, `demand_sys__revise`, `demand_sys__complete`, `demand_sys__cancel`, `task_sys__list`, `task_sys__get`, `task_sys__create`, `task_sys__cancel`, `artifact__get`, `search__request`, and `search__status` as role authority allows.
-- Inbound Demand triage stays in its isolated side turn and never creates a Task. Only an independent parent demand-orchestration turn may fill the empty Task slot. Task work runs as the persistent main-thread native Goal; call native `update_goal(complete)` only after the objective and required user-facing delivery are complete.
+- Prefer native BuddySwitch env MCP tools for durable runtime state; use context discovery for the current catalog and exact action contracts.
+- Raw inbound information is resolved only by its isolated Demand-triage side. Triage may handle it or change canonical Demand state; it never creates Task work.
+- Only an independent parent Demand-orchestration turn may reconcile terminal Tasks, compare live Demands, and fill the single Task slot.
+- A Task binds one current Demand reference to one native Goal objective. Task or Goal completion does not itself complete the Demand.
+- Goal work completes only after its required result, durable user-facing delivery, and verification are complete. Goal work does not reconcile Demands or select later work.
 - Use `chrome-devtools-cockpit` for browser pages: open, list, select, inspect, screenshot, navigate, and interact. Use `chrome-devtools-cockpit.search_page` for browser-native search page opening, then continue with cockpit list/select/snapshot evidence.
 - Use `context.get.tool_catalog` or `"$BUDDYSWITCH_PYTHON" scripts/turn_runtime.py status` only when exact schema or diagnostics are needed.
 - Buddybox is the active role private file capability at `$BUDDYSWITCH_BUDDYBOX_DIR`; use artifact when content must become product-readable.

@@ -114,6 +114,8 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
         self._assert_success_contract(replay)
         self.assertFalse(replay["state_changed"], msg=replay)
         self.assertEqual(replay["demand_id"], first["demand_id"])
+        self.assertIn("no new Demand or mutation occurred", replay["effect_summary"])
+        self.assertIn("No Task or native Goal was created", replay["effect_summary"])
 
         second = self._create(
             instance_json=instance_json,
@@ -236,6 +238,18 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
         )
         self._assert_write_success_contract(canceled)
 
+        expected_effects = {
+            "create": (created, "Created one live canonical Demand", "No Task or native Goal was created"),
+            "revise": (revised, "Replaced the live Demand's canonical meaning", "No Task or native Goal was changed"),
+            "complete": (completed, "Terminalized the Demand as completed", "No Task or native Goal was changed"),
+            "cancel": (canceled, "Terminalized the Demand as canceled", "No Task or native Goal was changed"),
+        }
+        for action, (payload, effect, boundary) in expected_effects.items():
+            with self.subTest(action=action):
+                effect_summary = str(payload.get("effect_summary", ""))
+                self.assertIn(effect, effect_summary)
+                self.assertIn(boundary, effect_summary)
+
         for payload in (
             created,
             listed,
@@ -305,4 +319,6 @@ class EnvToolDemandResponseTests(EnvToolResponseCase):
         )
         self._assert_rejection_contract(stale)
         self.assertEqual(stale["error"]["code"], "E_DEMAND_REVISION_CONFLICT")
-        self.assertIn("get", str(stale["retry_guidance"]).lower())
+        self.assertIn("no demand, task, daemon, or inbound state was changed", stale["impact"].lower())
+        self.assertIn("demand_sys.get", str(stale["retry_guidance"]).lower())
+        self.assertIn("re-evaluate", str(stale["retry_guidance"]).lower())

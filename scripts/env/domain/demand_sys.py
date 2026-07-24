@@ -344,6 +344,12 @@ def _normalize_ingress_proposal(value: Any) -> dict[str, Any]:
     return normalized
 
 
+def validate_ingress_proposal(value: Any) -> dict[str, Any]:
+    """Return the Demand-owned canonical proposal before any external effect."""
+
+    return _normalize_ingress_proposal(value)
+
+
 def _records(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     raw_records = state.get("demands")
     if not isinstance(raw_records, Mapping):

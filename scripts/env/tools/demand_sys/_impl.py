@@ -201,21 +201,71 @@ def _write_success(
             "demand_pool_revision",
         }
     }
+    state_changed = bool(receipt.get("state_changed"))
+    changed_effects = {
+        "create": (
+            "Created one live canonical Demand and returned its current demand_ref. "
+            "No Task or native Goal was created."
+        ),
+        "revise": (
+            "Replaced the live Demand's canonical meaning and returned its refreshed "
+            "demand_ref. No Task or native Goal was changed."
+        ),
+        "complete": (
+            "Terminalized the Demand as completed with the supplied summary and "
+            "evidence references. No Task or native Goal was changed."
+        ),
+        "cancel": (
+            "Terminalized the Demand as canceled with the supplied reason. "
+            "No Task or native Goal was changed."
+        ),
+    }
+    replay_effects = {
+        "create": (
+            "The same Demand creation already exists; no new Demand or mutation "
+            "occurred. No Task or native Goal was created."
+        ),
+        "revise": (
+            "The Demand already has the supplied canonical meaning; no new mutation "
+            "occurred. No Task or native Goal was changed."
+        ),
+        "complete": (
+            "The Demand was already completed with the same summary and evidence "
+            "references; no new mutation occurred. No Task or native Goal was changed."
+        ),
+        "cancel": (
+            "The Demand was already canceled with the same reason; no new mutation "
+            "occurred. No Task or native Goal was changed."
+        ),
+    }
+    effect_summary = (
+        changed_effects[action]
+        if state_changed
+        else replay_effects[action]
+    )
+    allowed_next_actions = (
+        [
+            "Use demand_sys.get to observe the exact current terminal Demand.",
+            "Do not submit this terminal Demand for new Task selection.",
+        ]
+        if action in {"complete", "cancel"}
+        else [
+            "Use demand_sys.get to observe the exact current Demand and refreshed demand_ref.",
+            "Allow demand-orchestration to compare live Demands and fill an empty Task slot.",
+        ]
+    )
     return tool_results.success(
         tool="demand_sys",
         action=f"demand_sys.{action}",
         current_identity=_current_identity(context),
         active_role=_active_role(context),
-        effect_summary=f"Applied demand_sys.{action} to the actor's Demand aggregate.",
-        state_changed=bool(receipt.get("state_changed")),
+        effect_summary=effect_summary,
+        state_changed=state_changed,
         durability="durable",
         state_changes=state_changes,
         created_ids=created_ids,
         updated_ids=updated_ids,
-        allowed_next_actions=[
-            "Use demand_sys.get to observe the exact current Demand.",
-            "Allow demand-orchestration to select Task work from live Demands.",
-        ],
+        allowed_next_actions=allowed_next_actions,
         extra=public,
     )
 

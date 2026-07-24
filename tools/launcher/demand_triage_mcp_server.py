@@ -38,6 +38,13 @@ RESOLVE_INPUT_SCHEMA: dict[str, Any] = {
     "properties": {
         "decision": {
             "type": "string",
+            "description": (
+                "Resolution effect: no_action_needed leaves no obligation or reply; "
+                "handled sends one reply that the Actor judges fully satisfies the need; "
+                "create declares an independent unmet need; merge_intake adds compatible "
+                "meaning to one live Demand; revise replaces changed Demand meaning; "
+                "cancel withdraws or invalidates one live Demand."
+            ),
             "enum": [
                 "no_action_needed",
                 "handled",
@@ -47,19 +54,54 @@ RESOLVE_INPUT_SCHEMA: dict[str, Any] = {
                 "cancel",
             ],
         },
-        "reason": {"type": "string"},
-        "demand_ref": {"type": ["string", "null"]},
-        "description": {"type": ["string", "null"]},
-        "detail": {"type": ["string", "null"]},
-        "reply_content": {"type": ["string", "null"]},
+        "reason": {
+            "type": "string",
+            "description": (
+                "Grounded explanation of this inbound's relationship to the current "
+                "live Demand pool and why this resolution effect is correct."
+            ),
+        },
+        "demand_ref": {
+            "type": ["string", "null"],
+            "description": (
+                "Current opaque reference for the targeted live Demand. Required for "
+                "merge_intake, revise, and cancel; otherwise null."
+            ),
+        },
+        "description": {
+            "type": ["string", "null"],
+            "description": (
+                "Complete post-resolution one-sentence canonical unmet need and desired "
+                "outcome. Required for create, merge_intake, and revise; otherwise null."
+            ),
+        },
+        "detail": {
+            "type": ["string", "null"],
+            "description": (
+                "Complete post-resolution satisfaction contract: outcome, material "
+                "boundaries, binding constraints, required delivery, and satisfaction "
+                "evidence. Required for create, merge_intake, and revise; otherwise null."
+            ),
+        },
+        "reply_content": {
+            "type": ["string", "null"],
+            "description": (
+                "Complete reply that the Actor judges fully satisfies the bound inbound "
+                "need. Required only for handled; otherwise null."
+            ),
+        },
     },
 }
 
 RESOLVE_TOOL = {
     "name": "resolve",
     "description": (
-        "Commit exactly one decision for the current isolated Demand ingress. "
-        "Call this once before ending the triage turn."
+        "Consume this isolated triage side's one-shot capability and attempt to "
+        "commit its resolution for the bound inbound fact. The Demand owner "
+        "atomically settles the receipt and applies any authorized Demand change, "
+        "or returns a stale target to pending for a fresh side retry. Handled also "
+        "owns idempotent reply delivery and structural verification of the durable "
+        "reply relationship and identities. This action never creates Task work."
     ),
     "inputSchema": RESOLVE_INPUT_SCHEMA,
 }

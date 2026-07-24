@@ -78,6 +78,37 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
         self.assertNotIn("demand", registry.supported_tools())
         self.assertNotIn("demand_triage__resolve", by_name)
 
+    def test_demand_and_task_specs_expose_actor_contract_shape_and_boundaries(self) -> None:
+        by_name = {
+            spec["name"]: spec
+            for spec in self.native_mcp.list_native_tool_specs()
+        }
+
+        demand_create = by_name["demand_sys__create"]
+        task_create = by_name["task_sys__create"]
+        self.assertEqual(
+            set(demand_create["inputSchema"]["properties"]),
+            {"description", "detail"},
+        )
+        self.assertEqual(
+            set(task_create["inputSchema"]["properties"]),
+            {"demand_ref", "objective", "selection_reason"},
+        )
+        for tool in (demand_create, task_create):
+            self.assertTrue(tool["description"].strip())
+            for field_schema in tool["inputSchema"]["properties"].values():
+                self.assertTrue(field_schema["description"].strip())
+
+        # These two exclusions are stable product boundaries, not prose snapshots.
+        self.assertIn(
+            "does not create Task work or a native Goal",
+            demand_create["description"],
+        )
+        self.assertIn(
+            "does not mutate, satisfy, or reprioritize a Demand",
+            task_create["description"],
+        )
+
     def test_projection_loads_no_private_tool_implementations_or_services(self) -> None:
         script = """
 import json

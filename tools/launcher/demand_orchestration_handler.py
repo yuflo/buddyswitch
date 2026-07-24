@@ -29,19 +29,13 @@ _ACCELERATION_TRIGGERS = frozenset(
 )
 
 ORCHESTRATION_PROMPT = """[DEMAND ORCHESTRATION — independent parent turn]
-Use $demand-orchestration.
-Reread canonical Task and Demand state; do not trust this attention snapshot.
-First reconcile every newly terminal Task with its latest Demand. Task
-completion is evidence, not automatic Demand completion. Then, if the Task
-slot is empty and any live Demand exists, compare the entire live pool and
-select exactly one Demand. Reread it and call task_sys__create once with its
-opaque demand_ref, a self-contained native Goal objective, and the selection
-reason. Do not create or complete a native Goal yourself.
 
-Attention snapshot:
+Use $demand-orchestration to process the current canonical attention.
+
+Attention:
 - demand_pool_revision: {pool_revision}
 - live_demand_count: {live_count}
-- terminal Task ids awaiting Demand reconciliation: {terminal_task_ids}
+- newly_terminal_task_ids: {terminal_task_ids}
 """
 
 

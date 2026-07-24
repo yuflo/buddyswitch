@@ -104,6 +104,56 @@ class EnvToolResponseRegistryTests(EnvToolResponseCase):
         self.assertIn("track.resolve_comment_thread", full.get("operation_semantics", {}))
         self.assertNotIn("comment.resolve", full.get("operation_semantics", {}))
 
+    def test_context_projections_explain_demand_and_task_product_boundaries(self) -> None:
+        actor_id = "act-dev-demand-task-semantics"
+        instance_json = self._instance_json(role="dev", actor_id=actor_id)
+
+        full = self._dispatch(
+            instance_json=instance_json,
+            actor_id=actor_id,
+            role="dev",
+            tool="context",
+            action="get",
+            args={},
+        )
+        summary = self._dispatch(
+            instance_json=instance_json,
+            actor_id=actor_id,
+            role="dev",
+            tool="context",
+            action="summarize",
+            args={},
+        )
+
+        demand = full["tool_catalog"]["demand_sys"]
+        task = full["tool_catalog"]["task_sys"]
+        demand_compact = summary["tool_affordances"]["demand_sys"]
+        task_compact = summary["tool_affordances"]["task_sys"]
+
+        self.assertIn("host-owned", demand["capability_boundary"].lower())
+        self.assertIn("task sys never mutates a demand", task["capability_boundary"].lower())
+        self.assertEqual(demand_compact["object_model"], demand["object_model"])
+        self.assertEqual(task_compact["object_model"], task["object_model"])
+        demand_actions = demand["action_semantics"]
+        task_actions = task["action_semantics"]
+        for action, fields in {
+            "create": ("description", "detail"),
+            "revise": ("demand_ref", "description", "detail", "reason"),
+            "complete": ("demand_ref", "summary", "evidence_refs"),
+        }.items():
+            with self.subTest(tool="demand_sys", action=action):
+                explained = demand_actions[action]["inputs_explained"]
+                for field in fields:
+                    self.assertIn(field, explained)
+                    self.assertTrue(explained[field].strip())
+        for field in ("demand_ref", "objective", "selection_reason"):
+            self.assertIn(field, task_actions["create"]["inputs_explained"])
+            self.assertTrue(task_actions["create"]["inputs_explained"][field].strip())
+        self.assertNotIn("input_schemas", demand_compact)
+        self.assertNotIn("action_semantics", demand_compact)
+        self.assertNotIn("input_schemas", task_compact)
+        self.assertNotIn("action_semantics", task_compact)
+
     def test_unknown_tool_rejection_contract(self) -> None:
         actor_id = "act-pm-reject"
         instance_json = self._instance_json(role="pm", actor_id=actor_id)
