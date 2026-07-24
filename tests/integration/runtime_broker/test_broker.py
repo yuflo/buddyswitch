@@ -307,23 +307,40 @@ class RuntimeBrokerTests(unittest.TestCase):
             "demand_triage_runtime",
             FakeDemandTriageRuntime,
         ):
-            result = self._dispatch(
-                method="demand.ingress.resolve",
-                params={
-                    "capability": "host-capability",
-                    "proposal": {
-                        "decision": "no_action_needed",
-                        "reason": "Acknowledgement only.",
-                        "demand_ref": None,
-                        "description": None,
-                        "detail": None,
-                        "reply_content": None,
-                    },
-                },
-                actor_id="act-market-triage",
+            actor_id = self.workspace.actor_id(
                 role="market",
-                instance_json=instance_json,
+                label="act-market-triage",
             )
+            request_id = f"req-test-{uuid.uuid4().hex}"
+            envelope = runtime_broker.dispatch_runtime_request(
+                request={
+                    "protocol": BROKER_V2_PROTOCOL,
+                    "request_id": request_id,
+                    "method": "demand.ingress.resolve",
+                    "params": {
+                        "actor_id": actor_id,
+                        "active_role": "market",
+                        "capability": "host-capability",
+                        "proposal": {
+                            "decision": "no_action_needed",
+                            "reason": "Acknowledgement only.",
+                            "demand_ref": None,
+                            "description": None,
+                            "detail": None,
+                            "reply_content": None,
+                        },
+                    },
+                    "deadline_ms": 35000,
+                },
+                instance_json_path=instance_json,
+                manifest_path=MANIFEST,
+            )
+            self.assertIs(envelope.get("ok"), True, msg=envelope)
+            self.assertEqual(envelope.get("request_id"), request_id)
+            result = envelope.get("result")
+            self.assertIsInstance(result, dict, msg=envelope)
+            assert isinstance(result, dict)
+
             wrong_actor = self._dispatch(
                 method="demand.ingress.resolve",
                 params={

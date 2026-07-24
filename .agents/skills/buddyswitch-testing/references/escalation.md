@@ -38,5 +38,8 @@ of commands and do not require separate actors.
 
 A failure, flake, timeout, cleanup residual, or unexpected environment error is new
 evidence. Stop escalation, diagnose the signal, and rerun only the probe needed to
-confirm the diagnosis. An older pass does not override a newer failure.
-
+confirm the diagnosis. An older pass does not override a newer failure. An
+unexplained error attributable to the claimed path invalidates acceptance even when
+downstream state converges. Treat disagreement among the effect, envelope,
+client/tool status, and consumer outcome as failure evidence; trace the owning
+boundary before reusing any earlier pass.

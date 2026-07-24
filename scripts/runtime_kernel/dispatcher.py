@@ -409,11 +409,12 @@ def _demand_ingress_resolve_dispatch(
 ) -> dict[str, Any]:
     runtime = _demand_triage_runtime_for_session(session)
     try:
-        return runtime.resolve_request(
+        result = runtime.resolve_request(
             instance_json=session.instance_json_path,
             instance_record=instance_record,
             params=params,
         )
+        return {"ok": True, **result}
     except runtime.DemandTriageRuntimeError as exc:
         return _error(
             exc.code,

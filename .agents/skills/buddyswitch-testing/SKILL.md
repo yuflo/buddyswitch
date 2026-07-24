@@ -43,12 +43,34 @@ exclusivity, and cleanup.
 | Test or runner change | Changed tests and current runner-contract tests |
 | Non-executable prose/artifact | Artifact-specific verification; do not invent a test run |
 
+## Terminal Truth Proof
+
+For every new or changed mutating boundary, name and prove the complete terminal
+path:
+
+```text
+owner effect -> public contract -> adapter/envelope
+             -> client/tool interpretation -> consumer-observed status
+```
+
+Success proof requires the intended effect exactly once, a real success envelope,
+success as interpreted by the client or tool, success at the final consumer, and no
+attributable contradictory error. Failure proof requires the real envelope and
+consumer to observe failure with no undeclared effect. If commit uncertainty is
+intentional, expose it as an explicit contract state rather than an ordinary
+failure. State convergence alone does not prove success.
+
 ## Non-Negotiable Rules
 
 - Do not store feature names, source-to-test maps, fixed test directories, test
   counts, or elapsed-time thresholds in this skill.
 - Do not add a test entry, runner mode, impact engine, evidence ledger, or second
   policy owner.
+- Do not flatten success and error envelopes into one result shape, copy business
+  fields from an error into a success-shaped result, or omit assertions for
+  `ok`, status, and error semantics at the boundary under test.
+- Fakes may control inputs and external dependencies; they must not author the
+  success conclusion that the system under test is responsible for producing.
 - A state transition does not require a new command when valid evidence already
   proves the broader claim.
 - Ordinary local completion is not FINAL. Use the final command only for a frozen
@@ -76,6 +98,7 @@ run the final command once after all review-driven edits are complete.
 | Every breadth state needs its own command | Reuse one command across every state it actually proves |
 | No direct test was found, so broad tests are enough | Add/select RED or state the unresolved boundary and escalate |
 | The whole dirty worktree belongs to this task | Partition claim scope, but record the complete tested source identity |
+| State converged, so the operation succeeded | Prove effect, envelope, client/tool status, consumer status, and attributable errors agree |
 
 ## Red Flags
 
@@ -84,6 +107,7 @@ run the final command once after all review-driven edits are complete.
 - Selecting tests from a remembered module map instead of current repository facts
 - Treating a failed or flaky run as invalid merely because an older pass exists
 - Claiming success when target discovery found no proof
+- Excusing a contradictory error because downstream state converged
 
 Stop at a red flag and return to claim, discovery, or evidence analysis.
 
@@ -96,4 +120,3 @@ Report:
 - result and cleanup/residual state
 - evidence identity and whether earlier evidence was reused
 - residual risk, ambiguity, or blocker
-

@@ -88,6 +88,7 @@ The only public test entry is:
 - Use `focused` for ordinary claim-scoped proof.
 - Use `full` only for a frozen merge/release candidate, explicit repository-wide acceptance, or direct user request.
 - Tests prove semantic behavior, persisted state, failure effects, and consumer results—not only fields, mocks, registration, or `ok=true`.
+- Mutating operations have one end-to-end terminal truth: persisted effects, protocol results, consumer-observed status, and attributable runtime errors agree. Any contradiction invalidates acceptance even when state eventually converges.
 - Resource-owning tests prove cleanup and leave no process, socket, lock, or temporary-state residue.
 - Manual checks supplement repeatable automated proof; they do not replace it.
 
