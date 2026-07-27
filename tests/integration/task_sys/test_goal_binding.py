@@ -248,6 +248,54 @@ class TaskGoalBindingContractTests(RuntimeWorkspaceTestCase):
         with self.assertRaisesRegex(ValueError, "retired or invalid Task record"):
             task_sys.list_tasks(actor_target=self.actor_target)
 
+    def test_actor_scoped_list_ignores_only_foreign_retired_task_records(self) -> None:
+        created = self._create()
+        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        foreign_actor = {
+            "actor_id": self._runtime_actor_id(role="dev", label="foreign-retired-task"),
+            "role_id": "dev",
+        }
+        (tasks_dir / "task-demand-foreign-retired.json").write_text(
+            json.dumps(
+                {
+                    "id": "task-demand-foreign-retired",
+                    "actor_target": foreign_actor,
+                    "status": "in_progress.side_processing",
+                    "source_type": "demand",
+                    "source_ref": self.demand_ref,
+                    "execution": {"processor": "side"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            [row["id"] for row in task_sys.list_tasks(actor_target=self.actor_target)],
+            [created["task_id"]],
+        )
+        with self.assertRaisesRegex(ValueError, "retired or invalid Task record"):
+            task_sys.list_tasks()
+
+    def test_actor_scoped_list_rejects_owned_retired_task_record(self) -> None:
+        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        tasks_dir.mkdir(parents=True)
+        (tasks_dir / "task-demand-owned-retired.json").write_text(
+            json.dumps(
+                {
+                    "id": "task-demand-owned-retired",
+                    "actor_target": self.actor_target,
+                    "status": "in_progress.side_processing",
+                    "source_type": "demand",
+                    "source_ref": self.demand_ref,
+                    "execution": {"processor": "side"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ValueError, "retired or invalid Task record"):
+            task_sys.list_tasks(actor_target=self.actor_target)
+
     def test_actor_projection_has_active_and_terminal_groups_only(self) -> None:
         active = self._create()
         other_actor = {

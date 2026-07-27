@@ -377,30 +377,6 @@ def _ingress_receipts(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     return normalized
 
 
-def _creation_receipts(
-    state: Mapping[str, Any],
-    records: Mapping[str, dict[str, Any]],
-) -> dict[str, str]:
-    raw = state.get("actor_creation_receipts")
-    if not isinstance(raw, Mapping):
-        raise _payload_error(
-            "Demand actor aggregate actor_creation_receipts must be an object"
-        )
-    normalized: dict[str, str] = {}
-    for raw_key, raw_demand_id in raw.items():
-        key = _require_text(raw_key, "actor creation receipt key")
-        demand_id = _require_demand_id(
-            raw_demand_id,
-            "actor creation receipt demand id",
-        )
-        if demand_id not in records:
-            raise _payload_error(
-                "actor creation receipt must reference a stored Demand"
-            )
-        normalized[key] = demand_id
-    return normalized
-
-
 def _new_id(prefix: str, occupied: Mapping[str, Any]) -> str:
     while True:
         identifier = f"{prefix}-{uuid4().hex[:12]}"
@@ -529,87 +505,6 @@ def _increment_pool_revision(state: dict[str, Any]) -> int:
     return next_revision
 
 
-def actor_creation_key(
-    actor_target: Mapping[str, Any],
-    *,
-    thread_id: Any,
-    turn_id: Any,
-    description: Any,
-    detail: Any,
-) -> str:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    payload = {
-        "actor_id": normalized_target["actor_id"],
-        "role_id": normalized_target["role_id"],
-        "thread_id": _require_text(thread_id, "thread_id"),
-        "turn_id": _require_text(turn_id, "turn_id"),
-        "action": "demand_sys.create",
-        "description": _require_text(description, "description"),
-        "detail": _require_text(detail, "detail"),
-    }
-    body = json.dumps(
-        payload,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return "actor-create:" + hashlib.sha256(body).hexdigest()
-
-
-def create(
-    actor_target: Mapping[str, Any],
-    creation_key: Any,
-    description: Any,
-    detail: Any,
-    source_refs: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    normalized_key = _require_text(creation_key, "creation_key")
-    normalized_description = _require_text(description, "description")
-    normalized_detail = _require_text(detail, "detail")
-    normalized_refs = _normalize_refs(source_refs, "source_refs")
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state)
-        receipts = _creation_receipts(state, records)
-        existing_id = receipts.get(normalized_key)
-        if existing_id is not None:
-            existing = _find_demand(records, existing_id)
-            if (
-                existing["description"] != normalized_description
-                or existing["detail"] != normalized_detail
-                or existing["source_refs"] != normalized_refs
-            ):
-                raise DemandIngressConflict(
-                    "actor creation key already exists with different content"
-                )
-            return False, {
-                "state_changed": False,
-                "changes": [],
-                "demand_id": existing_id,
-                "demand_ref": _encode_ref(existing_id, existing["revision"]),
-                "demand_pool_revision": state["demand_pool_revision"],
-            }
-        record = _new_demand_record(
-            records,
-            description=normalized_description,
-            detail=normalized_detail,
-            source_refs=normalized_refs,
-        )
-        state["demands"][record["id"]] = record
-        state["actor_creation_receipts"][normalized_key] = record["id"]
-        pool_revision = _increment_pool_revision(state)
-        return True, {
-            "state_changed": True,
-            "changes": [_change(record["id"], "created")],
-            "demand_id": record["id"],
-            "demand_ref": _encode_ref(record["id"], 1),
-            "demand_pool_revision": pool_revision,
-        }
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
 def list_demands(
     actor_target: Mapping[str, Any],
     state: str = "live",
@@ -668,50 +563,6 @@ def _revise_record(
     return True
 
 
-def revise(
-    actor_target: Mapping[str, Any],
-    demand_ref: Any,
-    description: Any,
-    detail: Any,
-    reason: Any,
-) -> dict[str, Any]:
-    normalized_target = demands.normalize_actor_target(actor_target)
-    demand_id, basis_revision = _decode_ref(demand_ref)
-    normalized_description = _require_text(description, "description")
-    normalized_detail = _require_text(detail, "detail")
-    normalized_reason = _require_text(reason, "reason")
-
-    def mutate(state: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-        records = _records(state)
-        record = _find_demand(records, demand_id)
-        _require_live(record)
-        if record["revision"] != basis_revision:
-            raise DemandRevisionConflict(
-                f"Demand {demand_id} changed after this demand_ref was read"
-            )
-        stored = state["demands"][demand_id]
-        changed = _revise_record(
-            stored,
-            description=normalized_description,
-            detail=normalized_detail,
-        )
-        pool_revision = (
-            _increment_pool_revision(state)
-            if changed
-            else state["demand_pool_revision"]
-        )
-        return changed, {
-            "state_changed": changed,
-            "changes": [_change(demand_id, "revised")] if changed else [],
-            "demand_id": demand_id,
-            "demand_ref": _encode_ref(demand_id, int(stored["revision"])),
-            "reason": normalized_reason,
-            "demand_pool_revision": pool_revision,
-        }
-
-    return demands.transact_actor_state(normalized_target, mutate)
-
-
 def _terminal_matches(
     record: Mapping[str, Any],
     *,
@@ -727,6 +578,36 @@ def _terminal_matches(
     if terminal_type == "completed":
         return terminal.get("evidence_refs") == evidence_refs
     return True
+
+
+def _terminalize_record(
+    stored: dict[str, Any],
+    *,
+    terminal_type: str,
+    summary: str,
+    evidence_refs: list[dict[str, Any]] | None,
+    source_refs: list[dict[str, Any]] | None = None,
+) -> None:
+    now = runtime_files.now_iso()
+    terminal: dict[str, Any] = {
+        "type": terminal_type,
+        "at": now,
+        "summary": summary,
+    }
+    if terminal_type == "completed":
+        terminal["evidence_refs"] = deepcopy(evidence_refs)
+    stored.update(
+        {
+            "source_refs": (
+                _merge_refs(stored["source_refs"], source_refs)
+                if source_refs is not None
+                else deepcopy(stored["source_refs"])
+            ),
+            "revision": int(stored["revision"]) + 1,
+            "terminal": terminal,
+            "updated_at": now,
+        }
+    )
 
 
 def _terminalize(
@@ -774,20 +655,11 @@ def _terminalize(
                 f"Demand {demand_id} changed after this demand_ref was read"
             )
         stored = state["demands"][demand_id]
-        now = runtime_files.now_iso()
-        terminal: dict[str, Any] = {
-            "type": terminal_type,
-            "at": now,
-            "summary": normalized_summary,
-        }
-        if terminal_type == "completed":
-            terminal["evidence_refs"] = normalized_evidence
-        stored.update(
-            {
-                "revision": int(stored["revision"]) + 1,
-                "terminal": terminal,
-                "updated_at": now,
-            }
+        _terminalize_record(
+            stored,
+            terminal_type=terminal_type,
+            summary=normalized_summary,
+            evidence_refs=normalized_evidence,
         )
         pool_revision = _increment_pool_revision(state)
         return True, {
@@ -813,19 +685,6 @@ def complete(
         terminal_type="completed",
         summary=summary,
         evidence_refs=evidence_refs,
-    )
-
-
-def cancel(
-    actor_target: Mapping[str, Any],
-    demand_ref: Any,
-    reason: Any,
-) -> dict[str, Any]:
-    return _terminalize(
-        actor_target,
-        demand_ref,
-        terminal_type="canceled",
-        summary=reason,
     )
 
 
@@ -994,21 +853,12 @@ def _apply_ingress_target_change(
             "demand_ref": _encode_ref(demand_id, int(stored["revision"])),
         }
     if decision == "cancel":
-        now = runtime_files.now_iso()
-        stored.update(
-            {
-                "source_refs": _merge_refs(
-                    stored["source_refs"],
-                    receipt["fact"]["source_refs"],
-                ),
-                "revision": int(stored["revision"]) + 1,
-                "terminal": {
-                    "type": "canceled",
-                    "at": now,
-                    "summary": proposal["reason"],
-                },
-                "updated_at": now,
-            }
+        _terminalize_record(
+            stored,
+            terminal_type="canceled",
+            summary=proposal["reason"],
+            evidence_refs=None,
+            source_refs=receipt["fact"]["source_refs"],
         )
         return True, {
             "decision": "cancel",

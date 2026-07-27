@@ -113,7 +113,8 @@ def _build_definition() -> ToolDefinition:
             "execution commitment, or cancel the active Task.",
         ),
         do_not_use_when=(
-            "You need to create, revise, complete, or cancel a Demand; use Demand Sys.",
+            "You need to resolve inbound Demand meaning or complete a satisfied "
+            "Demand; use the permitted Demand Sys action for the current thread.",
             "You need to declare native Goal completion; use the Codex Goal lifecycle.",
         ),
         actions=(

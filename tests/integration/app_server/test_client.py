@@ -387,11 +387,15 @@ class AppServerClientTests(unittest.TestCase):
                                 "mcp_servers.buddyswitch-env.enabled_tools": [
                                     "demand_sys__list",
                                     "demand_sys__get",
+                                    "message__get",
+                                    "message__conversation",
+                                    "demand_sys__resolve_inbound",
                                 ],
-                                "mcp_servers.buddyswitch-demand-triage": {
-                                    "command": "/usr/bin/python3",
-                                    "args": ["/repo/demand_triage_mcp_server.py"],
-                                },
+                                "mcp_servers.buddyswitch-env.disabled_tools": [],
+                                "skills.config": [
+                                    {"name": "demand-triage", "enabled": True},
+                                    {"name": "demand-orchestration", "enabled": False},
+                                ],
                             },
                         )
                     )
@@ -421,11 +425,15 @@ class AppServerClientTests(unittest.TestCase):
                     "mcp_servers.buddyswitch-env.enabled_tools": [
                         "demand_sys__list",
                         "demand_sys__get",
+                        "message__get",
+                        "message__conversation",
+                        "demand_sys__resolve_inbound",
                     ],
-                    "mcp_servers.buddyswitch-demand-triage": {
-                        "command": "/usr/bin/python3",
-                        "args": ["/repo/demand_triage_mcp_server.py"],
-                    },
+                    "mcp_servers.buddyswitch-env.disabled_tools": [],
+                    "skills.config": [
+                        {"name": "demand-triage", "enabled": True},
+                        {"name": "demand-orchestration", "enabled": False},
+                    ],
                 },
             )
             self.assertEqual(params["permissions"], "buddyswitch-runtime")

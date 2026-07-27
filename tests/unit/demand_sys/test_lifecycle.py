@@ -20,15 +20,76 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
 
     def _create(self, label: str) -> dict[str, Any]:
         self._sequence += 1
-        creation_key = f"actor-self:{label}-{self._sequence}"
-        receipt = demand_sys.create(
+        source_key = f"im.message.created:{label}-{self._sequence}"
+        demand_sys.claim_ingress(
             self.actor_target,
-            creation_key,
+            source_key,
             f"Demand {label}.",
             f"Detailed requirement for {label}.",
-            [{"type": "actor.self_requested", "ref": {"key": creation_key}}],
+            [{
+                "type": "im.message.created",
+                "ref": {
+                    "message_id": f"msg-{label}-{self._sequence}",
+                    "conversation_id": "conv-demand-lifecycle",
+                    "event_id": f"imev-{label}-{self._sequence}",
+                },
+            }],
         )
-        return demand_sys.get(self.actor_target, receipt["changes"][0]["demand_id"])
+        attempt_id = demand_sys.begin_ingress_resolution(
+            self.actor_target,
+            source_key,
+        )["attempt_id"]
+        receipt = demand_sys.resolve_ingress(
+            self.actor_target,
+            source_key,
+            attempt_id,
+            {
+                "decision": "create",
+                "reason": "This inbound creates one independent unmet need.",
+                "demand_ref": None,
+                "description": f"Demand {label}.",
+                "detail": f"Detailed requirement for {label}.",
+                "reply_content": None,
+            },
+            handled_verified=False,
+        )
+        return demand_sys.get(self.actor_target, receipt["demand_id"])
+
+    def _cancel(self, record: dict[str, Any], label: str) -> dict[str, Any]:
+        self._sequence += 1
+        source_key = f"im.message.created:{label}-{self._sequence}"
+        demand_sys.claim_ingress(
+            self.actor_target,
+            source_key,
+            "Withdraw the existing need.",
+            "The requester explicitly withdrew this requirement.",
+            [{
+                "type": "im.message.created",
+                "ref": {
+                    "message_id": f"msg-{label}-{self._sequence}",
+                    "conversation_id": "conv-demand-lifecycle",
+                    "event_id": f"imev-{label}-{self._sequence}",
+                },
+            }],
+        )
+        attempt_id = demand_sys.begin_ingress_resolution(
+            self.actor_target,
+            source_key,
+        )["attempt_id"]
+        return demand_sys.resolve_ingress(
+            self.actor_target,
+            source_key,
+            attempt_id,
+            {
+                "decision": "cancel",
+                "reason": "Requirement was withdrawn.",
+                "demand_ref": record["demand_ref"],
+                "description": None,
+                "detail": None,
+                "reply_content": None,
+            },
+            handled_verified=False,
+        )
 
     def _bytes(self) -> bytes:
         return demands.actor_state_path(self.actor_target).read_bytes()
@@ -92,16 +153,12 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
     def test_cancel_stores_exact_summary_shape(self) -> None:
         record = self._create("cancel")
 
-        receipt = demand_sys.cancel(
-            self.actor_target,
-            record["demand_ref"],
-            "Requirement was withdrawn.",
-        )
+        receipt = self._cancel(record, "cancel")
         terminal = demand_sys.get(self.actor_target, record["id"])["terminal"]
 
         self.assertEqual(
-            receipt["changes"],
-            [{"demand_id": record["id"], "kind": "canceled"}],
+            (receipt["decision"], receipt["demand_id"], receipt["demand_changed"]),
+            ("cancel", record["id"], True),
         )
         self.assertEqual(
             terminal,
@@ -144,11 +201,7 @@ class DemandLifecycleTests(RuntimeWorkspaceTestCase):
 
     def test_different_action_against_terminal_demand_rejects_without_write(self) -> None:
         record = self._create("terminal-conflict")
-        demand_sys.cancel(
-            self.actor_target,
-            record["demand_ref"],
-            "Requirement was withdrawn.",
-        )
+        self._cancel(record, "terminal-conflict")
 
         raised = self._assert_unchanged_error(
             demand_sys.DemandTerminalConflict,

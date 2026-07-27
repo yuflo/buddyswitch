@@ -10,7 +10,7 @@ from typing import Any, Callable, Mapping
 from . import runtime_files
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _ACTOR_TARGET_FIELDS = {"actor_id", "role_id"}
 _AGGREGATE_FIELDS = {
     "schema_version",
@@ -18,7 +18,6 @@ _AGGREGATE_FIELDS = {
     "demands",
     "demand_pool_revision",
     "ingress_receipts",
-    "actor_creation_receipts",
 }
 
 
@@ -72,7 +71,6 @@ def _empty_actor_state(actor_target: Mapping[str, str]) -> dict[str, Any]:
         "demands": {},
         "demand_pool_revision": 0,
         "ingress_receipts": {},
-        "actor_creation_receipts": {},
     }
 
 
@@ -85,7 +83,7 @@ def _validate_actor_state(
     if set(payload) != _AGGREGATE_FIELDS:
         raise ValueError(
             "Demand actor aggregate must contain exactly schema_version, actor_target, "
-            "demands, demand_pool_revision, ingress_receipts, and actor_creation_receipts"
+            "demands, demand_pool_revision, and ingress_receipts"
         )
     schema_version = payload.get("schema_version")
     if type(schema_version) is not int or schema_version != SCHEMA_VERSION:
@@ -115,20 +113,12 @@ def _validate_actor_state(
             raise ValueError(
                 f"Demand actor aggregate ingress_receipts.{source_key} must be an object"
             )
-    actor_creation_receipts = payload.get("actor_creation_receipts")
-    if not isinstance(actor_creation_receipts, dict):
-        raise ValueError("Demand actor aggregate actor_creation_receipts must be an object")
-    for creation_key, demand_id in actor_creation_receipts.items():
-        if not isinstance(creation_key, str) or not creation_key.strip():
-            raise ValueError("Demand actor aggregate creation receipt keys must be non-empty strings")
-        runtime_files.require_id(demand_id, "actor creation receipt demand id")
     return {
         "schema_version": SCHEMA_VERSION,
         "actor_target": actor_target,
         "demands": copy.deepcopy(demands_by_id),
         "demand_pool_revision": demand_pool_revision,
         "ingress_receipts": copy.deepcopy(ingress_receipts),
-        "actor_creation_receipts": copy.deepcopy(actor_creation_receipts),
     }
 
 

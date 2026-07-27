@@ -63,20 +63,40 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
         )
 
     def _demand(self, suffix: str = "primary") -> dict[str, Any]:
-        return demand_sys.create(
+        source_key = f"track.comment.added:{suffix}"
+        demand_sys.claim_ingress(
             self.actor_target,
-            f"actor-create:{suffix}",
+            source_key,
             f"Deliver the {suffix} Demand result.",
             f"Canonical live Demand {suffix}.",
             [
                 {
-                    "type": "actor.self_requested",
+                    "type": "track.comment.added",
                     "ref": {
-                        "thread_id": self.context.main_thread_id,
-                        "turn_id": f"turn-{suffix}",
+                        "track_id": "track-demand-orchestration",
+                        "comment_id": suffix,
+                        "thread_id": "comment-thread-demand-orchestration",
                     },
                 }
             ],
+        )
+        attempt_id = demand_sys.begin_ingress_resolution(
+            self.actor_target,
+            source_key,
+        )["attempt_id"]
+        return demand_sys.resolve_ingress(
+            self.actor_target,
+            source_key,
+            attempt_id,
+            {
+                "decision": "create",
+                "reason": "This inbound creates one independent unmet need.",
+                "demand_ref": None,
+                "description": f"Deliver the {suffix} Demand result.",
+                "detail": f"Canonical live Demand {suffix}.",
+                "reply_content": None,
+            },
+            handled_verified=False,
         )
 
     def _task(self, demand: dict[str, Any], suffix: str = "primary") -> dict[str, Any]:
@@ -115,7 +135,7 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("input_actor", source)
         self.assertNotIn("needs_parent_judgment", source)
 
-    def test_actor_created_live_demand_starts_one_independent_parent_turn(self) -> None:
+    def test_inbound_created_live_demand_starts_one_independent_parent_turn(self) -> None:
         self._demand()
         state = _State()
         runtime = _Runtime()
@@ -213,7 +233,10 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
             self.actor_target,
             demand["demand_ref"],
             "Demand was independently satisfied.",
-            [{"type": "task_sys.task", "ref": {"task_id": task["task_id"]}}],
+            [
+                {"type": "task_sys.task", "ref": {"task_id": task["task_id"]}},
+                {"type": "artifact", "ref": {"id": "art-demand-satisfied"}},
+            ],
         )
         state = _State()
         runtime = _Runtime()

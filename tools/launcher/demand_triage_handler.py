@@ -19,12 +19,11 @@ import actor_side_thread  # noqa: E402
 import app_server  # noqa: E402
 import daemon_contracts  # noqa: E402
 import demand_sys_daemon_adapter  # noqa: E402
-import demand_triage_mcp_server  # noqa: E402
 import demand_triage_runtime  # noqa: E402
+import env_tool_mcp_server  # noqa: E402
 import side_thread_registry  # noqa: E402
 from env.domain import demand_sys  # noqa: E402
 from env.repos import runtime_files  # noqa: E402
-from runtime_kernel import lifecycle as runtime_broker_lifecycle  # noqa: E402
 
 
 RETRY_SECONDS = 5
@@ -33,7 +32,7 @@ TRIAGE_PROMPT = """[DEMAND TRIAGE — isolated side]
 
 Use $demand-triage to resolve this one inbound fact against the Actor's current
 canonical Demand context. Commit one final resolution through
-`demand_triage.resolve` before ending this turn.
+`demand_sys__resolve_inbound` before ending this turn.
 
 Inbound fact:
 {fact}
@@ -44,6 +43,7 @@ TRIAGE_ENV_TOOLS = [
     "demand_sys__get",
     "message__get",
     "message__conversation",
+    "demand_sys__resolve_inbound",
 ]
 
 
@@ -106,43 +106,21 @@ def _schedule_retry(state: Any, source_key: str) -> None:
     )
 
 
-def _runtime_broker_socket(context: Any) -> Path:
-    instance_root = Path(
-        getattr(
-            context,
-            "instance_root",
-            Path(context.instance_json).parent,
-        )
-    )
-    actor_id = runtime_files.require_id(
-        getattr(context, "actor_id", ""),
-        "context.actor_id",
-    )
-    return runtime_broker_lifecycle.resolve_socket_path(
-        actor_id,
-        instance_root,
-        instance_root / "runtime" / "runtime-broker.socket",
-    )
-
-
 def _triage_thread_config(
     context: Any,
     capability: str,
 ) -> dict[str, Any]:
+    del context
     return {
-        "mcp_servers.buddyswitch-demand-triage": {
-            "command": sys.executable,
-            "args": [
-                str(HELPER_DIR / "demand_triage_mcp_server.py"),
-                "--broker-socket",
-                str(_runtime_broker_socket(context)),
-            ],
-            "env": {
-                demand_triage_mcp_server.CAPABILITY_ENV: capability,
-            },
-            "default_tools_approval_mode": "approve",
-        },
         "mcp_servers.buddyswitch-env.enabled_tools": list(TRIAGE_ENV_TOOLS),
+        "mcp_servers.buddyswitch-env.disabled_tools": [],
+        "mcp_servers.buddyswitch-env.env": {
+            env_tool_mcp_server.DEMAND_INBOUND_CAPABILITY_ENV: capability,
+        },
+        "skills.config": [
+            {"name": "demand-triage", "enabled": True},
+            {"name": "demand-orchestration", "enabled": False},
+        ],
     }
 
 

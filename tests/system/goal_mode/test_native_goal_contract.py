@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from tools.launcher import app_server
+import app_server
 
 from tests.system.goal_mode.support import (
     RealCodexGoalHarness,

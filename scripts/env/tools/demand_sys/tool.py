@@ -19,6 +19,10 @@ def _text(description: str) -> dict[str, Any]:
     return {"type": "string", "description": description}
 
 
+def _nullable_text(description: str) -> dict[str, Any]:
+    return {"type": ["string", "null"], "description": description}
+
+
 def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
     return {
         "type": "object",
@@ -89,8 +93,20 @@ def _action(
         mutates=MUTATES_NONE if read_only else MUTATES_RUNTIME_OBJECTS,
         task_requirement=TASK_REQUIREMENT_FREE,
         required_permission=f"demand_sys.{name}",
-        authority="demand_sys.actor_owned_aggregate",
-        visibility="Demand state owned by the active actor identity and role",
+        authority=(
+            "demand_sys.bound_inbound_side_capability"
+            if name == "resolve_inbound"
+            else "demand_sys.parent_actor_completion"
+            if name == "complete"
+            else "demand_sys.actor_owned_aggregate"
+        ),
+        visibility=(
+            "Isolated Demand-triage side bound to one inbound receipt"
+            if name == "resolve_inbound"
+            else "Parent/Main Actor thread"
+            if name == "complete"
+            else "Demand state owned by the active actor identity and role"
+        ),
         durability="none" if read_only else "durable",
         result_content_level=result_content_level,
         success_effect=success_effect,
@@ -98,22 +114,44 @@ def _action(
             "Rejected Demand actions do not mutate Demand, Task, daemon, or inbound state."
         ),
         reads=("active actor Demand aggregate",),
-        writes=() if read_only else ("active actor Demand aggregate",),
-        does_not_write=("Task Sys records", "daemon registrations", "inbound state"),
+        writes=(
+            ()
+            if read_only
+            else (
+                "active actor Demand aggregate",
+                "bound inbound receipt",
+                "bound source reply when decision is handled",
+            )
+            if name == "resolve_inbound"
+            else ("active actor Demand aggregate",)
+        ),
+        does_not_write=("Task Sys records", "daemon registrations"),
         preconditions=(
             "env.tool role-action policy allows this action for the active role",
             "all referenced Demands belong to the active actor aggregate",
+            *(
+                (
+                    "actual invocation Thread and one-shot capability match the bound side lease",
+                )
+                if name == "resolve_inbound"
+                else (
+                    "evidence includes a completed same-Actor Task bound to this Demand",
+                    "evidence includes durable delivery proof beyond Task or Goal status",
+                )
+                if name == "complete"
+                else ()
+            ),
         ),
         returns=("actor-level Demand response without storage or concurrency fields",),
         use_when=(use_when,),
         do_not_use_when=(do_not_use_when,),
         risk_hints={
             "read_only": read_only,
-            "destructive": name in {"complete", "cancel"},
-            "idempotent": read_only or name in {"create", "complete", "cancel"},
+            "destructive": name in {"resolve_inbound", "complete"},
+            "idempotent": read_only or name in {"resolve_inbound", "complete"},
             "open_world": False,
             "requires_human_approval": False,
-            "external_effect": False,
+            "external_effect": name == "resolve_inbound",
         },
     )
 
@@ -135,12 +173,13 @@ def _build_definition() -> ToolDefinition:
             "of Task execution."
         ),
         scope=(
-            "Inspect or express Actor intent to create, replace, satisfy, or withdraw "
-            "one canonical Demand."
+            "Inspect canonical Demands, resolve one bound inbound on an isolated side, "
+            "or complete one satisfied Demand from Parent/Main."
         ),
         capability_boundary=(
-            "Demand Sys exposes six Actor intents. Raw inbound triage, source-provenance "
-            "derivation, idempotency, concurrency, storage, and Task/Goal coordination "
+            "Demand Sys exposes four actions. Inbound triage is the only create, merge, "
+            "revise, or cancel path; Parent/Main can only read and complete. Source "
+            "authority, idempotency, concurrency, storage, and Task/Goal coordination "
             "remain host-owned."
         ),
         object_model=(
@@ -149,9 +188,9 @@ def _build_definition() -> ToolDefinition:
             "until explicitly completed or canceled. It is not a Task, execution plan, "
             "progress message, or native Goal."
         ),
-        use_when=("You need to inspect or change the active Actor's canonical unmet needs.",),
+        use_when=("You need to inspect or reconcile the active Actor's canonical unmet needs.",),
         do_not_use_when=(
-            "You need to triage raw inbound information, execute Task work, or control a native Goal.",
+            "You need to execute Task work or control a native Goal.",
         ),
         actions=(
             _action(
@@ -196,91 +235,75 @@ def _build_definition() -> ToolDefinition:
                 do_not_use_when="You only need to compare compact summaries; use demand_sys.list.",
             ),
             _action(
-                name="create",
+                name="resolve_inbound",
                 description=(
-                    "Create one durable independent canonical Demand. This action does "
-                    "not create Task work or a native Goal."
+                    "Consume the isolated Demand-triage side's one-shot authority and "
+                    "commit exactly one resolution for its bound inbound fact. This "
+                    "action never creates Task work or controls a native Goal."
                 ),
                 schema=_schema(
                     {
-                        "description": _text(
-                            "One durable sentence naming the unmet need and desired "
-                            "outcome. It remains meaningful across possible Tasks and "
-                            "is not an execution step, acknowledgement, status update, "
-                            "or solution plan."
-                        ),
-                        "detail": _text(
-                            "Complete satisfaction contract for the need: desired "
-                            "observable outcome, material boundaries, binding constraints, "
-                            "required user-facing delivery, and evidence that would justify "
-                            "Demand completion. Preserve material source meaning; exclude "
-                            "Task selection and Goal-lifecycle instructions."
-                        ),
-                    },
-                    ["description", "detail"],
-                ),
-                read_only=False,
-                result_content_level="creation receipt and opaque demand_ref",
-                success_effect=(
-                    "Creates one durable live Demand with host-derived provenance and "
-                    "idempotency; creates no Task or native Goal."
-                ),
-                use_when=(
-                    "The Actor identifies one independent unmet need not represented "
-                    "by a live Demand."
-                ),
-                do_not_use_when=(
-                    "The input is untriaged, duplicates or supplements a live Demand, "
-                    "or changes a live Demand's canonical meaning."
-                ),
-            ),
-            _action(
-                name="revise",
-                description=(
-                    "Replace the complete canonical meaning of one live Demand. This "
-                    "is a full replacement, not a text patch, and it does not change "
-                    "Task or Goal state."
-                ),
-                schema=_schema(
-                    {
-                        "demand_ref": demand_ref,
-                        "description": _text(
-                            "Complete replacement one-sentence unmet need and desired outcome."
-                        ),
-                        "detail": _text(
-                            "Complete replacement satisfaction contract, preserving every "
-                            "still-valid prior requirement and incorporating the changed "
-                            "outcome, boundary, constraint, delivery, or evidence condition."
-                        ),
+                        "decision": {
+                            "type": "string",
+                            "description": (
+                                "One final effect for the bound inbound fact: settle without "
+                                "action, handle with a reply, create an independent Demand, "
+                                "merge compatible intake, revise meaning, or cancel a live Demand."
+                            ),
+                            "enum": [
+                                "no_action_needed",
+                                "handled",
+                                "create",
+                                "merge_intake",
+                                "revise",
+                                "cancel",
+                            ],
+                        },
                         "reason": _text(
-                            "Grounded explanation of what canonical meaning changed and why "
-                            "replacement is correct. This explains the call; it is not "
-                            "promised as persisted Demand history."
+                            "Grounded explanation of the inbound's relationship to the "
+                            "canonical Demand context and why this effect is correct."
+                        ),
+                        "demand_ref": _nullable_text(
+                            "Current opaque live Demand reference for merge_intake, revise, "
+                            "or cancel; otherwise null."
+                        ),
+                        "description": _nullable_text(
+                            "Complete post-resolution canonical unmet need for create, "
+                            "merge_intake, or revise; otherwise null."
+                        ),
+                        "detail": _nullable_text(
+                            "Complete post-resolution satisfaction contract for create, "
+                            "merge_intake, or revise; otherwise null."
+                        ),
+                        "reply_content": _nullable_text(
+                            "Complete bound-source reply for handled; otherwise null."
                         ),
                     },
-                    ["demand_ref", "description", "detail", "reason"],
+                    [
+                        "decision",
+                        "reason",
+                        "demand_ref",
+                        "description",
+                        "detail",
+                        "reply_content",
+                    ],
                 ),
                 read_only=False,
-                result_content_level="revision receipt with refreshed opaque demand_ref",
+                result_content_level="bound receipt resolution and any resulting Demand or reply identity",
                 success_effect=(
-                    "Replaces the live Demand's complete canonical meaning while "
-                    "preserving host-owned provenance; changes no Task or Goal."
+                    "Atomically settles the bound receipt and applies at most one canonical "
+                    "Demand effect; handled also verifies one durable source reply."
                 ),
-                use_when=(
-                    "The live Demand's intended outcome, boundary, binding constraint, "
-                    "required delivery, or satisfaction meaning changed."
-                ),
-                do_not_use_when=(
-                    "New information changes no canonical meaning, belongs to an "
-                    "independent need, or remains raw inbound owned by triage."
-                ),
+                use_when="This isolated triage side has completed semantic judgment for its bound inbound.",
+                do_not_use_when="The caller is Parent/Main, Goal work, or an unbound side thread.",
             ),
             _action(
                 name="complete",
                 description=(
                     "Terminalize one live Demand as satisfied with a concrete summary "
-                    "and durable evidence references. This action does not change Task "
-                    "or Goal state."
+                    "and durable evidence references, including one completed "
+                    "same-Demand Task and delivery proof beyond Task status. This "
+                    "action does not change Task or Goal state."
                 ),
                 schema=_schema(
                     {
@@ -307,34 +330,6 @@ def _build_definition() -> ToolDefinition:
                 do_not_use_when=(
                     "Only Task/Goal execution ended, delivery is missing, evidence is "
                     "unverified, or any part of the Demand remains unmet."
-                ),
-            ),
-            _action(
-                name="cancel",
-                description=(
-                    "Terminalize one live Demand as withdrawn, invalidated, or no longer "
-                    "required. This action does not change Task or Goal state."
-                ),
-                schema=_schema(
-                    {
-                        "demand_ref": demand_ref,
-                        "summary": _text(
-                            "Concrete withdrawal or invalidating fact explaining why "
-                            "satisfaction is no longer required; do not describe successful "
-                            "completion."
-                        ),
-                    },
-                    ["demand_ref", "summary"],
-                ),
-                read_only=False,
-                result_content_level="cancellation receipt with refreshed opaque demand_ref",
-                success_effect=(
-                    "Terminalizes the Demand as canceled; changes no Task or Goal."
-                ),
-                use_when="The need was withdrawn or deliberately abandoned.",
-                do_not_use_when=(
-                    "The need was satisfied, remains valid but blocked or lower priority, "
-                    "or only its current Task stopped or failed."
                 ),
             ),
         ),

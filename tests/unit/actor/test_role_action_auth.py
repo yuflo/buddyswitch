@@ -73,12 +73,10 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
 
     def test_every_demand_sys_permission_allows_every_manifest_role(self) -> None:
         expected = {
-            "demand_sys.create",
-            "demand_sys.revise",
             "demand_sys.list",
             "demand_sys.get",
+            "demand_sys.resolve_inbound",
             "demand_sys.complete",
-            "demand_sys.cancel",
         }
         self.assertEqual(
             {permission for permission in role_auth.COMMON_ROLE_PERMISSIONS if permission.startswith("demand_sys.")},

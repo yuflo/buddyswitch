@@ -10,7 +10,7 @@ The current execution path is:
 
 ```text
 independent parent Demand orchestration
-  -> task_sys.create
+  -> task_sys__create
   -> durable active Task
   -> task_goal.reconcile_task
   -> TaskGoalHandler
@@ -63,8 +63,8 @@ create
 cancel
 ```
 
-`create` accepts only an opaque `demand_ref`, a self-contained `objective`, and
-a `selection_reason`. The tool boundary resolves the current Demand through
+`task_sys__create` accepts only an opaque `demand_ref`, a self-contained
+`objective`, and a `selection_reason`. The tool boundary resolves the current Demand through
 the Demand rule capability, derives the Actor target, writes the Task through
 the Task owner, and requests idempotent Goal reconciliation.
 
@@ -122,9 +122,20 @@ Repeated reconciliation is idempotent.
 
 Task completion and Demand completion are deliberately independent. A terminal
 Task is evidence. A later independent parent Demand orchestration turn rereads
-the latest Demand and decides whether to complete, cancel, revise, or keep it
-live. Only after that judgment may an empty Task slot be filled from the whole
-live Demand pool.
+the latest Demand and its owning delivery products. It calls
+`demand_sys__complete` only when the complete latest need is satisfied;
+otherwise it keeps the Demand live. Demand creation, merge, revision, and
+cancellation remain exclusively bound-inbound triage decisions.
+
+Demand completion requires at least one Task evidence reference. A narrow Task
+Sys read contract verifies that every cited Task exists, belongs to the same
+Actor, is bound to the same Demand, and is completed. The Demand adapter also
+requires concrete delivery evidence beyond Task status and performs every
+check before Demand mutation. Missing, active, canceled, cross-Actor,
+cross-Demand, stale, or delivery-free evidence leaves the Demand unchanged.
+
+Only after terminal reconciliation may an empty Task slot be filled from the
+whole live Demand pool, and orchestration selects at most one next Demand.
 
 Task domain code does not import or mutate Demand state. Demand domain code
 does not import or mutate Task state. Demand orchestration is their explicit

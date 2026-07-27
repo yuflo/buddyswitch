@@ -21,6 +21,7 @@ from runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # 
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "buddyswitch-env"
+DEMAND_INBOUND_CAPABILITY_ENV = "BUDDYSWITCH_DEMAND_INBOUND_CAPABILITY"
 Dispatcher = Callable[..., dict[str, Any]]
 
 
@@ -172,6 +173,10 @@ def _handle_tools_call(request_id: Any, params: Any, dispatcher: Dispatcher) -> 
             if isinstance(source, str):
                 invocation[target] = source.strip()
         tool, action = native_mcp.resolve_native_tool_name(name)
+        if tool == "demand_sys" and action == "resolve_inbound":
+            capability = os.environ.get(DEMAND_INBOUND_CAPABILITY_ENV)
+            if isinstance(capability, str) and capability.strip():
+                invocation["demand_inbound_capability"] = capability.strip()
     except (KeyError, ValueError) as exc:
         return rpc_result(
             request_id,

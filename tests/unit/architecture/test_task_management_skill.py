@@ -46,7 +46,7 @@ def test_task_management_is_not_an_active_skill_or_role_dependency() -> None:
             assert "demand-orchestration" in set(role.get("skills", []))
 
 
-def test_demand_orchestration_skill_owns_terminal_reconciliation_and_exact_selection() -> None:
+def test_demand_orchestration_skill_owns_terminal_reconciliation_and_bounded_selection() -> None:
     text = ORCHESTRATION.read_text(encoding="utf-8")
     lowered = " ".join(text.lower().split())
 
@@ -56,11 +56,9 @@ def test_demand_orchestration_skill_owns_terminal_reconciliation_and_exact_selec
         "demand_sys__list",
         "demand_sys__get",
         "demand_sys__complete",
-        "demand_sys__cancel",
-        "demand_sys__revise",
         "task_sys__create",
         "selection_reason",
-        "select exactly one",
+        "select at most one",
         "native goal",
         "update_goal",
         "user-facing delivery",
@@ -82,14 +80,16 @@ def test_orchestration_skill_keeps_task_and_demand_completion_decoupled() -> Non
     lowered = " ".join(text.lower().split())
 
     assert "task completion is evidence, not demand completion" in lowered
-    assert "do not automatically complete or cancel" in lowered
+    assert "do not automatically complete a demand" in lowered
     assert "leave the demand live" in lowered
-    assert "one task per demand" in lowered
+    assert "if one task is active, stop" in lowered
+    assert "if more than one is active" in lowered
     assert "task_sys.outcome_frame" not in text
     assert "task_sys.side_frame" not in text
     assert "task_sys.parent_frame" not in text
     assert "need_parent" not in text
-    assert "choose at most one" not in lowered
+    assert "select exactly one" not in lowered
+    assert "one task per demand" not in lowered
     assert "execution brief" not in lowered
 
 
@@ -132,7 +132,7 @@ def test_triage_skill_owns_one_complete_relationship_sop() -> None:
         "correction demand",
         "merge_intake",
         "revise",
-        "demand_triage.resolve",
+        "demand_sys__resolve_inbound",
     )
     for phrase in required:
         assert phrase in normalized
@@ -141,6 +141,10 @@ def test_triage_skill_owns_one_complete_relationship_sop() -> None:
     assert "needs_parent_judgment" not in normalized
     assert "task_sys" not in normalized
     assert "message__send" not in normalized
+    assert "demand_sys__complete" not in normalized
+    assert "demand_sys__resolve_inbound" not in " ".join(
+        ORCHESTRATION.read_text(encoding="utf-8").lower().split()
+    )
 
 
 def test_prompt_skill_and_role_layers_do_not_duplicate_tool_catalog_contracts() -> None:
@@ -156,6 +160,7 @@ def test_prompt_skill_and_role_layers_do_not_duplicate_tool_catalog_contracts() 
     for reusable_rule in (
         "compare the entire live pool",
         "select exactly one demand",
+        "select at most one demand",
         "self-contained native goal objective",
         "task completion is evidence",
     ):

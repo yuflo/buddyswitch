@@ -92,6 +92,13 @@ def _current_demand_surfaces() -> tuple[Path, ...]:
 
 def _retired_demand_tokens() -> tuple[str, ...]:
     return (
+        "demand_triage." + "resolve",
+        "buddyswitch-" + "demand-triage",
+        "demand." + "ingress.resolve",
+        "demand_sys__" + "create",
+        "demand_sys__" + "revise",
+        "demand_sys__" + "cancel",
+        "actor_creation_" + "receipts",
         "parent" + "_id",
         "depends" + "_on",
         "demand_sys." + "set_parent",
@@ -170,7 +177,7 @@ def test_first_class_intake_state_and_domain_commands_are_absent() -> None:
         assert f"def {command}(" not in domain_source
 
 
-def test_current_demand_surfaces_do_not_preserve_the_retired_graph_model() -> None:
+def test_current_demand_surfaces_do_not_preserve_retired_models_or_transports() -> None:
     for relative in _current_demand_surfaces():
         source = (REPO_ROOT / relative).read_text(encoding="utf-8")
         for token in _retired_demand_tokens():
@@ -256,6 +263,31 @@ def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
         assert "fallback_demand" not in source, path
 
 
+def test_demand_public_surface_has_one_four_action_definition_and_no_goal_filter() -> None:
+    from env.tools.demand_sys.tool import DEFINITION
+
+    assert {action.name for action in DEFINITION.actions} == {
+        "list",
+        "get",
+        "resolve_inbound",
+        "complete",
+    }
+    tool_source = (REPO_ROOT / TOOL_ROOT / "tool.py").read_text(encoding="utf-8")
+    impl_source = (REPO_ROOT / TOOL_ROOT / "_impl.py").read_text(encoding="utf-8")
+    for retired in ('name="create"', 'name="revise"', 'name="cancel"'):
+        assert retired not in tool_source
+    for goal_filter in ("goal_thread", "goal-specific", "goal_specific"):
+        assert goal_filter not in tool_source.lower()
+        assert goal_filter not in impl_source.lower()
+
+    domain_source = (REPO_ROOT / DOMAIN).read_text(encoding="utf-8")
+    repository_source = (REPO_ROOT / REPOSITORY).read_text(encoding="utf-8")
+    for retired_definition in ("def create(", "def revise(", "def cancel("):
+        assert retired_definition not in domain_source
+    assert "actor_creation_" + "receipts" not in repository_source
+    assert not (REPO_ROOT / "tools/launcher/demand_triage_mcp_server.py").exists()
+
+
 def test_current_architecture_allows_only_opaque_task_reference_collaboration() -> None:
     demand_text = (REPO_ROOT / "docs/arch/demand-sys-architecture.md").read_text(encoding="utf-8")
     task_text = (REPO_ROOT / "docs/arch/task-sys-architecture.md").read_text(encoding="utf-8")
@@ -264,13 +296,16 @@ def test_current_architecture_allows_only_opaque_task_reference_collaboration() 
 
     assert "private source-keyed ingress receipt" in demand_text
     assert "isolated demand-triage side" in demand_text
-    assert "demand_triage.resolve" in demand_text
-    assert "strict final-message JSON shape" in demand_text
+    assert "`demand_sys__resolve_inbound` through the normal unified" in demand_text
+    assert "one-use capability" in demand_text
     assert "opaque current `demand_ref`" in demand_text
     assert "independent parent Demand orchestration" in demand_text
     assert "IM and Track owners first validate and persist their exact source fact" in normalized
     assert "The ingress receipt is recovery metadata" in demand_text
     assert "A terminal Task never mutates a Demand automatically" in demand_text
+    assert "same Actor, same Demand, and completed" in demand_text
+    assert "list, get, and complete" in demand_text
+    assert "list, get, and resolve_inbound" in demand_text
     assert "## Explicit non-goals" in demand_text
     assert "No Demand graph" in demand_text
     assert "No first-class pre-Demand product object" in demand_text

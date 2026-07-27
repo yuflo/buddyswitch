@@ -68,10 +68,8 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
             {
                 "demand_sys__list",
                 "demand_sys__get",
-                "demand_sys__create",
-                "demand_sys__revise",
+                "demand_sys__resolve_inbound",
                 "demand_sys__complete",
-                "demand_sys__cancel",
             },
         )
         self.assertFalse(any(name.startswith("demand__") for name in by_name))
@@ -84,25 +82,29 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
             for spec in self.native_mcp.list_native_tool_specs()
         }
 
-        demand_create = by_name["demand_sys__create"]
+        demand_resolve = by_name["demand_sys__resolve_inbound"]
         task_create = by_name["task_sys__create"]
         self.assertEqual(
-            set(demand_create["inputSchema"]["properties"]),
-            {"description", "detail"},
+            set(demand_resolve["inputSchema"]["properties"]),
+            {"decision", "reason", "demand_ref", "description", "detail", "reply_content"},
+        )
+        self.assertEqual(
+            demand_resolve["inputSchema"]["properties"]["decision"]["enum"],
+            ["no_action_needed", "handled", "create", "merge_intake", "revise", "cancel"],
         )
         self.assertEqual(
             set(task_create["inputSchema"]["properties"]),
             {"demand_ref", "objective", "selection_reason"},
         )
-        for tool in (demand_create, task_create):
+        for tool in (demand_resolve, task_create):
             self.assertTrue(tool["description"].strip())
             for field_schema in tool["inputSchema"]["properties"].values():
                 self.assertTrue(field_schema["description"].strip())
 
         # These two exclusions are stable product boundaries, not prose snapshots.
         self.assertIn(
-            "does not create Task work or a native Goal",
-            demand_create["description"],
+            "isolated",
+            demand_resolve["description"].lower(),
         )
         self.assertIn(
             "does not mutate, satisfy, or reprioritize a Demand",

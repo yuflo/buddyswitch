@@ -67,6 +67,10 @@ class TaskGoalConflict(TaskSysError):
         super().__init__(f"Task {task_id} Goal conflict: {message}")
 
 
+class TaskCompletionEvidenceError(TaskSysError):
+    code = "E_TASK_SYS_COMPLETION_EVIDENCE"
+
+
 def _require_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
@@ -278,6 +282,18 @@ def _validate_task(record: Any) -> dict[str, Any]:
     }
 
 
+def _task_record_belongs_to_actor(
+    record: Any,
+    actor_target: Mapping[str, str],
+) -> bool:
+    try:
+        value = _require_mapping(record, "task")
+        record_target = _normalize_actor_target(value.get("actor_target"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"retired or invalid Task record: {exc}") from exc
+    return record_target == actor_target
+
+
 def _tasks_dir() -> Path:
     return runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
 
@@ -333,9 +349,13 @@ def list_tasks(
         raise ValueError("statuses contains an unsupported Task status")
     rows: list[dict[str, Any]] = []
     for path in sorted(tasks_dir.glob("*.json")):
-        record = _validate_task(runtime_files.read_json_object(path))
-        if normalized_target is not None and record["actor_target"] != normalized_target:
+        raw_record = runtime_files.read_json_object(path)
+        if normalized_target is not None and not _task_record_belongs_to_actor(
+            raw_record,
+            normalized_target,
+        ):
             continue
+        record = _validate_task(raw_record)
         if allowed_statuses is not None and record["status"] not in allowed_statuses:
             continue
         rows.append(record)
@@ -344,6 +364,42 @@ def list_tasks(
 
 def get_task(task_id: str) -> dict[str, Any]:
     return _load_task(runtime_files.require_id(task_id, "task id"))
+
+
+def require_completed_task_for_demand(
+    *,
+    task_id: str,
+    actor_target: Mapping[str, Any],
+    demand_id: str,
+) -> dict[str, Any]:
+    normalized_target = _normalize_actor_target(actor_target)
+    normalized_demand_id = runtime_files.require_id(
+        demand_id,
+        "demand id",
+    )
+    if not normalized_demand_id.startswith("demand-"):
+        raise TaskCompletionEvidenceError(
+            "Demand completion evidence requires a Demand id"
+        )
+    try:
+        task = _load_task(runtime_files.require_id(task_id, "task id"))
+    except (ValueError, FileNotFoundError) as exc:
+        raise TaskCompletionEvidenceError(
+            f"Demand completion Task evidence is unavailable: {task_id}"
+        ) from exc
+    if task["actor_target"] != normalized_target:
+        raise TaskCompletionEvidenceError(
+            f"Task {task_id} does not belong to the active Actor"
+        )
+    if task["status"] != COMPLETED:
+        raise TaskCompletionEvidenceError(
+            f"Task {task_id} is {task['status']}, not completed"
+        )
+    if task["demand_ref"]["demand_id"] != normalized_demand_id:
+        raise TaskCompletionEvidenceError(
+            f"Task {task_id} is bound to another Demand"
+        )
+    return task_summary(task)
 
 
 def create(

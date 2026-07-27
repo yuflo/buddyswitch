@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -25,7 +26,43 @@ _ACTION_DEFINITION_MAP = {
     ]
 }
 
-_DISCOVERY_EXCLUDED_TOOLS: set[str] = set()
+_PARENT_DEMAND_ACTIONS = frozenset({"list", "get", "complete"})
+
+
+def _parent_tool_catalog() -> dict[str, dict[str, Any]]:
+    catalog = deepcopy(tool_registry.env_tools_description())
+    demand = catalog.get("demand_sys")
+    if not isinstance(demand, dict):
+        return catalog
+    demand["operations"] = [
+        action
+        for action in demand.get("operations", [])
+        if action in _PARENT_DEMAND_ACTIONS
+    ]
+    for field in ("payload_fields", "input_schemas", "action_semantics"):
+        rows = demand.get(field)
+        if isinstance(rows, dict):
+            demand[field] = {
+                action: value
+                for action, value in rows.items()
+                if action in _PARENT_DEMAND_ACTIONS
+            }
+    native_actions = (demand.get("native_mcp") or {}).get("actions")
+    if isinstance(native_actions, dict):
+        demand["native_mcp"]["actions"] = {
+            action: value
+            for action, value in native_actions.items()
+            if action in _PARENT_DEMAND_ACTIONS
+        }
+    return catalog
+
+
+def _parent_operation_semantics() -> dict[str, dict[str, Any]]:
+    return {
+        action: semantics
+        for action, semantics in tool_registry.operation_semantics().items()
+        if action != "demand_sys.resolve_inbound"
+    }
 
 class ContextServiceContext(TypedDict):
     active_role: str
@@ -295,8 +332,8 @@ def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
 
 
 def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
-    operation_semantics = tool_registry.operation_semantics(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
-    affordances = tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS)
+    operation_semantics = _parent_operation_semantics()
+    affordances = tool_registry.compact_tool_affordances()
     artifact_create = operation_semantics["artifact.create_revision"]
     runtime_policy_preview = context.runtime_policy_preview(operation_semantics)
     return {
@@ -580,8 +617,8 @@ def _current_context_sections(
     candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {
-        "tool_catalog": tool_registry.env_tools_description(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
-        "operation_semantics": tool_registry.operation_semantics(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
+        "tool_catalog": _parent_tool_catalog(),
+        "operation_semantics": _parent_operation_semantics(),
         "tool_catalog_errors": tool_registry.tool_catalog_errors(),
         "tracks": visible_tracks,
         "tasks": visible_tasks,
@@ -767,7 +804,7 @@ def summarize_context(*, args: dict[str, Any], context: ContextServiceContext) -
         "message_cues": sections["message_cues"],
         "context_sources": context_sources_desc(),
         "writable_surfaces": sections["writable_surfaces"],
-        "tool_affordances": tool_registry.compact_tool_affordances(exclude_tools=_DISCOVERY_EXCLUDED_TOOLS),
+        "tool_affordances": tool_registry.compact_tool_affordances(),
         "capability_snapshot": sections["capability_snapshot"],
         "decision_surface": sections["decision_surface"],
     }

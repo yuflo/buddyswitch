@@ -75,12 +75,11 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
         path.write_text(
             json.dumps(
                 {
-                    "schema_version": 4,
+                    "schema_version": 5,
                     "actor_target": target,
                     "demands": records,
                     "demand_pool_revision": 2,
                     "ingress_receipts": {},
-                    "actor_creation_receipts": {},
                 },
                 ensure_ascii=True,
                 indent=2,

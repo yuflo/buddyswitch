@@ -112,34 +112,50 @@ class EnvToolSchemaContractTests(unittest.TestCase):
                         path=f"{tool}.{action}.{field_name}",
                     )
 
-    def test_demand_actor_surface_hides_concurrency_and_provenance_inputs(self) -> None:
-        create = catalog.get_action_definition("demand_sys", "create").input_schema
-        revise = catalog.get_action_definition("demand_sys", "revise").input_schema
+    def test_demand_surfaces_hide_authority_and_retired_mutation_inputs(self) -> None:
+        resolve_inbound = catalog.get_action_definition(
+            "demand_sys",
+            "resolve_inbound",
+        ).input_schema
         complete = catalog.get_action_definition("demand_sys", "complete").input_schema
-        cancel = catalog.get_action_definition("demand_sys", "cancel").input_schema
 
         self.assertEqual(
-            set(create["properties"]),
-            {"description", "detail"},
+            catalog.supported_actions("demand_sys"),
+            {"list", "get", "resolve_inbound", "complete"},
         )
         self.assertEqual(
-            set(revise["properties"]),
-            {"demand_ref", "description", "detail", "reason"},
+            set(resolve_inbound["properties"]),
+            {
+                "decision",
+                "reason",
+                "demand_ref",
+                "description",
+                "detail",
+                "reply_content",
+            },
         )
         self.assertEqual(
-            revise["required"],
-            ["demand_ref", "description", "detail", "reason"],
+            set(resolve_inbound["required"]),
+            set(resolve_inbound["properties"]),
         )
         self.assertEqual(
             set(complete["properties"]),
             {"demand_ref", "summary", "evidence_refs"},
         )
-        self.assertEqual(
-            set(cancel["properties"]),
-            {"demand_ref", "summary"},
+        model_fields = {
+            *resolve_inbound["properties"],
+            *complete["properties"],
+        }
+        self.assertTrue(
+            {
+                "actor_id",
+                "thread_id",
+                "source_key",
+                "attempt_id",
+                "capability",
+                "expected_revision",
+            }.isdisjoint(model_fields)
         )
-        serialized = json.dumps(catalog.env_tools_description(), ensure_ascii=True)
-        self.assertNotIn("expected_revision", serialized)
 
     def test_demand_completion_schema_exposes_exact_task_evidence_identity(self) -> None:
         complete = catalog.get_action_definition("demand_sys", "complete").input_schema

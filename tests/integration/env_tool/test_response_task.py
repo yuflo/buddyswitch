@@ -15,17 +15,41 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         del instance_json, role, actor_id
 
     def _demand_ref(self, *, actor_id: str, label: str) -> str:
-        created = demand_sys.create(
-            {"actor_id": actor_id, "role_id": "dev"},
-            f"actor-create:{label}",
+        actor_target = {"actor_id": actor_id, "role_id": "dev"}
+        source_key = f"track.comment.added:{label}"
+        demand_sys.claim_ingress(
+            actor_target,
+            source_key,
             "Deliver the selected observable result.",
             "This Demand is used by the Task tool response contract.",
             [
                 {
-                    "type": "actor.self_requested",
-                    "ref": {"thread_id": "thr-main", "turn_id": f"turn-{label}"},
+                    "type": "track.comment.added",
+                    "ref": {
+                        "track_id": "track-task-response",
+                        "comment_id": label,
+                        "thread_id": "comment-thread-task-response",
+                    },
                 }
             ],
+        )
+        attempt_id = demand_sys.begin_ingress_resolution(
+            actor_target,
+            source_key,
+        )["attempt_id"]
+        created = demand_sys.resolve_ingress(
+            actor_target,
+            source_key,
+            attempt_id,
+            {
+                "decision": "create",
+                "reason": "This inbound creates one selected unmet need.",
+                "demand_ref": None,
+                "description": "Deliver the selected observable result.",
+                "detail": "This Demand is used by the Task tool response contract.",
+                "reply_content": None,
+            },
+            handled_verified=False,
         )
         return str(created["demand_ref"])
 

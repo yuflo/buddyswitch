@@ -12,6 +12,7 @@ import sys
 from typing import Any, Iterator
 
 from env.repos import runtime_files
+from env.tool_runtime.context import DemandIngressApplicationAccess
 from env.tool_runtime import results as tool_results
 from env.tool_runtime.registry import dispatch_env_tool_request
 from env_manifest import ManifestError, load_manifest
@@ -217,6 +218,7 @@ def _runtime_server_env(
 def _env_tool_dispatch(
     *,
     params: dict[str, Any],
+    session: RuntimeBrokerSession,
     manifest_path: Path,
     instance_json_path: Path,
     instance_record: dict[str, Any],
@@ -225,6 +227,11 @@ def _env_tool_dispatch(
     actor_id = str(instance_record["actor_id"]).strip()
     active_role = str(instance_record["role"]).strip()
     payload = dict(params)
+    demand_ingress_application = DemandIngressApplicationAccess(
+        runtime_provider=lambda: _demand_triage_runtime_for_session(session),
+        instance_json=instance_json_path,
+        instance_payload=dict(instance_record),
+    )
     return dispatch_env_tool_request(
         payload={
             key: value
@@ -238,6 +245,7 @@ def _env_tool_dispatch(
         manifest=manifest,
         manifest_path=manifest_path,
         invocation=payload.get("invocation"),
+        demand_ingress_application=demand_ingress_application,
     )
 
 
@@ -401,28 +409,6 @@ def _browser_dispatch(
     )
 
 
-def _demand_ingress_resolve_dispatch(
-    *,
-    session: RuntimeBrokerSession,
-    instance_record: dict[str, Any],
-    params: dict[str, Any],
-) -> dict[str, Any]:
-    runtime = _demand_triage_runtime_for_session(session)
-    try:
-        result = runtime.resolve_request(
-            instance_json=session.instance_json_path,
-            instance_record=instance_record,
-            params=params,
-        )
-        return {"ok": True, **result}
-    except runtime.DemandTriageRuntimeError as exc:
-        return _error(
-            exc.code,
-            exc.message,
-            retriable=bool(exc.retriable),
-        )
-
-
 def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSession) -> dict[str, Any]:
     try:
         method_raw = request.get("method")
@@ -482,6 +468,7 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
             if method == "env.tool":
                 return _env_tool_dispatch(
                     params=params,
+                    session=session,
                     manifest_path=session.manifest_path,
                     instance_json_path=session.instance_json_path,
                     instance_record=instance_record,
@@ -490,12 +477,6 @@ def dispatch_runtime_request(request: dict[str, Any], session: RuntimeBrokerSess
                 return _ping_dispatch(session=session, instance_record=instance_record)
             if method == "status":
                 return _status_dispatch(session=session, instance_record=instance_record)
-            if method == "demand.ingress.resolve":
-                return _demand_ingress_resolve_dispatch(
-                    session=session,
-                    instance_record=instance_record,
-                    params=params,
-                )
             if method.startswith("browser."):
                 return _browser_dispatch(
                     method=method,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import stat
@@ -20,6 +21,34 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 
 class TestLauncherBootstrapConfig(ProcessLauncherHarness, unittest.TestCase):
+    def test_parent_codex_config_projects_demand_tools_and_skills_once(self) -> None:
+        actor_environment = importlib.import_module("actor_environment")
+        codex_config = importlib.import_module("codex_config")
+        existing = (
+            actor_environment._BASE_CODEX_CONFIG
+            + """
+
+[mcp_servers.buddyswitch-env]
+command = "/runtime/python"
+args = ["/runtime/env_tool_mcp_server.py"]
+"""
+        )
+
+        rendered = codex_config.patched_config_text(
+            existing,
+            [],
+            profile_mode=True,
+            profile_filesystem_entries={"/": "read"},
+        )
+
+        self.assertIn(
+            'disabled_tools = ["demand_sys__resolve_inbound"]',
+            rendered,
+        )
+        self.assertIn('name = "demand-triage"', rendered)
+        triage_skill = rendered.split('name = "demand-triage"', 1)[1].split("[[", 1)[0]
+        self.assertIn("enabled = false", triage_skill)
+        self.assertNotIn('name = "demand-orchestration"', rendered)
     def test_shared_environment_bootstrap_creates_browser_ttl_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             shared_root = Path(temp_root) / ".codex-buddyswitch"

@@ -7,8 +7,8 @@ description: Reconcile newly terminal Tasks against their latest Demands and fil
 
 This Skill runs only in an independent parent Demand-orchestration turn. It
 owns Actor judgment between the canonical Demand pool and one native-Goal Task
-slot. Task completion is evidence, not Demand completion. One Task per Demand
-is the current constraint; Demand and Task lifecycles remain decoupled.
+slot. Task completion is evidence, not Demand completion. Demand and Task
+lifecycles remain decoupled.
 
 Use native BuddySwitch env MCP tools. Read exact contracts from
 `context.get.tool_catalog`.
@@ -18,21 +18,23 @@ reconciliation after Task creation, and Task Goal work owns Goal completion.
 
 ## Reconcile newly terminal Tasks
 
-For every listed terminal Task:
+For every newly terminal Task:
 
 1. Read the exact Task with `task_sys__get`.
 2. Read its latest canonical Demand with `demand_sys__get`.
 3. Verify actual deliverables and required user-facing delivery through their
    owning products. Task or Goal status alone is not proof.
 4. Use `demand_sys__complete` only when the latest complete need is satisfied
-   by exact durable evidence; use `demand_sys__cancel` only for withdrawal or
-   invalidation; use `demand_sys__revise` only when remaining canonical
-   meaning changed; otherwise deliberately leave the Demand live. Do not
-   automatically complete or cancel a Demand from Task status.
+   by exact durable evidence; otherwise deliberately leave the Demand live.
+   Parent/Main never creates, revises, or cancels a Demand. Do not
+   automatically complete a Demand from Task status.
+5. After all terminal Task judgments, reread every live Demand before deciding
+   whether later work should fill the empty Task slot.
 
 ## Fill the Task slot
 
-1. Read active Tasks with `task_sys__list(status="active")`.
+1. Read active Tasks with `task_sys__list(status="active")` after terminal
+   reconciliation.
 2. If one Task is active, stop. If more than one is active, surface the
    invariant failure and create nothing.
 3. If the slot is empty, call `demand_sys__list(state="live")` and read every
@@ -40,7 +42,7 @@ For every listed terminal Task:
 4. Compare only grounded facts: explicit urgency or deadline, user commitment,
    blocked downstream work, continuity, evidence readiness, and staleness. Do
    not invent priority, deadlines, dependencies, or commitments.
-5. When live Demands exist, select exactly one and state the decisive grounded
+5. When live Demands exist, select at most one and state the decisive grounded
    comparison in `selection_reason`.
 6. Convert that Demand into one Task-sized execution commitment using the
    exact runtime field contract of `task_sys__create`.
@@ -69,9 +71,7 @@ When a Demand's `source_refs` contains `type="im.message.created"`:
    source message_id and content that satisfies the latest Demand.
 4. Task and native Goal completion do not prove delivery. If no matching
    durable reply exists, do not call `demand_sys__complete`; leave the Demand
-   live. When the terminal Task omitted delivery, use `demand_sys__revise` to
-   make the remaining delivery explicit so a new Task can bind the refreshed
-   Demand reference.
+   live so another Task can address the unmet delivery.
 5. A completed IM-origin Demand must cite both the terminal Task and the exact
    reply as evidence. Use an `im.message.reply` evidence ref with `id` equal to
    the reply message id and `key` equal to `reply_to:<source message_id>`.

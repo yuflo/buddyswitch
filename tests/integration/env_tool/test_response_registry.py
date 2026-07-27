@@ -55,13 +55,22 @@ class EnvToolResponseRegistryTests(EnvToolResponseCase):
 
         self._assert_success_contract(full)
         self._assert_success_contract(summary)
-        expected_tool_catalog = tool_catalog.env_tools_description()
-        expected_operation_semantics = tool_catalog.operation_semantics()
         self.assertIn("tool_catalog", full)
         self.assertIn("operation_semantics", full)
-        self.assertEqual(full.get("tool_catalog"), expected_tool_catalog)
-        self.assertEqual(full.get("tool_catalog"), turn_runtime._build_env_tools_desc())
-        self.assertEqual(full.get("operation_semantics"), expected_operation_semantics)
+        demand_catalog = full["tool_catalog"]["demand_sys"]
+        self.assertEqual(
+            set(demand_catalog["operations"]),
+            {"list", "get", "complete"},
+        )
+        self.assertNotIn("resolve_inbound", demand_catalog["action_semantics"])
+        self.assertNotIn("demand_sys.resolve_inbound", full["operation_semantics"])
+        registry_demand = tool_catalog.env_tools_description()["demand_sys"]
+        for action in ("list", "get", "complete"):
+            self.assertEqual(
+                demand_catalog["action_semantics"][action],
+                registry_demand["action_semantics"][action],
+            )
+        self.assertNotEqual(full.get("tool_catalog"), turn_runtime._build_env_tools_desc())
         self.assertNotIn("tool_catalog", summary)
         self.assertNotIn("operation_semantics", summary)
         self.assertEqual(summary.get("tool_affordances"), tool_catalog.compact_tool_affordances())
@@ -136,9 +145,8 @@ class EnvToolResponseRegistryTests(EnvToolResponseCase):
         self.assertEqual(task_compact["object_model"], task["object_model"])
         demand_actions = demand["action_semantics"]
         task_actions = task["action_semantics"]
+        self.assertEqual(set(demand_actions), {"list", "get", "complete"})
         for action, fields in {
-            "create": ("description", "detail"),
-            "revise": ("demand_ref", "description", "detail", "reason"),
             "complete": ("demand_ref", "summary", "evidence_refs"),
         }.items():
             with self.subTest(tool="demand_sys", action=action):

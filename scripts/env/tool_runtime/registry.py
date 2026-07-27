@@ -458,6 +458,7 @@ def dispatch_env_tool_request(
     manifest: dict[str, Any],
     manifest_path: Path | None = None,
     invocation: dict[str, Any] | None = None,
+    demand_ingress_application: Any | None = None,
 ) -> dict[str, Any]:
     runtime_actor = _actor_identity_profile_from_dispatch(actor_id=actor_id, active_role=active_role)
     current_identity = runtime_actor.identity.to_payload()
@@ -605,7 +606,12 @@ def dispatch_env_tool_request(
     if not isinstance(invocation_payload, dict):
         raise ValueError("invocation must be an object")
     normalized_invocation: dict[str, str | None] = {}
-    for field_name in ("thread_id", "turn_id", "request_id"):
+    for field_name in (
+        "thread_id",
+        "turn_id",
+        "request_id",
+        "demand_inbound_capability",
+    ):
         value = invocation_payload.get(field_name)
         if value is not None and (
             not isinstance(value, str) or not value.strip()
@@ -624,6 +630,7 @@ def dispatch_env_tool_request(
         manifest=dict(manifest),
         manifest_path=manifest_path,
         invocation=InvocationFact(**normalized_invocation),
+        demand_ingress_application=demand_ingress_application,
     )
     if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED:
         from env.domain import task_sys

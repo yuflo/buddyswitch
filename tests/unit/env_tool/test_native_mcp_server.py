@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 
 from tests.support.paths import REPO_ROOT
@@ -58,16 +60,30 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         self.assertNotIn("task__get", by_name)
         self.assertNotIn("demand_sys__resolve_ingress", by_name)
         self.assertNotIn("demand_triage__resolve", by_name)
+        self.assertEqual(
+            {name for name in by_name if name.startswith("demand_sys__")},
+            {
+                "demand_sys__list",
+                "demand_sys__get",
+                "demand_sys__resolve_inbound",
+                "demand_sys__complete",
+            },
+        )
         self.assertEqual(by_name["message__get"]["inputSchema"]["type"], "object")
         self.assertEqual(by_name["message__list"]["inputSchema"]["type"], "object")
 
         actor_contracts = {
             "demand_sys__list": {"state"},
             "demand_sys__get": {"demand_id"},
-            "demand_sys__create": {"description", "detail"},
-            "demand_sys__revise": {"demand_ref", "description", "detail", "reason"},
+            "demand_sys__resolve_inbound": {
+                "decision",
+                "reason",
+                "demand_ref",
+                "description",
+                "detail",
+                "reply_content",
+            },
             "demand_sys__complete": {"demand_ref", "summary", "evidence_refs"},
-            "demand_sys__cancel": {"demand_ref", "summary"},
             "task_sys__list": {"status", "limit"},
             "task_sys__get": {"task_id"},
             "task_sys__create": {"demand_ref", "objective", "selection_reason"},
@@ -100,10 +116,14 @@ class EnvNativeMcpServerTests(unittest.TestCase):
                 self.assertEqual(set(schema["properties"]), expected_fields)
                 assert_described(schema, tool_name)
 
-        self.assertIn(
-            "does not create Task work or a native Goal",
-            by_name["demand_sys__create"]["description"],
+        resolver_schema = by_name["demand_sys__resolve_inbound"]["inputSchema"]
+        self.assertEqual(
+            resolver_schema["properties"]["decision"]["enum"],
+            ["no_action_needed", "handled", "create", "merge_intake", "revise", "cancel"],
         )
+        self.assertNotIn("actor_id", resolver_schema["properties"])
+        self.assertNotIn("thread_id", resolver_schema["properties"])
+        self.assertNotIn("capability", resolver_schema["properties"])
         self.assertIn(
             "does not mutate, satisfy, or reprioritize a Demand",
             by_name["task_sys__create"]["description"],
@@ -163,6 +183,55 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         self.assertIs(result.get("isError"), False)
         self.assertEqual(result["content"][0]["type"], "text")
         self.assertEqual(json.loads(result["content"][0]["text"])["rows"], [])
+
+    def test_resolve_inbound_attaches_private_capability_to_host_invocation_only(self) -> None:
+        calls: list[dict[str, Any]] = []
+        proposal = {
+            "decision": "no_action_needed",
+            "reason": "The inbound creates no unmet obligation.",
+            "demand_ref": None,
+            "description": None,
+            "detail": None,
+            "reply_content": None,
+        }
+        with patch.dict(
+            os.environ,
+            {self.server.DEMAND_INBOUND_CAPABILITY_ENV: "host-secret"},
+            clear=False,
+        ):
+            response = self.server.handle_request(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 12,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "demand_sys__resolve_inbound",
+                        "arguments": proposal,
+                        "_meta": {"threadId": "thr-side-1"},
+                    },
+                },
+                dispatcher=lambda **kwargs: calls.append(kwargs)
+                or {"ok": True, "decision": "no_action_needed"},
+            )
+
+        self.assertEqual(calls[0]["args"], proposal)
+        self.assertNotIn("capability", calls[0]["args"])
+        self.assertEqual(
+            calls[0]["invocation"],
+            {
+                "thread_id": "thr-side-1",
+                "request_id": "12",
+                "demand_inbound_capability": "host-secret",
+            },
+        )
+        self.assertFalse(response["result"]["isError"])
+        result = response["result"]
+        self.assertIs(result.get("isError"), False)
+        self.assertEqual(result["content"][0]["type"], "text")
+        self.assertEqual(
+            json.loads(result["content"][0]["text"])["decision"],
+            "no_action_needed",
+        )
 
     def test_tools_call_rejects_unknown_native_name_without_dispatch(self) -> None:
         calls: list[dict[str, Any]] = []

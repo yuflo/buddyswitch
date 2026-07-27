@@ -14,7 +14,9 @@ PERMISSION_PROFILE = "buddyswitch-runtime"
 PERMISSION_PROFILE_PREFIX = f"permissions.{PERMISSION_PROFILE}"
 MANAGED_COMMENT = "# BuddySwitch managed automation permissions"
 MCP_SERVER_PREFIX = "mcp_servers."
+ENV_MCP_SECTION = "mcp_servers.buddyswitch-env"
 MCP_TOOLS_APPROVAL_KEY = "default_tools_approval_mode"
+PARENT_DEMAND_DISABLED_TOOLS = 'disabled_tools = ["demand_sys__resolve_inbound"]\n'
 WEB_SEARCH_KEY = "web_search"
 
 
@@ -299,6 +301,51 @@ def patch_mcp_server_approvals(config_text: str) -> str:
     return "".join(output)
 
 
+def patch_parent_demand_tool_projection(config_text: str) -> str:
+    lines = config_text.splitlines(keepends=True)
+    output: list[str] = []
+    in_env_mcp = False
+    env_mcp_found = False
+    filter_written = False
+
+    def finish_section() -> None:
+        nonlocal filter_written
+        if in_env_mcp and not filter_written:
+            append_mcp_projection(output)
+            filter_written = True
+
+    for line in lines:
+        header = parse_section_header(line)
+        if header is not None:
+            finish_section()
+            in_env_mcp = header == ENV_MCP_SECTION
+            if in_env_mcp:
+                env_mcp_found = True
+                filter_written = False
+            output.append(line)
+            continue
+        if in_env_mcp and top_level_key_assignment(line, "disabled_tools"):
+            if not filter_written:
+                output.append(PARENT_DEMAND_DISABLED_TOOLS)
+                filter_written = True
+            continue
+        output.append(line)
+
+    finish_section()
+    if not env_mcp_found:
+        return config_text
+    return "".join(output)
+
+
+def append_mcp_projection(output: list[str]) -> None:
+    if output and output[-1].strip() == "":
+        trailing_blank = output.pop()
+        output.append(PARENT_DEMAND_DISABLED_TOOLS)
+        output.append(trailing_blank)
+        return
+    output.append(PARENT_DEMAND_DISABLED_TOOLS)
+
+
 def path_contains(container: Path, path: Path) -> bool:
     if container == path:
         return True
@@ -492,7 +539,10 @@ def patched_config_text(
     profile_filesystem_entries: dict[str, str] | None = None,
     unix_sockets: list[Path] | None = None,
 ) -> str:
-    preserved = patch_mcp_server_approvals(strip_managed_sections(existing_text)).rstrip("\n")
+    preserved = strip_managed_sections(existing_text)
+    if profile_mode:
+        preserved = patch_parent_demand_tool_projection(preserved)
+    preserved = patch_mcp_server_approvals(preserved).rstrip("\n")
     managed_top_level = render_managed_permission_top_level_block() if profile_mode else render_managed_top_level_block()
     if profile_mode:
         if profile_filesystem_entries is None:

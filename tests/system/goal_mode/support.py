@@ -19,7 +19,8 @@ import zstandard
 
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import CleanupReport, ResourceLedger
-from tools.launcher import app_server, codex_runtime
+import app_server
+import codex_runtime
 
 
 DEFAULT_TIMEOUT_SECONDS = 20.0

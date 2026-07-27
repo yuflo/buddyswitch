@@ -88,6 +88,7 @@ def _capability_lease(
     instance_json: Path,
     actor_id: str,
     main_thread_id: str,
+    actual_thread_id: str,
     capability_hash: str,
 ) -> dict[str, Any]:
     rows = side_thread_registry.find_side_threads_by_capability_hash(
@@ -121,6 +122,7 @@ def _capability_lease(
         row.get("parent_thread_id") != main_thread_id
         or side_thread_id == main_thread_id
         or row.get("purpose") != PURPOSE
+        or side_thread_id != actual_thread_id
     ):
         raise DemandTriageRuntimeError(
             "E_DEMAND_TRIAGE_AUTHORITY",
@@ -315,26 +317,26 @@ def resolve_request(
     *,
     instance_json: Path,
     instance_record: Mapping[str, Any],
-    params: Mapping[str, Any],
+    capability: Any,
+    actual_thread_id: Any,
+    proposal: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if not isinstance(params, Mapping):
-        raise DemandTriageRuntimeError(
-            "E_DEMAND_TRIAGE_PAYLOAD",
-            "Demand triage request params must be an object",
-        )
-    capability = params.get("capability")
-    proposal = params.get("proposal")
     if not isinstance(proposal, Mapping):
         raise DemandTriageRuntimeError(
             "E_DEMAND_TRIAGE_PAYLOAD",
             "Demand triage proposal must be an object",
         )
+    resolved_thread_id = _required_text(
+        actual_thread_id,
+        "actual_thread_id",
+    )
     capability_hash = hash_capability(capability)
     actor_target, main_thread_id = _instance_identity(instance_record)
     row = _capability_lease(
         instance_json=Path(instance_json),
         actor_id=actor_target["actor_id"],
         main_thread_id=main_thread_id,
+        actual_thread_id=resolved_thread_id,
         capability_hash=capability_hash,
     )
     source_key, attempt_id, receipt = _receipt_binding(
@@ -363,6 +365,9 @@ def resolve_request(
         capability_hash=capability_hash,
     )
     response = dict(result)
+    response["ingress_state_changed"] = bool(result.get("state_changed"))
+    response["state_changed"] = True
+    response["lease_consumed"] = True
     if handled_message_id is not None:
         response["handled_message_id"] = handled_message_id
     return response

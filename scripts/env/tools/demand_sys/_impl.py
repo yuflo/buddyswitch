@@ -1,10 +1,12 @@
-"""Thin six-intent adapter over the Demand Sys domain owner."""
+"""Thin four-action adapter over the Demand Sys application boundary."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Callable
 
+from env.tool_runtime.context import DemandIngressApplicationError
 from env.tool_runtime import results as tool_results
 from .tool import DEFINITION
 
@@ -13,9 +15,6 @@ _ACTION_ALLOWED_FIELDS = {
     action.name: set((action.input_schema.get("properties") or {}).keys())
     for action in DEFINITION.actions
 }
-_READ_ACTIONS = {"list", "get"}
-
-
 def _profile(context: Any) -> Any:
     profile = getattr(context, "current_actor_identity_profile", None)
     if profile is None:
@@ -56,6 +55,24 @@ def _domain(context: Any) -> Any:
     return domain
 
 
+def _task_domain(context: Any) -> Any:
+    domain = getattr(getattr(context, "rules", None), "task_sys", None)
+    if domain is None:
+        raise RuntimeError("Task Sys domain access is unavailable")
+    return domain
+
+
+class _CompletionEvidenceError(ValueError):
+    code = "E_DEMAND_COMPLETION_EVIDENCE"
+
+
+def _demand_ingress_application(context: Any) -> Any:
+    application = getattr(context, "demand_ingress_application", None)
+    if application is None:
+        raise RuntimeError("Demand ingress application access is unavailable")
+    return application
+
+
 def _invocation(context: Any) -> Any:
     invocation = getattr(context, "invocation", None)
     if invocation is None:
@@ -69,6 +86,7 @@ def _rejection(
     context: Any,
     code: str,
     message: str,
+    retryable: bool = True,
     correctable_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     if code == "E_DEMAND_REVISION_CONFLICT":
@@ -87,16 +105,20 @@ def _rejection(
         active_role=_active_role(context),
         code=code,
         message=message,
-        permission_boundary="demand_sys.actor_owned_aggregate",
+        permission_boundary=(
+            "demand_sys.bound_inbound_side_capability"
+            if action == "resolve_inbound"
+            else "demand_sys.actor_owned_aggregate"
+        ),
         human_summary="Demand Sys rejected the requested intent.",
         why_blocked=message,
         impact="No Demand, Task, daemon, or inbound state was changed.",
         state_changed=False,
-        retryable=True,
+        retryable=retryable,
         retry_guidance=guidance,
         allowed_next_actions=[
             "Use demand_sys.list to inspect the canonical Demand pool.",
-            "Use demand_sys.get before mutating one selected Demand.",
+            "Use demand_sys.get before completing one selected Demand.",
         ],
         correctable_fields=list(correctable_fields or []),
     )
@@ -159,8 +181,8 @@ def _read_success(
         durability="none",
         read_scope="active actor Demand aggregate",
         allowed_next_actions=[
-            "Use demand_sys.get to reread one selected Demand before mutation.",
-            "Use create, revise, complete, or cancel only for the matching actor intent.",
+            "Use demand_sys.get to reread one selected Demand.",
+            "Use demand_sys.complete only after its terminal Task evidence is verified.",
         ],
         extra=extra,
     )
@@ -202,40 +224,68 @@ def _write_success(
         }
     }
     state_changed = bool(receipt.get("state_changed"))
+    if action == "resolve_inbound":
+        if bool(receipt.get("ingress_state_changed")):
+            state_changes.append(
+                {
+                    "object": "demand_sys.ingress_receipt",
+                    "id": receipt.get("source_key"),
+                    "kind": (
+                        "pending"
+                        if receipt.get("retry_required") is True
+                        else "settled"
+                    ),
+                }
+            )
+        if receipt.get("demand_changed") is True:
+            demand_id = receipt.get("demand_id")
+            decision = str(receipt.get("decision") or "updated")
+            state_changes.append(
+                {
+                    "object": "demand_sys.demand",
+                    "id": demand_id,
+                    "kind": "created" if decision == "create" else decision,
+                }
+            )
+            if decision == "create" and isinstance(demand_id, str):
+                created_ids.append(demand_id)
+            elif isinstance(demand_id, str):
+                updated_ids.append(demand_id)
+        if isinstance(receipt.get("handled_message_id"), str):
+            state_changes.append(
+                {
+                    "object": "message.im",
+                    "id": receipt["handled_message_id"],
+                    "kind": "created",
+                }
+            )
+        if receipt.get("lease_consumed") is True:
+            state_changes.append(
+                {
+                    "object": "actor.side_thread_capability",
+                    "id": getattr(_invocation(context), "thread_id", None),
+                    "kind": "consumed",
+                }
+            )
     changed_effects = {
-        "create": (
-            "Created one live canonical Demand and returned its current demand_ref. "
-            "No Task or native Goal was created."
-        ),
-        "revise": (
-            "Replaced the live Demand's canonical meaning and returned its refreshed "
-            "demand_ref. No Task or native Goal was changed."
+        "resolve_inbound": (
+            "Committed the bound inbound resolution and consumed its one-shot side "
+            "capability. Any Demand or Message effect is reported in state_changes. "
+            "No Task or native Goal was changed."
         ),
         "complete": (
             "Terminalized the Demand as completed with the supplied summary and "
             "evidence references. No Task or native Goal was changed."
         ),
-        "cancel": (
-            "Terminalized the Demand as canceled with the supplied reason. "
-            "No Task or native Goal was changed."
-        ),
     }
     replay_effects = {
-        "create": (
-            "The same Demand creation already exists; no new Demand or mutation "
-            "occurred. No Task or native Goal was created."
-        ),
-        "revise": (
-            "The Demand already has the supplied canonical meaning; no new mutation "
-            "occurred. No Task or native Goal was changed."
+        "resolve_inbound": (
+            "The bound inbound resolution was already durable; the one-shot side "
+            "capability was consumed without duplicating a Demand or Message effect."
         ),
         "complete": (
             "The Demand was already completed with the same summary and evidence "
             "references; no new mutation occurred. No Task or native Goal was changed."
-        ),
-        "cancel": (
-            "The Demand was already canceled with the same reason; no new mutation "
-            "occurred. No Task or native Goal was changed."
         ),
     }
     effect_summary = (
@@ -248,10 +298,10 @@ def _write_success(
             "Use demand_sys.get to observe the exact current terminal Demand.",
             "Do not submit this terminal Demand for new Task selection.",
         ]
-        if action in {"complete", "cancel"}
+        if action == "complete"
         else [
-            "Use demand_sys.get to observe the exact current Demand and refreshed demand_ref.",
-            "Allow demand-orchestration to compare live Demands and fill an empty Task slot.",
+            "Use demand_sys.list and demand_sys.get to observe the resulting Demand pool.",
+            "Return control to the Parent after the bound inbound receipt is settled.",
         ]
     )
     return tool_results.success(
@@ -270,8 +320,81 @@ def _write_success(
     )
 
 
+def _completion_task_ids(evidence_refs: Any) -> list[str]:
+    if not isinstance(evidence_refs, list):
+        raise _CompletionEvidenceError(
+            "Demand completion evidence_refs must be a list"
+        )
+    task_ids: list[str] = []
+    has_delivery_evidence = False
+    for row in evidence_refs:
+        if not isinstance(row, Mapping):
+            continue
+        evidence_type = row.get("type")
+        ref = row.get("ref")
+        if evidence_type == "task_sys.task":
+            task_id = ref.get("task_id") if isinstance(ref, Mapping) else None
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise _CompletionEvidenceError(
+                    "task_sys.task evidence requires ref.task_id"
+                )
+            task_ids.append(task_id.strip())
+            continue
+        if evidence_type == "artifact" and isinstance(ref, Mapping):
+            artifact_id = ref.get("id")
+            has_delivery_evidence = (
+                isinstance(artifact_id, str) and bool(artifact_id.strip())
+            ) or has_delivery_evidence
+        elif evidence_type == "im.message.reply" and isinstance(ref, Mapping):
+            message_id = ref.get("id")
+            reply_key = ref.get("key")
+            has_delivery_evidence = (
+                isinstance(message_id, str)
+                and bool(message_id.strip())
+                and isinstance(reply_key, str)
+                and bool(reply_key.strip())
+            ) or has_delivery_evidence
+    if not task_ids:
+        raise _CompletionEvidenceError(
+            "Demand completion requires completed Task evidence"
+        )
+    if not has_delivery_evidence:
+        raise _CompletionEvidenceError(
+            "Demand completion requires durable delivery evidence in addition "
+            "to Task status"
+        )
+    return list(dict.fromkeys(task_ids))
+
+
+def _complete(
+    *,
+    domain: Any,
+    task_domain: Any,
+    target: dict[str, str],
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    task_ids = _completion_task_ids(args.get("evidence_refs"))
+    resolved = domain.resolve_demand_ref(
+        actor_target=target,
+        demand_ref=args.get("demand_ref"),
+    )
+    for task_id in task_ids:
+        task_domain.require_completed_task_for_demand(
+            task_id=task_id,
+            actor_target=target,
+            demand_id=resolved["demand_id"],
+        )
+    return domain.complete(
+        target,
+        args.get("demand_ref"),
+        args.get("summary"),
+        args.get("evidence_refs"),
+    )
+
+
 def _handlers(
     domain: Any,
+    task_domain: Any,
     target: dict[str, str],
     context: Any,
 ) -> dict[str, Callable[[dict[str, Any]], Any]]:
@@ -281,42 +404,18 @@ def _handlers(
             target, args.get("state") or "live"
         ),
         "get": lambda args: domain.get(target, args.get("demand_id")),
-        "create": lambda args: domain.create(
-            target,
-            domain.actor_creation_key(
-                target,
-                thread_id=invocation.thread_id,
-                turn_id=invocation.turn_id,
-                description=args.get("description"),
-                detail=args.get("detail"),
-            ),
-            args.get("description"),
-            args.get("detail"),
-            [{
-                "type": "actor.self_requested",
-                "ref": {
-                    "thread_id": invocation.thread_id,
-                    "turn_id": invocation.turn_id,
-                },
-            }],
+        "resolve_inbound": lambda args: (
+            _demand_ingress_application(context).resolve_inbound(
+                proposal=args,
+                capability=invocation.demand_inbound_capability,
+                actual_thread_id=invocation.thread_id,
+            )
         ),
-        "revise": lambda args: domain.revise(
-            target,
-            args.get("demand_ref"),
-            args.get("description"),
-            args.get("detail"),
-            args.get("reason"),
-        ),
-        "complete": lambda args: domain.complete(
-            target,
-            args.get("demand_ref"),
-            args.get("summary"),
-            args.get("evidence_refs"),
-        ),
-        "cancel": lambda args: domain.cancel(
-            target,
-            args.get("demand_ref"),
-            args.get("summary"),
+        "complete": lambda args: _complete(
+            domain=domain,
+            task_domain=task_domain,
+            target=target,
+            args=args,
         ),
     }
 
@@ -326,11 +425,39 @@ def invoke(*, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]
     if rejection is not None:
         return rejection
     domain = _domain(context)
-    handler = _handlers(domain, _actor_target(context), context).get(action)
+    task_domain = _task_domain(context)
+    handler = _handlers(
+        domain,
+        task_domain,
+        _actor_target(context),
+        context,
+    ).get(action)
     if handler is None:
         raise ValueError(f"unsupported action: {action}")
     try:
         result = handler(args)
+    except _CompletionEvidenceError as exc:
+        return _rejection(
+            action=action,
+            context=context,
+            code=exc.code,
+            message=str(exc),
+        )
+    except DemandIngressApplicationError as exc:
+        return _rejection(
+            action=action,
+            context=context,
+            code=exc.code,
+            message=exc.message,
+            retryable=exc.retriable,
+        )
+    except task_domain.TaskCompletionEvidenceError as exc:
+        return _rejection(
+            action=action,
+            context=context,
+            code="E_DEMAND_COMPLETION_TASK",
+            message=str(exc),
+        )
     except domain.DemandError as exc:
         return _rejection(
             action=action,

@@ -14,7 +14,7 @@ directly, or defer judgment to another thread.
 
 The ordinary tools on this side are intentionally limited to
 `demand_sys__list`, `demand_sys__get`, `message__get`, and
-`message__conversation`.
+`message__conversation`; the only write is `demand_sys__resolve_inbound`.
 
 ## Judge one inbound
 
@@ -72,8 +72,8 @@ The ordinary tools on this side are intentionally limited to
    evidence rather than restating the chosen enum. Construct the complete
    post-resolution canonical description and detail using the exact runtime
    field descriptions for
-   `demand_triage.resolve`.
-9. Call `demand_triage.resolve` exactly once and follow stale-reference
+   `demand_sys__resolve_inbound`.
+9. Call `demand_sys__resolve_inbound` exactly once and follow stale-reference
    feedback. Do not return an uncommitted proposal.
 
 ## Counterexamples

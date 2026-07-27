@@ -42,6 +42,19 @@ The instance composition currently registers, among other owners:
 These modules may import product domains and App Server adapters. Generic
 daemon modules may not.
 
+Demand inbound resolution illustrates the transport boundary:
+
+```text
+isolated Side -> unified buddyswitch-env MCP -> env.tool
+  -> Demand adapter -> narrow host-composed ingress application
+  -> product-owned authority validation + Demand domain
+```
+
+The generic environment dispatcher composes that narrow application lazily
+from the active instance facts. It does not interpret a Demand proposal or
+choose a transition. There is no dedicated Demand transport, special broker
+method, or daemon application command for inbound resolution.
+
 `TaskGoalHandler` illustrates the boundary precisely:
 
 ```text
@@ -95,7 +108,7 @@ Allowed:
 product handler -> daemon contracts/runtime
 product handler -> product domain or App Server adapter
 instance_daemon -> daemon core + concrete product handlers
-product tool -> narrow application-command capability
+product tool -> narrow host-composed application capability
 ```
 
 Forbidden:

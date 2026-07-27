@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import uuid
 
 from env.domain import artifact_relations as _artifact_relations_domain
@@ -408,6 +408,60 @@ class TaskGoalRuntimeAccess:
         )
 
 
+class DemandIngressApplicationError(RuntimeError):
+    """Stable env.tool-facing failure from the Demand ingress application."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retriable: bool,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retriable = retriable
+
+
+class DemandIngressApplicationAccess:
+    """Narrow host-composed access to the Demand ingress operation."""
+
+    def __init__(
+        self,
+        *,
+        runtime_provider: Callable[[], Any],
+        instance_json: Path,
+        instance_payload: dict[str, Any],
+    ) -> None:
+        self._runtime_provider = runtime_provider
+        self._instance_json = instance_json
+        self._instance_payload = instance_payload
+
+    def resolve_inbound(
+        self,
+        *,
+        proposal: dict[str, Any],
+        capability: str | None,
+        actual_thread_id: str | None,
+    ) -> dict[str, Any]:
+        runtime = self._runtime_provider()
+        try:
+            return runtime.resolve_request(
+                instance_json=self._instance_json,
+                instance_record=self._instance_payload,
+                capability=capability,
+                actual_thread_id=actual_thread_id,
+                proposal=proposal,
+            )
+        except runtime.DemandTriageRuntimeError as exc:
+            raise DemandIngressApplicationError(
+                str(exc.code),
+                str(exc.message),
+                retriable=bool(exc.retriable),
+            ) from exc
+
+
 @dataclass(frozen=True)
 class DomainAccess:
     """Host-owned domain validator/normalizer access."""
@@ -441,6 +495,7 @@ class InvocationFact:
     thread_id: str | None = None
     turn_id: str | None = None
     request_id: str | None = None
+    demand_inbound_capability: str | None = None
 
 
 @dataclass(frozen=True)
@@ -455,6 +510,7 @@ class ToolContext(Mapping[str, Any]):
     manifest: dict[str, Any]
     manifest_path: Path | None = None
     invocation: InvocationFact = field(default_factory=InvocationFact)
+    demand_ingress_application: DemandIngressApplicationAccess | None = None
     objects: RuntimeObjectAccess = field(default_factory=RuntimeObjectAccess)
     catalog: RegistryCatalogAccess = field(default_factory=RegistryCatalogAccess)
     rules: DomainAccess = field(default_factory=DomainAccess)
@@ -514,6 +570,7 @@ class ToolContext(Mapping[str, Any]):
         manifest: dict[str, Any],
         manifest_path: Path | None = None,
         invocation: InvocationFact | None = None,
+        demand_ingress_application: DemandIngressApplicationAccess | None = None,
     ) -> "ToolContext":
         return cls(
             current_identity=actor_identity_profile.identity,
@@ -524,6 +581,7 @@ class ToolContext(Mapping[str, Any]):
             manifest=manifest,
             manifest_path=manifest_path,
             invocation=invocation or InvocationFact(),
+            demand_ingress_application=demand_ingress_application,
         )
 
     @property

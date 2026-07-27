@@ -65,19 +65,19 @@ class DemandIngressResolutionTests(RuntimeWorkspaceTestCase):
             "reply_content": reply_content,
         }
 
-    def _create_actor_demand(self, label: str) -> dict[str, Any]:
-        created = demand_sys.create(
+    def _create_ingress_demand(self, label: str) -> dict[str, Any]:
+        attempt_id = self._begin(label)
+        created = demand_sys.resolve_ingress(
             self.actor_target,
-            f"actor-create:{label}",
-            f"Demand {label}.",
-            f"Detailed requirement for {label}.",
-            [{
-                "type": "actor.self_requested",
-                "ref": {
-                    "thread_id": "thr-main",
-                    "turn_id": f"turn-{label}",
-                },
-            }],
+            f"im.message.created:msg-{label}",
+            attempt_id,
+            self._proposal(
+                "create",
+                reason="This inbound creates one independent unmet need.",
+                description=f"Demand {label}.",
+                detail=f"Detailed requirement for {label}.",
+            ),
+            handled_verified=False,
         )
         return demand_sys.get(self.actor_target, created["demand_id"])
 
@@ -87,12 +87,11 @@ class DemandIngressResolutionTests(RuntimeWorkspaceTestCase):
         self.assertEqual(
             state,
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "actor_target": self.actor_target,
                 "demands": {},
                 "demand_pool_revision": 0,
                 "ingress_receipts": {},
-                "actor_creation_receipts": {},
             },
         )
         self.assertNotIn("intakes", state)
@@ -340,19 +339,26 @@ class DemandIngressResolutionTests(RuntimeWorkspaceTestCase):
         self.assertEqual(handled["demand_pool_revision"], 0)
         self.assertEqual(demand_sys.list_demands(self.actor_target), [])
 
-    def test_direct_actor_demand_mutations_increment_pool_revision(self) -> None:
-        first = self._create_actor_demand("first")
+    def test_shared_ingress_and_completion_mutations_increment_pool_revision_once(self) -> None:
+        first = self._create_ingress_demand("first")
         self.assertEqual(
             demands.load_actor_state(self.actor_target)["demand_pool_revision"],
             1,
         )
 
-        revised = demand_sys.revise(
+        revise_attempt = self._begin("first-revise")
+        revised = demand_sys.resolve_ingress(
             self.actor_target,
-            first["demand_ref"],
-            "Demand first revised.",
-            "The revised canonical requirement.",
-            "Scope changed.",
+            "im.message.created:msg-first-revise",
+            revise_attempt,
+            self._proposal(
+                "revise",
+                reason="Scope changed.",
+                demand_ref=first["demand_ref"],
+                description="Demand first revised.",
+                detail="The revised canonical requirement.",
+            ),
+            handled_verified=False,
         )
         self.assertEqual(revised["demand_pool_revision"], 2)
 
@@ -364,20 +370,27 @@ class DemandIngressResolutionTests(RuntimeWorkspaceTestCase):
         )
         self.assertEqual(completed["demand_pool_revision"], 3)
 
-        second = self._create_actor_demand("second")
+        second = self._create_ingress_demand("second")
         self.assertEqual(
             demands.load_actor_state(self.actor_target)["demand_pool_revision"],
             4,
         )
-        canceled = demand_sys.cancel(
+        cancel_attempt = self._begin("second-cancel")
+        canceled = demand_sys.resolve_ingress(
             self.actor_target,
-            second["demand_ref"],
-            "The requester withdrew this need.",
+            "im.message.created:msg-second-cancel",
+            cancel_attempt,
+            self._proposal(
+                "cancel",
+                reason="The requester withdrew this need.",
+                demand_ref=second["demand_ref"],
+            ),
+            handled_verified=False,
         )
         self.assertEqual(canceled["demand_pool_revision"], 5)
 
     def test_merge_revise_and_cancel_apply_against_current_opaque_refs(self) -> None:
-        merge_target = self._create_actor_demand("merge-target")
+        merge_target = self._create_ingress_demand("merge-target")
         merge_attempt = self._begin("merge")
         merged = demand_sys.resolve_ingress(
             self.actor_target,
@@ -435,14 +448,21 @@ class DemandIngressResolutionTests(RuntimeWorkspaceTestCase):
         self.assertEqual(terminal["summary"], canceled["reason"])
 
     def test_stale_target_ref_retries_receipt_without_partial_demand_write(self) -> None:
-        target = self._create_actor_demand("stale")
+        target = self._create_ingress_demand("stale-target")
         attempt_id = self._begin("stale")
-        demand_sys.revise(
+        concurrent_attempt = self._begin("stale-concurrent")
+        demand_sys.resolve_ingress(
             self.actor_target,
-            target["demand_ref"],
-            "Concurrent current description.",
-            "Concurrent current detail.",
-            "Another turn changed this Demand.",
+            "im.message.created:msg-stale-concurrent",
+            concurrent_attempt,
+            self._proposal(
+                "revise",
+                reason="Another inbound changed this Demand.",
+                demand_ref=target["demand_ref"],
+                description="Concurrent current description.",
+                detail="Concurrent current detail.",
+            ),
+            handled_verified=False,
         )
         current_before = demand_sys.get(self.actor_target, target["id"])
 

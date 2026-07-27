@@ -347,13 +347,15 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 "mcp_servers.buddyswitch-env.enabled_tools": [
                     "demand_sys__list",
                     "demand_sys__get",
+                    "message__get",
+                    "message__conversation",
+                    "demand_sys__resolve_inbound",
                 ],
-                "mcp_servers.buddyswitch-demand-triage": {
-                    "command": "/usr/bin/python3",
-                    "env": {
-                        "BUDDYSWITCH_DEMAND_TRIAGE_CAPABILITY": "raw-secret",
-                    },
-                },
+                "mcp_servers.buddyswitch-env.disabled_tools": [],
+                "skills.config": [
+                    {"name": "demand-triage", "enabled": True},
+                    {"name": "demand-orchestration", "enabled": False},
+                ],
             }
 
             def assert_capability_lease_is_visible() -> None:
@@ -394,7 +396,7 @@ class SideThreadLifecycleContractTests(unittest.TestCase):
                 config_overrides,
             )
             persisted = instance_json.read_text(encoding="utf-8")
-            self.assertNotIn("raw-secret", persisted)
+            self.assertNotIn("demand_sys__complete", persisted)
 
     def test_start_side_thread_accepts_lease_consumed_before_turn_start_returns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

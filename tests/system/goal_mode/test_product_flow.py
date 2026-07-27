@@ -28,17 +28,28 @@ from tests.system.goal_mode.support import (
     response_completed,
     response_created,
 )
-from tools.launcher import app_server, codex_runtime, daemon_core
+import app_server
+import codex_runtime
+import daemon_core
 
 
 LAUNCHER = REPO_ROOT / "buddyswitch-codex"
 TIMEOUT_SECONDS = 60.0
+MULTI_DEMAND_PAUSE_SECONDS = 180.0
 POLL_SECONDS = 0.05
 REQUEST_TEXT = (
     "Reply with exactly: Phase 2 native Goal delivery verified. "
     "Treat this as one bounded need and finish it through the managed Task."
 )
 REPLY_TEXT = "Phase 2 native Goal delivery verified."
+SUPPLEMENT_TEXT = (
+    "Supplement the existing Phase 2 need: the durable reply must also confirm "
+    "the exact originating message binding."
+)
+DEMAND_B_TEXT = "Independently deliver a short follow-up verification checklist."
+ORDINARY_TEXT = "Thanks, no additional work is needed from this acknowledgement."
+DEMAND_C_TEXT = "Independently prepare a temporary rollback note."
+CANCEL_C_TEXT = "Withdraw the temporary rollback-note need completely."
 
 
 def _task_objective(message_id: str) -> str:
@@ -50,6 +61,13 @@ def _task_objective(message_id: str) -> str:
         "Only after that durable user-facing delivery is verified, call native "
         "update_goal with status complete. Do not reconcile the Demand or select "
         "later work."
+    )
+
+
+def _later_task_objective() -> str:
+    return (
+        "Deliver the independent follow-up verification checklist with durable "
+        "evidence. Do not reconcile any Demand or select later work."
     )
 
 
@@ -124,7 +142,10 @@ class ProductFlowController:
         self.allow_goal_delivery = threading.Event()
         self.reply_pause_reached = threading.Event()
         self.allow_goal_complete = threading.Event()
-        self.flow_finished = threading.Event()
+        self.reconciliation_pause_reached = threading.Event()
+        self.allow_reconciliation = threading.Event()
+        self.later_goal_pause_reached = threading.Event()
+        self.allow_later_goal_turn = threading.Event()
         self.failed = threading.Event()
         self.failure: str | None = None
         self.trace: list[dict[str, Any]] = []
@@ -216,7 +237,7 @@ class ProductFlowController:
         self.failed.set()
         raise AssertionError(message)
 
-    def _demand(self) -> dict[str, Any]:
+    def _demands(self) -> list[dict[str, Any]]:
         candidates = sorted(
             (
                 self.state_root
@@ -230,9 +251,87 @@ class ProductFlowController:
             raise AssertionError(f"expected one Demand aggregate, observed={candidates!r}")
         aggregate = json.loads(candidates[0].read_text(encoding="utf-8"))
         demands = aggregate.get("demands")
-        if not isinstance(demands, dict) or len(demands) != 1:
-            raise AssertionError(f"expected one Demand, observed={demands!r}")
-        return dict(next(iter(demands.values())))
+        if not isinstance(demands, dict):
+            raise AssertionError(f"expected Demand records, observed={demands!r}")
+        return [dict(row) for row in demands.values() if isinstance(row, dict)]
+
+    def _demand(self, description_fragment: str) -> dict[str, Any]:
+        matches = [
+            row
+            for row in self._demands()
+            if description_fragment.lower()
+            in str(row.get("description", "")).lower()
+        ]
+        if len(matches) != 1:
+            raise AssertionError(
+                f"expected one Demand containing {description_fragment!r}, "
+                f"observed={self._demands()!r}"
+            )
+        return matches[0]
+
+    def _assert_side_surface(self, request_record: dict[str, Any]) -> None:
+        visible = self._model_visible_input(request_record)
+        names = self._tool_names(request_record)
+        if (
+            "<name>demand-triage</name>" not in visible
+            or "demand_sys__resolve_inbound" not in visible
+            or "exec" not in names
+            or any(
+                forbidden in name
+                for name in names
+                for forbidden in (
+                    "demand_sys__complete",
+                    "task_sys__create",
+                    "task_sys__cancel",
+                )
+            )
+        ):
+            raise AssertionError(
+                "Demand side did not receive the exact triage Skill/tool surface: "
+                f"tools={names!r} visible={visible!r}"
+            )
+
+    def _assert_parent_surface(self, request_record: dict[str, Any]) -> None:
+        visible = self._model_visible_input(request_record)
+        names = self._tool_names(request_record)
+        if (
+            "<name>demand-orchestration</name>" not in visible
+            or "exec" not in names
+            or any("demand_sys__resolve_inbound" in name for name in names)
+            or any(
+                forbidden in name
+                for name in names
+                for forbidden in (
+                    "demand_sys__create",
+                    "demand_sys__revise",
+                    "demand_sys__cancel",
+                )
+            )
+        ):
+            raise AssertionError(
+                "Parent did not receive the exact orchestration Skill/tool surface: "
+                f"tools={names!r} visible={visible!r}"
+            )
+
+    def _assert_goal_surface(self, request_record: dict[str, Any]) -> None:
+        names = self._tool_names(request_record)
+        if (
+            "exec" not in names
+            or any(
+                forbidden in name
+                for name in names
+                for forbidden in (
+                    "demand_sys__resolve_inbound",
+                    "demand_sys__create",
+                    "demand_sys__revise",
+                    "demand_sys__cancel",
+                )
+            )
+        ):
+            raise AssertionError(
+                "Goal request exposed a Demand creation/change/cancel path: "
+                f"tools={names!r}"
+            )
 
     def _task(self) -> dict[str, Any]:
         candidates = sorted(
@@ -283,24 +382,15 @@ class ProductFlowController:
         if stage == 0:
             return _assistant_response(response_id, "Actor bootstrap complete.")
         if stage == 1:
-            visible = self._model_visible_input(request_record)
-            if (
-                "<name>demand-triage</name>" not in visible
-                or "acceptance unit" not in visible.lower()
-                or "demand_triage.resolve" not in visible
-            ):
-                raise AssertionError(
-                    "selected demand-triage Skill was not injected before "
-                    "triage sampling"
-                )
+            self._assert_side_surface(request_record)
             # This controller authors a deterministic decision to prove the
             # product plumbing. It does not prove real-model semantic
             # classification.
             return self._invoke(
                 request_record,
                 response_id,
-                tool_name="resolve",
-                namespace="mcp__buddyswitch_demand_triage",
+                tool_name="demand_sys__resolve_inbound",
+                namespace="mcp__buddyswitch_env",
                 arguments={
                     "decision": "create",
                     "reason": "The Web request declares one independent bounded need.",
@@ -311,8 +401,10 @@ class ProductFlowController:
                 },
             )
         if stage == 2:
+            self._assert_side_surface(request_record)
             return _assistant_response(response_id, "Demand ingress committed.")
         if stage == 3:
+            self._assert_parent_surface(request_record)
             return self._invoke(
                 request_record,
                 response_id,
@@ -321,6 +413,7 @@ class ProductFlowController:
                 arguments={"status": "terminal"},
             )
         if stage == 4:
+            self._assert_parent_surface(request_record)
             return self._invoke(
                 request_record,
                 response_id,
@@ -329,6 +422,7 @@ class ProductFlowController:
                 arguments={"status": "active"},
             )
         if stage == 5:
+            self._assert_parent_surface(request_record)
             return self._invoke(
                 request_record,
                 response_id,
@@ -337,7 +431,8 @@ class ProductFlowController:
                 arguments={"state": "live"},
             )
         if stage == 6:
-            demand = self._demand()
+            self._assert_parent_surface(request_record)
+            demand = self._demand("Phase 2")
             return self._invoke(
                 request_record,
                 response_id,
@@ -346,7 +441,8 @@ class ProductFlowController:
                 arguments={"demand_id": demand["id"]},
             )
         if stage == 7:
-            demand = self._demand()
+            self._assert_parent_surface(request_record)
+            demand = self._demand("Phase 2")
             if self.original_message_id is None:
                 return ResponseSpec.server_error(
                     "originating Web message id was not captured"
@@ -368,15 +464,18 @@ class ProductFlowController:
                 },
             )
         if stage == 8:
+            self._assert_parent_surface(request_record)
             return _assistant_response(response_id, "The native Goal now owns execution.")
         if stage == 9:
+            self._assert_goal_surface(request_record)
             return _assistant_response(
                 response_id,
                 "The reply has not been delivered yet, so the Goal remains active.",
             )
         if stage == 10:
+            self._assert_goal_surface(request_record)
             self.goal_pause_reached.set()
-            if not self.allow_goal_delivery.wait(TIMEOUT_SECONDS):
+            if not self.allow_goal_delivery.wait(MULTI_DEMAND_PAUSE_SECONDS):
                 return ResponseSpec.server_error("test did not release Goal delivery")
             if self.original_message_id is None:
                 return ResponseSpec.server_error("originating Web message id was not captured")
@@ -391,6 +490,113 @@ class ProductFlowController:
                 },
             )
         if stage == 11:
+            self._assert_side_surface(request_record)
+            demand = self._demand("Phase 2")
+            return self._invoke(
+                request_record,
+                response_id,
+                tool_name="demand_sys__resolve_inbound",
+                namespace="mcp__buddyswitch_env",
+                arguments={
+                    "decision": "merge_intake",
+                    "reason": "This supplement tightens the same delivery obligation.",
+                    "demand_ref": _encode_demand_ref(
+                        str(demand["id"]),
+                        int(demand["revision"]),
+                    ),
+                    "description": (
+                        "Return the Phase 2 native Goal verification reply with exact "
+                        "originating-message binding."
+                    ),
+                    "detail": f"{REQUEST_TEXT} {SUPPLEMENT_TEXT}",
+                    "reply_content": None,
+                },
+            )
+        if stage == 12:
+            self._assert_side_surface(request_record)
+            return _assistant_response(response_id, "Demand A supplement merged.")
+        if stage == 13:
+            self._assert_side_surface(request_record)
+            return self._invoke(
+                request_record,
+                response_id,
+                tool_name="demand_sys__resolve_inbound",
+                namespace="mcp__buddyswitch_env",
+                arguments={
+                    "decision": "create",
+                    "reason": "This is an independent follow-up obligation.",
+                    "demand_ref": None,
+                    "description": "Deliver an independent follow-up verification checklist.",
+                    "detail": DEMAND_B_TEXT,
+                    "reply_content": None,
+                },
+            )
+        if stage == 14:
+            self._assert_side_surface(request_record)
+            return _assistant_response(response_id, "Independent Demand B committed.")
+        if stage == 15:
+            self._assert_side_surface(request_record)
+            return self._invoke(
+                request_record,
+                response_id,
+                tool_name="demand_sys__resolve_inbound",
+                namespace="mcp__buddyswitch_env",
+                arguments={
+                    "decision": "no_action_needed",
+                    "reason": "This acknowledgement creates no unmet obligation.",
+                    "demand_ref": None,
+                    "description": None,
+                    "detail": None,
+                    "reply_content": None,
+                },
+            )
+        if stage == 16:
+            self._assert_side_surface(request_record)
+            return _assistant_response(response_id, "Ordinary inbound settled.")
+        if stage == 17:
+            self._assert_side_surface(request_record)
+            return self._invoke(
+                request_record,
+                response_id,
+                tool_name="demand_sys__resolve_inbound",
+                namespace="mcp__buddyswitch_env",
+                arguments={
+                    "decision": "create",
+                    "reason": "This is a temporary independent obligation.",
+                    "demand_ref": None,
+                    "description": "Prepare a temporary rollback note.",
+                    "detail": DEMAND_C_TEXT,
+                    "reply_content": None,
+                },
+            )
+        if stage == 18:
+            self._assert_side_surface(request_record)
+            return _assistant_response(response_id, "Temporary Demand C committed.")
+        if stage == 19:
+            self._assert_side_surface(request_record)
+            demand = self._demand("temporary rollback")
+            return self._invoke(
+                request_record,
+                response_id,
+                tool_name="demand_sys__resolve_inbound",
+                namespace="mcp__buddyswitch_env",
+                arguments={
+                    "decision": "cancel",
+                    "reason": "The requester explicitly withdrew this temporary need.",
+                    "demand_ref": _encode_demand_ref(
+                        str(demand["id"]),
+                        int(demand["revision"]),
+                    ),
+                    "description": None,
+                    "detail": None,
+                    "reply_content": None,
+                },
+            )
+        if stage == 20:
+            self._assert_side_surface(request_record)
+            return _assistant_response(response_id, "Demand C canceled.")
+        if stage == 21:
+            self._assert_goal_surface(request_record)
             reply = self._reply()
             return self._invoke(
                 request_record,
@@ -399,7 +605,8 @@ class ProductFlowController:
                 namespace="mcp__buddyswitch_env",
                 arguments={"message_id": reply["id"]},
             )
-        if stage == 12:
+        if stage == 22:
+            self._assert_goal_surface(request_record)
             self.reply_pause_reached.set()
             if not self.allow_goal_complete.wait(TIMEOUT_SECONDS):
                 return ResponseSpec.server_error("test did not release Goal completion")
@@ -409,9 +616,16 @@ class ProductFlowController:
                 tool_name="update_goal",
                 arguments={"status": "complete"},
             )
-        if stage == 13:
+        if stage == 23:
+            self._assert_goal_surface(request_record)
             return _assistant_response(response_id, "Delivery and native Goal are complete.")
-        if stage == 14:
+        if stage == 24:
+            self._assert_parent_surface(request_record)
+            self.reconciliation_pause_reached.set()
+            if not self.allow_reconciliation.wait(TIMEOUT_SECONDS):
+                return ResponseSpec.server_error(
+                    "test did not release Demand reconciliation"
+                )
             return self._invoke(
                 request_record,
                 response_id,
@@ -419,7 +633,8 @@ class ProductFlowController:
                 namespace="mcp__buddyswitch_env",
                 arguments={"status": "terminal"},
             )
-        if stage == 15:
+        if stage == 25:
+            self._assert_parent_surface(request_record)
             task = self._task()
             return self._invoke(
                 request_record,
@@ -428,8 +643,9 @@ class ProductFlowController:
                 namespace="mcp__buddyswitch_env",
                 arguments={"task_id": task["id"]},
             )
-        if stage == 16:
-            demand = self._demand()
+        if stage == 26:
+            self._assert_parent_surface(request_record)
+            demand = self._demand("Phase 2")
             return self._invoke(
                 request_record,
                 response_id,
@@ -437,7 +653,8 @@ class ProductFlowController:
                 namespace="mcp__buddyswitch_env",
                 arguments={"demand_id": demand["id"]},
             )
-        if stage == 17:
+        if stage == 27:
+            self._assert_parent_surface(request_record)
             reply = self._reply()
             return self._invoke(
                 request_record,
@@ -446,8 +663,9 @@ class ProductFlowController:
                 namespace="mcp__buddyswitch_env",
                 arguments={"message_id": reply["id"]},
             )
-        if stage == 18:
-            demand = self._demand()
+        if stage == 28:
+            self._assert_parent_surface(request_record)
+            demand = self._demand("Phase 2")
             task = self._task()
             reply = self._reply()
             return self._invoke(
@@ -479,7 +697,8 @@ class ProductFlowController:
                     ],
                 },
             )
-        if stage == 19:
+        if stage == 29:
+            self._assert_parent_surface(request_record)
             return self._invoke(
                 request_record,
                 response_id,
@@ -487,7 +706,8 @@ class ProductFlowController:
                 namespace="mcp__buddyswitch_env",
                 arguments={"status": "active"},
             )
-        if stage == 20:
+        if stage == 30:
+            self._assert_parent_surface(request_record)
             return self._invoke(
                 request_record,
                 response_id,
@@ -495,11 +715,58 @@ class ProductFlowController:
                 namespace="mcp__buddyswitch_env",
                 arguments={"state": "live"},
             )
-        if stage == 21:
-            self.flow_finished.set()
+        if stage == 31:
+            self._assert_parent_surface(request_record)
+            demand = self._demand("follow-up verification checklist")
+            return self._invoke(
+                request_record,
+                response_id,
+                tool_name="demand_sys__get",
+                namespace="mcp__buddyswitch_env",
+                arguments={"demand_id": demand["id"]},
+            )
+        if stage == 32:
+            self._assert_parent_surface(request_record)
+            demand = self._demand("follow-up verification checklist")
+            return self._invoke(
+                request_record,
+                response_id,
+                tool_name="task_sys__create",
+                namespace="mcp__buddyswitch_env",
+                arguments={
+                    "demand_ref": _encode_demand_ref(
+                        str(demand["id"]),
+                        int(demand["revision"]),
+                    ),
+                    "objective": _later_task_objective(),
+                    "selection_reason": (
+                        "Demand B is the only remaining live Demand after Demand A "
+                        "completion and Demand C cancellation."
+                    ),
+                },
+            )
+        if stage == 33:
+            self._assert_parent_surface(request_record)
             return _assistant_response(
                 response_id,
-                "Demand reconciled; no live Demand remains and no Task was created.",
+                "Demand A reconciled and Demand B selected into the empty Task slot.",
+            )
+        if stage == 34:
+            self._assert_goal_surface(request_record)
+            return _assistant_response(
+                response_id,
+                "The later Demand B now owns the active native Goal.",
+            )
+        if stage == 35:
+            self._assert_goal_surface(request_record)
+            self.later_goal_pause_reached.set()
+            if not self.allow_later_goal_turn.wait(TIMEOUT_SECONDS):
+                return ResponseSpec.server_error(
+                    "test did not release later Goal turn"
+                )
+            return _assistant_response(
+                response_id,
+                "The later Demand B remains active for future execution.",
             )
         return ResponseSpec.server_error(f"unexpected product-flow model stage {stage}")
 
@@ -706,13 +973,21 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
             return {}
         return json.loads(candidates[0].read_text(encoding="utf-8"))
 
-    def _single_demand(self) -> dict[str, Any] | None:
+    def _demands(self) -> list[dict[str, Any]]:
         demands = self._demand_aggregate().get("demands")
-        if not isinstance(demands, dict) or len(demands) != 1:
-            return None
-        return dict(next(iter(demands.values())))
+        if not isinstance(demands, dict):
+            return []
+        return [dict(row) for row in demands.values() if isinstance(row, dict)]
 
-    def _single_task(self) -> dict[str, Any] | None:
+    def _demand(self, fragment: str) -> dict[str, Any] | None:
+        matches = [
+            row
+            for row in self._demands()
+            if fragment.lower() in str(row.get("description", "")).lower()
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _tasks(self) -> list[dict[str, Any]]:
         candidates = sorted(
             (
                 self.state_root
@@ -722,9 +997,40 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
                 / "tasks"
             ).glob("*.json")
         )
-        if len(candidates) != 1:
-            return None
-        return json.loads(candidates[0].read_text(encoding="utf-8"))
+        return [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in candidates
+        ]
+
+    def _single_task(self) -> dict[str, Any] | None:
+        tasks = self._tasks()
+        return tasks[0] if len(tasks) == 1 else None
+
+    def _send_inbound(self, content: str) -> dict[str, Any]:
+        if self.actor_id is None:
+            raise AssertionError("Actor id is not available")
+        sent = self._http(
+            "POST",
+            "/api/im/messages",
+            {
+                "target_identity_id": self.actor_id,
+                "content": content,
+                "reply_to": None,
+            },
+        )
+        self.assertEqual(sent["delivery_status"], "accepted", msg=sent)
+        self.assertEqual(sent["actor_handling_status"], "submitted", msg=sent)
+        return sent
+
+    def _settled_receipt(self, message_id: str) -> dict[str, Any] | None:
+        receipt = self._demand_aggregate().get("ingress_receipts", {}).get(
+            f"im.message.created:{message_id}"
+        )
+        return (
+            dict(receipt)
+            if isinstance(receipt, dict) and receipt.get("state") == "settled"
+            else None
+        )
 
     def _instance(self) -> dict[str, Any]:
         if self.actor_id is None:
@@ -778,6 +1084,8 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
         self._closed = True
         self.controller.allow_goal_delivery.set()
         self.controller.allow_goal_complete.set()
+        self.controller.allow_reconciliation.set()
+        self.controller.allow_later_goal_turn.set()
 
         report = CleanupReport()
         if self.actor_id is not None:
@@ -842,24 +1150,17 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
 
         session = self._http("GET", "/api/im/session")
         self.assertEqual(session["identity"]["type"], "external")
-        sent = self._http(
-            "POST",
-            "/api/im/messages",
-            {
-                "target_identity_id": self.actor_id,
-                "content": REQUEST_TEXT,
-                "reply_to": None,
-            },
-        )
-        self.assertEqual(sent["delivery_status"], "accepted", msg=sent)
-        self.assertEqual(sent["actor_handling_status"], "submitted", msg=sent)
+        sent = self._send_inbound(REQUEST_TEXT)
         self.controller.original_message_id = str(sent["message"]["id"])
 
         self._wait_for_controller(
             self.controller.goal_pause_reached,
             "Goal delivery pause",
         )
-        demand = self._wait_until(self._single_demand, "one live Demand")
+        demand = self._wait_until(
+            lambda: self._demand("Phase 2"),
+            "one live Demand A",
+        )
         task = self._wait_until(
             lambda: (
                 row
@@ -889,6 +1190,82 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
         self.assertEqual(goal["threadId"], self._instance()["thread_id"])
         self.assertGreaterEqual(self.controller.stage, 11)
 
+        def settle_inbound(
+            content: str,
+            *,
+            decision: str,
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
+            inbound = self._send_inbound(content)
+            message_id = str(inbound["message"]["id"])
+            receipt = self._wait_until(
+                lambda: self._settled_receipt(message_id),
+                f"settled inbound {message_id}",
+            )
+            self._wait_until(
+                lambda: self._instance().get("side_threads") == [],
+                f"side cleanup for {message_id}",
+            )
+            self.assertEqual(receipt["outcome"]["decision"], decision)
+            active_tasks = [
+                row for row in self._tasks() if row.get("status") == "active"
+            ]
+            self.assertEqual([row["id"] for row in active_tasks], [task["id"]])
+            self.assertEqual(self._goal()["status"], "active")
+            return inbound, receipt
+
+        supplement, _supplement_receipt = settle_inbound(
+            SUPPLEMENT_TEXT,
+            decision="merge_intake",
+        )
+        demand = self._wait_until(
+            lambda: (
+                row
+                if (row := self._demand("originating-message binding")) is not None
+                and row.get("revision") == 2
+                else None
+            ),
+            "merged Demand A",
+        )
+        self.assertEqual(len(demand["source_refs"]), 2)
+        self.assertEqual(
+            demand["source_refs"][1]["ref"]["message_id"],
+            supplement["message"]["id"],
+        )
+
+        _inbound_b, _b_receipt = settle_inbound(
+            DEMAND_B_TEXT,
+            decision="create",
+        )
+        self.assertEqual(len(self._demands()), 2)
+        self.assertIsNotNone(self._demand("follow-up verification checklist"))
+
+        _ordinary, ordinary_receipt = settle_inbound(
+            ORDINARY_TEXT,
+            decision="no_action_needed",
+        )
+        self.assertFalse(ordinary_receipt["outcome"]["demand_changed"])
+        self.assertEqual(len(self._demands()), 2)
+
+        _inbound_c, _c_create_receipt = settle_inbound(
+            DEMAND_C_TEXT,
+            decision="create",
+        )
+        self.assertEqual(len(self._demands()), 3)
+        self.assertIsNone(self._demand("temporary rollback")["terminal"])
+
+        _cancel_c, c_cancel_receipt = settle_inbound(
+            CANCEL_C_TEXT,
+            decision="cancel",
+        )
+        self.assertTrue(c_cancel_receipt["outcome"]["demand_changed"])
+        canceled_c = self._demand("temporary rollback")
+        self.assertEqual(canceled_c["terminal"]["type"], "canceled")
+        self.assertEqual(
+            self._demand_aggregate()["demand_pool_revision"],
+            5,
+        )
+        self.assertGreaterEqual(self.controller.stage, 21)
+
         self.controller.allow_goal_delivery.set()
         self._wait_for_controller(
             self.controller.reply_pause_reached,
@@ -906,12 +1283,21 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
         self.assertEqual(self._goal()["status"], "active")
 
         self.controller.allow_goal_complete.set()
+        self._wait_for_controller(
+            self.controller.reconciliation_pause_reached,
+            "Demand reconciliation pause",
+        )
         completed_task = self._wait_until(
             lambda: (
-                row
-                if (row := self._single_task()) is not None
-                and row.get("status") == "completed"
-                else None
+                next(
+                    (
+                        row
+                        for row in self._tasks()
+                        if row.get("id") == task["id"]
+                        and row.get("status") == "completed"
+                    ),
+                    None,
+                )
             ),
             "host-recorded completed Task",
         )
@@ -931,14 +1317,15 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
             completed_goal["updatedAt"],
         )
 
+        self.controller.allow_reconciliation.set()
         self._wait_for_controller(
-            self.controller.flow_finished,
-            "Demand reconciliation finish",
+            self.controller.later_goal_pause_reached,
+            "later Demand Goal pause",
         )
         completed_demand = self._wait_until(
             lambda: (
                 row
-                if (row := self._single_demand()) is not None
+                if (row := self._demand("originating-message binding")) is not None
                 and isinstance(row.get("terminal"), dict)
                 and row["terminal"].get("type") == "completed"
                 else None
@@ -958,31 +1345,34 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
         )
 
         console = self._http("GET", f"/api/actors/{self.actor_id}/console")["console"]
-        self.assertEqual(console["task_sys"]["active_count"], 0)
+        self.assertEqual(console["task_sys"]["active_count"], 1)
         self.assertEqual(console["task_sys"]["terminal_count"], 1)
         self.assertEqual(
             console["task_sys"]["terminal_tasks"][0]["task_id"],
             completed_task["id"],
         )
         self.assertNotIn("recoverable_tasks", console["task_sys"])
+        active_task = console["task_sys"]["active_tasks"][0]
+        demand_b = self._demand("follow-up verification checklist")
+        self.assertEqual(active_task["demand_ref"]["demand_id"], demand_b["id"])
         self.assertEqual(
-            list(
-                (
-                    self.state_root
-                    / "buddyswitch"
-                    / "objects"
-                    / "task-sys"
-                    / "tasks"
-                ).glob("*.json")
-            ),
-            [
-                self.state_root
-                / "buddyswitch"
-                / "objects"
-                / "task-sys"
-                / "tasks"
-                / f"{completed_task['id']}.json"
-            ],
+            next(
+                row
+                for row in self._tasks()
+                if row["id"] == active_task["task_id"]
+            )["objective"],
+            _later_task_objective(),
+        )
+        self.assertEqual(self._goal()["status"], "active")
+        self.assertEqual(self._goal()["objective"], _later_task_objective())
+        self.assertIsNone(demand_b["terminal"])
+        self.assertEqual(
+            self._demand("temporary rollback")["terminal"]["type"],
+            "canceled",
+        )
+        self.assertEqual(
+            len(self._tasks()),
+            2,
         )
 
         instance_root = self.shared_root / "instances" / self.actor_id

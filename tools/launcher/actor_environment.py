@@ -50,6 +50,10 @@ _FORBIDDEN_WORKSPACE_ENTRIES = (
 _BASE_CODEX_CONFIG = """[skills.bundled]
 enabled = false
 
+[[skills.config]]
+name = "demand-triage"
+enabled = false
+
 [features]
 plugins = false
 goals = true

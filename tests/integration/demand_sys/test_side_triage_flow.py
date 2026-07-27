@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import demand_sys_daemon_adapter
 import demand_triage_handler
-import demand_triage_mcp_server
 import demand_triage_runtime
+import env_tool_mcp_server
 import side_thread_registry
 from env.domain import demand_sys
 from env.repos import demands
@@ -148,11 +148,15 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         self,
         token: str,
         proposal: dict[str, Any],
+        *,
+        actual_thread_id: str = "thr-side-1",
     ) -> dict[str, Any]:
         return demand_triage_runtime.resolve_request(
             instance_json=self.instance_json,
             instance_record=self._read_instance(),
-            params={"capability": token, "proposal": proposal},
+            capability=token,
+            actual_thread_id=actual_thread_id,
+            proposal=proposal,
         )
 
     def _daemon_state(self) -> daemon_state.DaemonState:
@@ -217,21 +221,13 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
             start["binding"]["source_key"],
             self._track_fact()["source_key"],
         )
+        self.assertNotIn(
+            "mcp_servers.buddyswitch-demand-triage",
+            start["config_overrides"],
+        )
         raw_token = start["config_overrides"][
-            "mcp_servers.buddyswitch-demand-triage"
-        ]["env"][demand_triage_mcp_server.CAPABILITY_ENV]
-        self.assertEqual(
-            start["config_overrides"][
-                "mcp_servers.buddyswitch-demand-triage"
-            ]["args"][-1],
-            str(broker_socket),
-        )
-        self.assertEqual(
-            start["config_overrides"][
-                "mcp_servers.buddyswitch-demand-triage"
-            ]["default_tools_approval_mode"],
-            "approve",
-        )
+            "mcp_servers.buddyswitch-env.env"
+        ][env_tool_mcp_server.DEMAND_INBOUND_CAPABILITY_ENV]
         self.assertEqual(
             start["capability_hash"],
             demand_triage_runtime.hash_capability(raw_token),
@@ -245,6 +241,18 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
                 "demand_sys__get",
                 "message__get",
                 "message__conversation",
+                "demand_sys__resolve_inbound",
+            ],
+        )
+        self.assertEqual(
+            start["config_overrides"]["mcp_servers.buddyswitch-env.disabled_tools"],
+            [],
+        )
+        self.assertEqual(
+            start["config_overrides"]["skills.config"],
+            [
+                {"name": "demand-triage", "enabled": True},
+                {"name": "demand-orchestration", "enabled": False},
             ],
         )
         receipt = demand_sys.get_ingress_receipt(
@@ -253,7 +261,7 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         )
         self.assertEqual(receipt["state"], "resolving")
         self.assertNotIn("outputSchema", start["text"])
-        self.assertIn("demand_triage.resolve", start["text"])
+        self.assertIn("demand_sys__resolve_inbound", start["text"])
         self.assertIn("Use $demand-triage", start["text"])
         self.assertNotIn("canonical live Demands", start["text"])
         self.assertNotIn("acceptance unit", start["text"])
@@ -340,7 +348,9 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
             ("unknown", {}, "E_DEMAND_TRIAGE_CAPABILITY"),
             ("purpose", {"purpose": "unrelated-side-purpose"}, "E_DEMAND_TRIAGE_AUTHORITY"),
             ("parent", {"parent_thread_id": "thr-other"}, "E_DEMAND_TRIAGE_AUTHORITY"),
+            ("actor", {}, "E_DEMAND_TRIAGE_AUTHORITY"),
             ("side", {}, "E_DEMAND_TRIAGE_AUTHORITY"),
+            ("actual-thread", {}, "E_DEMAND_TRIAGE_AUTHORITY"),
             (
                 "source",
                 {"binding_overrides": {"source_key": "track.comment.added:wrong"}},
@@ -363,16 +373,30 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
                 )
                 if label == "unknown":
                     token = "capability-unknown"
+                elif label == "actor":
+                    payload = self._read_instance()
+                    payload["actor_id"] = "act-market-wrong-actor"
+                    self._write_instance(payload)
                 elif label == "side":
                     payload = self._read_instance()
                     payload["side_threads"][0]["thread_id"] = "thr-main"
                     self._write_instance(payload)
+                before = demands.load_actor_state(self.actor_target)
                 with self.assertRaises(demand_triage_runtime.DemandTriageRuntimeError) as raised:
                     self._resolve(
                         token,
                         self._proposal("no_action_needed"),
+                        actual_thread_id=(
+                            "thr-forged"
+                            if label == "actual-thread"
+                            else "thr-side-1"
+                        ),
                     )
                 self.assertEqual(raised.exception.code, code)
+                self.assertEqual(
+                    demands.load_actor_state(self.actor_target),
+                    before,
+                )
 
     def test_consumed_capability_cannot_be_reused(self) -> None:
         token, _attempt = self._claim_and_bind()
@@ -725,16 +749,26 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         self.assertEqual(self._read_instance()["side_threads"], [])
         self.assertNotIn("checkpoint", state.handler_state("demand_triage"))
 
-    def test_actor_created_demand_does_not_enter_triage_parent_path(self) -> None:
-        demand_sys.create(
+    def test_settled_inbound_demand_does_not_reenter_triage_parent_path(self) -> None:
+        fact = self._track_fact("track.comment.added:queued")
+        demand_sys.claim_ingress(
             self.actor_target,
-            "actor-create:queued",
-            "Research a queued AI market question.",
-            "Wait behind the active Task.",
-            [{
-                "type": "actor.self_requested",
-                "ref": {"thread_id": "thr-main", "turn_id": "turn-create"},
-            }],
+            **fact,
+        )
+        attempt_id = demand_sys.begin_ingress_resolution(
+            self.actor_target,
+            fact["source_key"],
+        )["attempt_id"]
+        demand_sys.resolve_ingress(
+            self.actor_target,
+            fact["source_key"],
+            attempt_id,
+            self._proposal(
+                "create",
+                description="Research a queued AI market question.",
+                detail="Wait behind the active Task.",
+            ),
+            handled_verified=False,
         )
         state = self._daemon_state()
         runtime = _Runtime()
