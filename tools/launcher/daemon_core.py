@@ -42,6 +42,7 @@ DAEMON_STOP_GRACE_SECONDS = 2.0
 DAEMON_POLL_SECONDS = 0.05
 DAEMON_READY_TIMEOUT_SECONDS = 5.0
 DAEMON_READY_POLL_SECONDS = 0.05
+DAEMON_MAINTENANCE_INTERVAL_SECONDS = app_server.DEFAULT_RPC_TIMEOUT_SECONDS
 INSTANCE_DAEMON_ENTRYPOINT = HELPER_DIR / "instance_daemon.py"
 
 
@@ -1035,6 +1036,7 @@ def run_daemon(
                 runtime,
                 daemon_handlers,
             )
+            next_maintenance_at = time.monotonic() + DAEMON_MAINTENANCE_INTERVAL_SECONDS
             while True:
                 try:
                     notification = client.read_notification()
@@ -1052,6 +1054,7 @@ def run_daemon(
                         daemon_handlers,
                     )
                     heartbeat_daemon_actor(context, identity_route)
+                    next_maintenance_at = time.monotonic() + DAEMON_MAINTENANCE_INTERVAL_SECONDS
                     continue
                 except app_server.AppServerError as exc:
                     state.record_error(origin_turn_id=None, message=str(exc))
@@ -1063,6 +1066,15 @@ def run_daemon(
                     runtime,
                     daemon_handlers,
                 )
+                if time.monotonic() >= next_maintenance_at:
+                    reconcile_handlers(
+                        context,
+                        state,
+                        runtime,
+                        daemon_handlers,
+                    )
+                    heartbeat_daemon_actor(context, identity_route)
+                    next_maintenance_at = time.monotonic() + DAEMON_MAINTENANCE_INTERVAL_SECONDS
     except app_server.AppServerError as exc:
         state.record_error(origin_turn_id=None, message=str(exc))
         return 1

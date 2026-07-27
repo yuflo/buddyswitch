@@ -248,33 +248,31 @@ class TaskGoalBindingContractTests(RuntimeWorkspaceTestCase):
         with self.assertRaisesRegex(ValueError, "retired or invalid Task record"):
             task_sys.list_tasks(actor_target=self.actor_target)
 
-    def test_actor_scoped_list_ignores_only_foreign_retired_task_records(self) -> None:
+    def test_actor_scoped_list_ignores_foreign_current_schema_task(self) -> None:
         created = self._create()
-        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
         foreign_actor = {
-            "actor_id": self._runtime_actor_id(role="dev", label="foreign-retired-task"),
+            "actor_id": self._runtime_actor_id(role="dev", label="foreign-current-task"),
             "role_id": "dev",
         }
-        (tasks_dir / "task-demand-foreign-retired.json").write_text(
-            json.dumps(
-                {
-                    "id": "task-demand-foreign-retired",
-                    "actor_target": foreign_actor,
-                    "status": "in_progress.side_processing",
-                    "source_type": "demand",
-                    "source_ref": self.demand_ref,
-                    "execution": {"processor": "side"},
-                }
-            ),
-            encoding="utf-8",
+        foreign = task_sys.create(
+            actor_target=foreign_actor,
+            demand_ref={
+                "demand_id": "demand-foreign-current-task",
+                "basis_revision": 1,
+                "demand_ref": "dref-foreign-current-task",
+            },
+            objective="Complete the independently current foreign Actor Task.",
+            selection_reason="The foreign Actor has its own active Task slot.",
         )
 
         self.assertEqual(
             [row["id"] for row in task_sys.list_tasks(actor_target=self.actor_target)],
             [created["task_id"]],
         )
-        with self.assertRaisesRegex(ValueError, "retired or invalid Task record"):
-            task_sys.list_tasks()
+        self.assertEqual(
+            {row["id"] for row in task_sys.list_tasks()},
+            {created["task_id"], foreign["task_id"]},
+        )
 
     def test_actor_scoped_list_rejects_owned_retired_task_record(self) -> None:
         tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"

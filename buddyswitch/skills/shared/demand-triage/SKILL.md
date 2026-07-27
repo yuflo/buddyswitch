@@ -43,6 +43,11 @@ The ordinary tools on this side are intentionally limited to
      `revise`;
    - “independent deliverable”, “separate acceptance”, or equivalent wording
      is strong evidence of a new acceptance unit and `create`;
+   - a separately requested testing or research deliverable—such as a test
+     script, observation sheet, study, or report—is a new acceptance unit when
+     the user asks for it as an additional deliverable, even when it evaluates
+     an existing product or design; do not merge it into that product or design
+     unless the user explicitly groups both into one accepted delivery;
    - technical separability is not product independence. Being implementable,
      testable, scheduled, canceled, or delivered in a separate step does not by
      itself create a new acceptance unit when the user groups the addition into

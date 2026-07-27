@@ -812,6 +812,39 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
 
             self.assertEqual(handler.calls, ["reconcile", "reconcile"])
 
+    def test_run_daemon_reconciles_while_notifications_remain_continuous(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            handler = ReconcileHandler()
+            clock = {"value": 0.0}
+            notification_step = self.core.app_server.DEFAULT_RPC_TIMEOUT_SECONDS / 2 + 0.1
+
+            class AdvancingFakeClient(FakeRunDaemonClient):
+                def read_notification(self) -> dict[str, object]:
+                    clock["value"] += notification_step
+                    return super().read_notification()
+
+            fake_client = AdvancingFakeClient(
+                notifications=[
+                    self._completed(turn_id="turn-user-1"),
+                    self._completed(turn_id="turn-user-2"),
+                    StopDaemonLoop("stop"),
+                ],
+            )
+            self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication()
+            original_monotonic = self.core.time.monotonic
+            self.addCleanup(setattr, self.core.time, "monotonic", original_monotonic)
+            self.core.time.monotonic = lambda: clock["value"]
+
+            with self.assertRaises(StopDaemonLoop):
+                self.core.run_daemon(
+                    instance["instance_json"],
+                    handlers=[handler],
+                )
+
+            self.assertEqual(handler.calls, ["reconcile", "reconcile"])
+
     def test_run_daemon_sweeps_due_schedules_on_app_server_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)

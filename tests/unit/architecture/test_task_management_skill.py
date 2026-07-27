@@ -128,6 +128,7 @@ def test_triage_skill_owns_one_complete_relationship_sop() -> None:
         "does not by itself create",
         "actor-proposed future improvement",
         "independently",
+        "testing or research deliverable",
         "terminal demand",
         "correction demand",
         "merge_intake",
