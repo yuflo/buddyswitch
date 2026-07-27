@@ -255,6 +255,9 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("outputSchema", start["text"])
         self.assertIn("demand_triage.resolve", start["text"])
         self.assertIn("Use $demand-triage", start["text"])
+        self.assertNotIn("canonical live Demands", start["text"])
+        self.assertNotIn("acceptance unit", start["text"])
+        self.assertNotIn('state="all"', start["text"])
         self.assertIn("Investigate AI market demand", start["text"])
         for duplicated_policy in (
             "no_action_needed",

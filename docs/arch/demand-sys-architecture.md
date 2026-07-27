@@ -10,9 +10,11 @@ The current path is:
 ```text
 validated IM or Track fact
   -> private source-keyed ingress receipt
-  -> isolated demand-triage side
+  -> isolated demand-triage side as a new ephemeral thread in the Actor workspace
+  -> native selection of the shared $demand-triage Skill
+  -> bounded Message context + compact all-state Demand context
   -> demand_triage.resolve
-  -> Demand-owned atomic application
+  -> Demand Sys deterministic validation + atomic application
   -> canonical Demand pool + pool revision
   -> independent parent Demand orchestration
   -> at most one active native-Goal Task
@@ -38,22 +40,37 @@ and atomic replacement. One resolution transaction settles the receipt and
 applies any Demand change together.
 
 There is no compatibility schema, fallback reader, shadow intake queue, or
-second Demand owner.
+second mutation path.
 
 ## Isolated inbound triage
 
 IM and Track owners first validate and persist their exact source fact, then
 schedule generic `demand.ingress.triage` attention. `DemandTriageHandler`
-claims the receipt and starts an ephemeral isolated side with:
+claims the receipt and starts the isolated demand-triage side as a new
+ephemeral App Server thread with the same Actor workspace and project roots.
+This is `thread/start`, not a fork of the parent transcript: it shares the
+Actor's installed Skills and canonical state, but it does not inherit the
+parent context window.
+
+Every role installs the same shared `demand-triage` Skill in its Actor
+workspace. The thin side prompt explicitly selects `$demand-triage`, so Codex
+natively injects the complete Skill before the first model sampling. BuddySwitch
+does not implement a second Skill loader or copy the semantic workflow into the
+handler prompt.
+
+The selected Skill owns the one semantic judgment workflow. It reads:
 
 - read-only `demand_sys__list` and `demand_sys__get`;
-- source-local Message reads;
+- the compact all-state Demand pool, followed by full reads of plausible
+  targets and all live candidates before create;
+- the exact source Message and a bounded latest direct conversation for IM
+  sources;
 - one capability-bound `demand_triage.resolve` operation.
 
 The side does not receive Demand mutation, Task creation, Message send, or
 unrelated product tools. The host validates Actor, main/side identity, purpose,
-source key, attempt, and one-use capability before the Demand owner applies
-the decision.
+source key, attempt, and one-use capability before Demand Sys applies the
+decision.
 
 Decisions are exactly:
 
@@ -80,6 +97,12 @@ The side resolves through a dedicated MCP operation rather than returning a
 strict final-message JSON shape. Resolution persists immediately through the
 runtime broker. A stale reference returns the receipt to pending without a
 partial mutation.
+
+Demand Sys contains no model judgment, embedding, semantic similarity,
+keyword classifier, target selection, or scoring. It validates authority,
+proposal shape, receipt attempt, current opaque references, idempotency,
+lifecycle, and atomic persistence only. `demand_triage.resolve` is the single
+triage commit path.
 
 ## Two product handlers
 
@@ -161,6 +184,8 @@ Demand fields or select work.
 - No first-class pre-Demand product object.
 - No Demand graph or dependency engine.
 - No parent inbound-triage judgment.
+- No alternate Skill loader or handler-owned copy of the triage SOP.
+- No model judgment in Demand Sys or daemon-service core.
 - No automatic Demand completion from Task status.
 - No Demand business rule in daemon-service core.
 - No resolver in the six-action Actor tool catalog.

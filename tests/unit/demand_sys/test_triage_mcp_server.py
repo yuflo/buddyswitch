@@ -60,6 +60,8 @@ class DemandTriageMcpServerTests(unittest.TestCase):
         tool = response["result"]["tools"][0]
         self.assertIn("one-shot capability", tool["description"].lower())
         self.assertIn("never creates Task work", tool["description"])
+        self.assertIn("Demand Sys", tool["description"])
+        self.assertNotIn("Demand owner", tool["description"])
 
         properties = tool["inputSchema"]["properties"]
         self.assertEqual(
@@ -76,6 +78,9 @@ class DemandTriageMcpServerTests(unittest.TestCase):
         for field in properties:
             explanation = properties[field].get("description", "").lower()
             self.assertTrue(explanation, msg=field)
+        reason = properties["reason"]["description"]
+        self.assertIn("canonical Demand context", reason)
+        self.assertNotIn("live Demand pool", reason)
 
     def test_resolve_forwards_host_capability_and_model_proposal(self) -> None:
         calls: list[dict[str, object]] = []

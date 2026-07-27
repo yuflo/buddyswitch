@@ -32,7 +32,7 @@ RETRY_SECONDS = 5
 TRIAGE_PROMPT = """[DEMAND TRIAGE — isolated side]
 
 Use $demand-triage to resolve this one inbound fact against the Actor's current
-canonical live Demands. Commit one final resolution through
+canonical Demand context. Commit one final resolution through
 `demand_triage.resolve` before ending this turn.
 
 Inbound fact:

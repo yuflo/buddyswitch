@@ -57,8 +57,8 @@ RESOLVE_INPUT_SCHEMA: dict[str, Any] = {
         "reason": {
             "type": "string",
             "description": (
-                "Grounded explanation of this inbound's relationship to the current "
-                "live Demand pool and why this resolution effect is correct."
+                "Grounded explanation of this inbound's relationship to the Actor's "
+                "canonical Demand context and why this resolution effect is correct."
             ),
         },
         "demand_ref": {
@@ -97,7 +97,7 @@ RESOLVE_TOOL = {
     "name": "resolve",
     "description": (
         "Consume this isolated triage side's one-shot capability and attempt to "
-        "commit its resolution for the bound inbound fact. The Demand owner "
+        "commit its resolution for the bound inbound fact. Demand Sys "
         "atomically settles the receipt and applies any authorized Demand change, "
         "or returns a stale target to pending for a fresh side retry. Handled also "
         "owns idempotent reply delivery and structural verification of the durable "

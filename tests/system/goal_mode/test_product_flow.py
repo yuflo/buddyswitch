@@ -158,6 +158,17 @@ class ProductFlowController:
                     names.append(name)
         return names
 
+    @staticmethod
+    def _model_visible_input(request_record: dict[str, Any]) -> str:
+        body = request_record.get("body")
+        if not isinstance(body, dict):
+            return ""
+        return json.dumps(
+            body.get("input"),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
     def _invoke(
         self,
         request_record: dict[str, Any],
@@ -272,6 +283,19 @@ class ProductFlowController:
         if stage == 0:
             return _assistant_response(response_id, "Actor bootstrap complete.")
         if stage == 1:
+            visible = self._model_visible_input(request_record)
+            if (
+                "<name>demand-triage</name>" not in visible
+                or "acceptance unit" not in visible.lower()
+                or "demand_triage.resolve" not in visible
+            ):
+                raise AssertionError(
+                    "selected demand-triage Skill was not injected before "
+                    "triage sampling"
+                )
+            # This controller authors a deterministic decision to prove the
+            # product plumbing. It does not prove real-model semantic
+            # classification.
             return self._invoke(
                 request_record,
                 response_id,

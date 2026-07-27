@@ -115,18 +115,32 @@ def test_orchestration_skill_makes_im_delivery_a_durable_completion_condition() 
     assert "leave the demand live" in lowered
 
 
-def test_triage_skill_is_side_only_and_has_no_parent_or_task_selection_branch() -> None:
+def test_triage_skill_owns_one_complete_relationship_sop() -> None:
     text = TRIAGE.read_text(encoding="utf-8")
-    lowered = text.lower()
+    normalized = " ".join(text.lower().split())
 
-    assert "demand_triage.resolve" in text
-    assert "no_action_needed" in text
-    assert "merge_intake" in text
-    assert "needs_parent_judgment" not in text
-    assert "parent judgment" not in lowered
-    assert "task_sys__create" not in text
-    assert "task_sys." not in text
-    assert "message__send" not in text
+    required = (
+        'demand_sys__list(state="all")',
+        "acceptance unit",
+        "explicit current user",
+        "user-requested grouping",
+        "technical separability",
+        "does not by itself create",
+        "actor-proposed future improvement",
+        "independently",
+        "terminal demand",
+        "correction demand",
+        "merge_intake",
+        "revise",
+        "demand_triage.resolve",
+    )
+    for phrase in required:
+        assert phrase in normalized
+
+    assert 'demand_sys__list(state="live")' not in normalized
+    assert "needs_parent_judgment" not in normalized
+    assert "task_sys" not in normalized
+    assert "message__send" not in normalized
 
 
 def test_prompt_skill_and_role_layers_do_not_duplicate_tool_catalog_contracts() -> None:
