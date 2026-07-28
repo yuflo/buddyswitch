@@ -13,7 +13,7 @@ import time
 import unittest
 from pathlib import Path
 
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 from tests.process.launcher._harness import ProcessLauncherHarness
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
@@ -835,16 +835,17 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9333"]
             config_text = (instance_codex_home / "config.toml").read_text(encoding="utf-8")
             self.assertIn("--browser-url=http://127.0.0.1:9333", config_text)
     def test_env_browser_ensure_does_not_repair_cockpit_mcp_missing_or_wrong_instance_root(self) -> None:
-        proxy_path = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
         cases = {
             "missing": [
-                str(proxy_path),
+                "-m",
+                "buddyswitch.application.entrypoints.browser_cockpit_proxy",
                 "--upstream-command",
                 "npx chrome-devtools-mcp@1.1.1",
                 "--browser-url=http://127.0.0.1:9444",
             ],
             "mismatched": [
-                str(proxy_path),
+                "-m",
+                "buddyswitch.application.entrypoints.browser_cockpit_proxy",
                 "--upstream-command",
                 "npx chrome-devtools-mcp@1.1.1",
                 "--browser-url=http://127.0.0.1:9444",

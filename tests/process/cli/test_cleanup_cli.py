@@ -19,13 +19,14 @@ class CleanupCliTests(unittest.TestCase):
             repo_root = Path(temp_root) / "state"
             manifest_path = repo_root / "buddyswitch" / "manifest.toml"
             manifest_path.parent.mkdir(parents=True)
-            shutil.copy2(REPO_ROOT / "buddyswitch" / "manifest.toml", manifest_path)
+            shutil.copy2(REPO_ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml", manifest_path)
 
             completed = run_process(
                 [
                     PYTHON,
-                    str(REPO_ROOT / "scripts" / "env_cleanup.py"),
-                    "--repo-root",
+                    "-m",
+                    "buddyswitch.application.entrypoints.cleanup",
+                    "--state-root",
                     str(repo_root),
                     "--manifest",
                     str(manifest_path),

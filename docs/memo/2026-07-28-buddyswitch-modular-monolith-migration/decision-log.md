@@ -1,0 +1,47 @@
+# Modular Monolith Migration Decision Log
+
+Statuses: `PROPOSED`, `ACCEPTED`, `SUPERSEDED`, `REJECTED`.
+
+| ID | Decision | Status | Evidence/authority | Stages |
+|---|---|---|---|---|
+| D-001 | Target is an explicit modular monolith with a narrow RoleHost | ACCEPTED | target design | all |
+| D-002 | `src/buddyswitch/**` is the sole Python implementation/runtime source root | ACCEPTED | audit reports 01/04 | S1+ |
+| D-003 | one `pyproject.toml` owns package/build/content/entrypoints | ACCEPTED | missing current package model; F-008 | S1 |
+| D-004 | every BuddySwitch process executes one installed attributable runtime distribution | ACCEPTED | split provenance trace; F-004/F-018 | S1+ |
+| D-005 | Actor workspaces contain no BuddySwitch implementation | ACCEPTED | Actor projection audit | S1+ |
+| D-006 | Actor projection contains selected Role/Skill/config/private/project content only | ACCEPTED | builder/Role trace | S1/S6 |
+| D-007 | `projects/app` remains an external seed/shared product mount | ACCEPTED | current builder semantics | S1 |
+| D-008 | state roots use explicit locator contracts, never package parent depth | ACCEPTED | `runtime_files.py` trace | S1/S5 |
+| D-009 | canonical data does not move implicitly with source; path changes use Protected migration | ACCEPTED | repository constitution | all |
+| D-010 | product/capability components are explicitly selected by application composition | ACCEPTED | architecture law | S2+ |
+| D-011 | product components are never filesystem-discovered | ACCEPTED | architecture law | S2+ |
+| D-012 | Browser is an Actor foundation capability, not a current product component | ACCEPTED | lifecycle/ownership evidence | S1/S5 |
+| D-013 | Search and Evidence are capability components; Context is application projection | ACCEPTED | current owner trace | S4 |
+| D-014 | foundation owns Identity, locators, Actor-private safety and product-neutral hosts | ACCEPTED | owner classification | S1/S5 |
+| D-015 | cleanup splits into lifecycle/path orchestration plus component deletion contributions | ACCEPTED | cleanup trace | S2–S5 |
+| D-016 | module Skills export typed runtime artifacts; Roles select IDs without private imports | ACCEPTED | Role/Skill boundary audit | S2–S6 |
+| D-017 | RoleHost alone may discover reviewed packaged Role directories | ACCEPTED | frequent Role extension pressure | S6 |
+| D-018 | no universal PluginHost, bus, DI container, service locator or hot reload | ACCEPTED | simplicity boundary | all |
+| D-019 | co-located module/Role unit/contract/integration tests use the one public runner | ACCEPTED | test ownership decision | S2+ |
+| D-020 | cross-component/process/system/architecture tests remain root-owned | ACCEPTED | test/resource ownership | all |
+| D-021 | S1 package/runtime/lifecycle cutover precedes Demand | ACCEPTED | readiness audit report 05 | roadmap |
+| D-022 | S1 internal checkpoints do not merge separately | ACCEPTED | one runtime truth requirement | S1 |
+| D-023 | S4 lanes may parallelize only after host contracts freeze and with one app-root owner | ACCEPTED | current shared seams | S4 |
+| D-024 | RoleHost waits for final module Skill exports | ACCEPTED | Role/module contract | S6 |
+| D-025 | old executable roots/assets/catalogs are deleted; no compatibility path remains | ACCEPTED | Sharp Forward | S1–S7 |
+| D-026 | root launchers remain thin stable interfaces, not implementation roots | ACCEPTED | repository contract | S1 |
+| D-027 | `docs/arch/**` changes with executable truth; migration docs never preempt it | ACCEPTED | documentation authority | all |
+| D-028 | the default runtime is one non-editable checkout-local installation under `.buddyswitch-runtime/venv` with an atomic activation record; an explicit override must satisfy the same binding | ACCEPTED | package/runtime audit; F-025 | S1 |
+| D-029 | S1 uses `setuptools.build_meta`; runtime entrypoints are package modules and no additional public console-script interface is introduced | ACCEPTED | installed-package simplicity; F-023 | S1 |
+| D-030 | `framework/schemas/**` moves to the package contract/schema owner; `scripts/output_schema.py` becomes test support; empty `scripts/runtime_store` and duplicate `framework/agent-registry.md` are deleted | ACCEPTED | current consumer trace; F-022/F-023 | S1 |
+| D-031 | the current coordinating session is the sole master ledger/decision/finding/residue/acceptance authority; independent sessions execute one READY Goal Packet and submit proposals only | ACCEPTED | maintainer-approved coordination mode | S1–S7 |
+| D-032 | after stage handoff the hub does not poll or hold waits; it pauses until the user returns the execution result, then verifies current repository truth | ACCEPTED | maintainer-approved asynchronous mode | S1–S7 |
+| D-033 | static package topology is proved in the process-free unit tier; wheel build, venv install and activation are proved under `tests/process/package/**` | ACCEPTED | current unit-tier process prohibition; F-029 | S1 |
+| D-034 | runtime provisioning is an explicit operator/developer PEP 517 build, venv, non-editable install and activation operation; product launchers and Actor lifecycle never bootstrap it | ACCEPTED | target fail-closed runtime model; F-030 | S1 |
+| D-035 | `buddyswitch-test` may execute root-owned `tests/runner.py` with the activated interpreter and no source `PYTHONPATH`; all production launchers and child processes remain installed-package-only | ACCEPTED | D-020 root test ownership; F-031 | S1 |
+| D-036 | root shell wrappers resolve only the runtime directory and deterministic `venv/bin/python`; the installed package alone parses and verifies `activation.json` | ACCEPTED | avoids pre-runtime JSON/interpreter duplication; F-032 | S1 |
+| D-037 | READY requires complete affected preservation evidence, a material positive/negative/correspondence boundary matrix and representative final-topology preflight; no architecture question may be delegated to an executor. A second specification invalidation at the same boundary forbids another patch-on-patch packet until the boundary architecture and end-to-end preflight are accepted | ACCEPTED | S1/E1 handoff root-cause review and maintainer acceptance | S1–S7 |
+| D-038 | S1 C2 source movement, C3 public/child-process cutover, C4 code-free Actor projection and C5 lifecycle proof form one atomic runnable replacement packet; C6 remains the separate frozen-final guidance/residue/full-acceptance gate | ACCEPTED | F-035 consumer trace, maintainer acceptance and `C2C5P-d24c5a85fec6b34a` final-topology preflight | S1 |
+
+Changing an accepted decision moves every affected active stage to
+`REPLANNING`.

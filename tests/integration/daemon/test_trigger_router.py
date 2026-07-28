@@ -15,20 +15,20 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_contracts  # noqa: E402
-import daemon_state  # noqa: E402
+from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
-TRIGGERS_PATH = ROOT / "tools" / "launcher" / "daemon_triggers.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+TRIGGERS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_triggers.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    return importlib.reload(importlib.import_module(path.stem))
+    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
 
 
 class RecordingHandler:

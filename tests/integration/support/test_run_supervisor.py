@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 from tests.support.environment import RunEnvironment
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import (
@@ -320,7 +320,7 @@ def test_descriptor_reconciliation_captures_replacement_process_identity() -> No
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        from runtime_kernel import process_identity
+        from buddyswitch.runtime_kernel import process_identity
 
         process_identity.write_record(pid_file, first.pid)
         ledger.reconcile_descriptors()
@@ -349,7 +349,7 @@ def test_descriptor_reconciliation_captures_replacement_process_identity() -> No
 
 
 def test_descriptor_reconciliation_refuses_mismatched_identity_record() -> None:
-    from runtime_kernel import process_identity
+    from buddyswitch.runtime_kernel import process_identity
 
     run = RunEnvironment.create()
     unrelated: subprocess.Popen[str] | None = None
@@ -543,8 +543,8 @@ def test_monitor_persists_descriptor_identity_before_owner_process_exits() -> No
 def test_serialized_central_daemon_strategy_runs_normal_stop_before_group_fallback(
     monkeypatch,
 ) -> None:
-    import central_daemon
-    import central_daemon_core
+    from buddyswitch.launcher import central_daemon
+    from buddyswitch.launcher import central_daemon_core
 
     run = RunEnvironment.create()
     pid = 0
@@ -639,7 +639,7 @@ def test_common_dir_lock_is_shared_by_two_git_worktrees() -> None:
                 str(ready_path),
                 str(acquired_path),
             ],
-            cwd=worktree,
+            cwd=REPO_ROOT,
             env=run.environ,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

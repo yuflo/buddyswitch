@@ -8,28 +8,28 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 
-DOMAIN = Path("scripts/env/domain/demand_sys.py")
-READ_MODEL = Path("scripts/env/domain/demand_read.py")
-REPOSITORY = Path("scripts/env/repos/demands.py")
-TOOL_ROOT = Path("scripts/env/tools/demand_sys")
-CONTEXT = Path("scripts/env/tool_runtime/context.py")
-CLI = Path("tools/launcher/cli.py")
-ROLE_AUTH = Path("scripts/env/tool_runtime/role_auth.py")
-CONTEXT_IMPL = Path("scripts/env/tools/context/_impl.py")
-DAEMON_ADAPTER = Path("tools/launcher/demand_sys_daemon_adapter.py")
-DEMAND_TRIAGE_HANDLER = Path("tools/launcher/demand_triage_handler.py")
-DEMAND_ORCHESTRATION_HANDLER = Path("tools/launcher/demand_orchestration_handler.py")
-DEMAND_ORCHESTRATION_SKILL = Path("buddyswitch/skills/shared/demand-orchestration/SKILL.md")
+DOMAIN = Path("src/buddyswitch/env/domain/demand_sys.py")
+READ_MODEL = Path("src/buddyswitch/env/domain/demand_read.py")
+REPOSITORY = Path("src/buddyswitch/env/repos/demands.py")
+TOOL_ROOT = Path("src/buddyswitch/env/tools/demand_sys")
+CONTEXT = Path("src/buddyswitch/env/tool_runtime/context.py")
+CLI = Path("src/buddyswitch/launcher/cli.py")
+ROLE_AUTH = Path("src/buddyswitch/env/tool_runtime/role_auth.py")
+CONTEXT_IMPL = Path("src/buddyswitch/env/tools/context/_impl.py")
+DAEMON_ADAPTER = Path("src/buddyswitch/launcher/demand_sys_daemon_adapter.py")
+DEMAND_TRIAGE_HANDLER = Path("src/buddyswitch/launcher/demand_triage_handler.py")
+DEMAND_ORCHESTRATION_HANDLER = Path("src/buddyswitch/launcher/demand_orchestration_handler.py")
+DEMAND_ORCHESTRATION_SKILL = Path("src/buddyswitch/skills/shared/demand-orchestration/SKILL.md")
 ARCH_ROOT = Path("docs/arch")
-SKILLS_ROOT = Path("buddyswitch/skills")
-ROLE_ROOT = Path("tools/launcher/assets/roles")
+SKILLS_ROOT = Path("src/buddyswitch/skills")
+ROLE_ROOT = Path("src/buddyswitch/launcher/assets/roles")
 GENERIC_DAEMON_PATHS = (
-    Path("tools/launcher/daemon_contracts.py"),
-    Path("tools/launcher/daemon_state.py"),
-    Path("tools/launcher/daemon_runtime.py"),
-    Path("tools/launcher/daemon_core.py"),
-    Path("tools/launcher/daemon_mailbox.py"),
-    Path("scripts/env/tool_runtime/daemon_client.py"),
+    Path("src/buddyswitch/launcher/daemon_contracts.py"),
+    Path("src/buddyswitch/launcher/daemon_state.py"),
+    Path("src/buddyswitch/launcher/daemon_runtime.py"),
+    Path("src/buddyswitch/launcher/daemon_core.py"),
+    Path("src/buddyswitch/launcher/daemon_mailbox.py"),
+    Path("src/buddyswitch/env/tool_runtime/daemon_client.py"),
 )
 
 
@@ -53,7 +53,7 @@ def _imports(relative: Path) -> set[str]:
 
 def _call_owners(name: str) -> list[str]:
     owners: list[str] = []
-    for root in (REPO_ROOT / "scripts" / "env", REPO_ROOT / "tools" / "launcher"):
+    for root in (REPO_ROOT / "src" / "buddyswitch" / "env", REPO_ROOT / "src" / "buddyswitch" / "launcher"):
         for path in sorted(root.rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             if any(
@@ -129,14 +129,14 @@ def test_dependency_direction_stays_inside_the_demand_owner_boundary() -> None:
     tool_impl_imports = _imports(TOOL_ROOT / "_impl.py")
     context_imports = _imports(CONTEXT)
 
-    assert "env.repos.demands" in domain_imports
-    assert "env.repos.runtime_files" in domain_imports
+    assert "buddyswitch.env.repos.demands" in domain_imports
+    assert "buddyswitch.env.repos.runtime_files" in domain_imports
     assert "runtime_files" in repository_imports
-    assert "env.domain.demand_sys" in read_imports
-    assert not any(name.startswith("env.repos") for name in read_imports)
-    assert not any(name.startswith("env.domain") for name in tool_impl_imports)
-    assert not any(name.startswith("env.repos") for name in tool_impl_imports)
-    assert "env.domain.demand_sys" in context_imports
+    assert "buddyswitch.env.domain.demand_sys" in read_imports
+    assert not any(name.startswith("buddyswitch.env.repos") for name in read_imports)
+    assert not any(name.startswith("buddyswitch.env.domain") for name in tool_impl_imports)
+    assert not any(name.startswith("buddyswitch.env.repos") for name in tool_impl_imports)
+    assert "buddyswitch.env.domain.demand_sys" in context_imports
 
     impl_text = (REPO_ROOT / TOOL_ROOT / "_impl.py").read_text(encoding="utf-8")
     assert 'getattr(getattr(context, "rules", None), "demand_sys", None)' in impl_text
@@ -191,15 +191,15 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
         assert "demand_sys" not in source, relative
         assert "demand-sys" not in source, relative
 
-    handler = Path("tools/launcher/im_wake_handler.py")
-    adapter = Path("tools/launcher/demand_sys_daemon_adapter.py")
+    handler = Path("src/buddyswitch/launcher/im_wake_handler.py")
+    adapter = Path("src/buddyswitch/launcher/demand_sys_daemon_adapter.py")
     handler_imports = _imports(handler)
     adapter_imports = _imports(adapter)
-    assert "demand_sys_daemon_adapter" in handler_imports
-    assert "env.services.messages" in handler_imports
+    assert "buddyswitch.launcher.demand_sys_daemon_adapter" in handler_imports
+    assert "buddyswitch.env.services.messages" in handler_imports
     assert not any("task_sys" in name for name in handler_imports)
-    assert "env.domain.demand_sys" not in adapter_imports
-    assert not any("env.repos.demands" in name for name in adapter_imports)
+    assert "buddyswitch.env.domain.demand_sys" not in adapter_imports
+    assert not any("buddyswitch.env.repos.demands" in name for name in adapter_imports)
     adapter_source = (REPO_ROOT / adapter).read_text(encoding="utf-8").lower()
     assert "task_sys" not in adapter_source
     assert "task sys" not in adapter_source
@@ -207,41 +207,41 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
     assert "task selection" not in adapter_source
 
     triage_imports = _imports(DEMAND_TRIAGE_HANDLER)
-    assert "env.domain.demand_sys" in triage_imports
-    assert "env.domain.task_sys" not in triage_imports
-    assert "daemon_contracts" in triage_imports
+    assert "buddyswitch.env.domain.demand_sys" in triage_imports
+    assert "buddyswitch.env.domain.task_sys" not in triage_imports
+    assert "buddyswitch.launcher.daemon_contracts" in triage_imports
 
     orchestration_imports = _imports(DEMAND_ORCHESTRATION_HANDLER)
-    assert "env.domain.demand_sys" in orchestration_imports
-    assert "env.domain.task_sys" in orchestration_imports
-    assert "daemon_contracts" in orchestration_imports
-    instance_daemon_source = (REPO_ROOT / "tools/launcher/instance_daemon.py").read_text(encoding="utf-8")
+    assert "buddyswitch.env.domain.demand_sys" in orchestration_imports
+    assert "buddyswitch.env.domain.task_sys" in orchestration_imports
+    assert "buddyswitch.launcher.daemon_contracts" in orchestration_imports
+    instance_daemon_source = (REPO_ROOT / "src/buddyswitch/launcher/instance_daemon.py").read_text(encoding="utf-8")
     assert "DemandTriageHandler()" in instance_daemon_source
     assert "DemandOrchestrationHandler()" in instance_daemon_source
 
-    track_handler = Path("tools/launcher/track_comment_added_handler.py")
+    track_handler = Path("src/buddyswitch/launcher/track_comment_added_handler.py")
     track_imports = _imports(track_handler)
     track_source = (REPO_ROOT / track_handler).read_text(encoding="utf-8")
-    actor_session = (REPO_ROOT / "tools/launcher/actor_session.py").read_text(encoding="utf-8")
-    assert "demand_sys_daemon_adapter" in track_imports
+    actor_session = (REPO_ROOT / "src/buddyswitch/launcher/actor_session.py").read_text(encoding="utf-8")
+    assert "buddyswitch.launcher.demand_sys_daemon_adapter" in track_imports
     assert not any("task_sys" in name for name in track_imports)
     assert "enqueue_inbound(" in track_source
-    assert not (REPO_ROOT / "tools/launcher/task_sys_ingress.py").exists()
+    assert not (REPO_ROOT / "src/buddyswitch/launcher/task_sys_ingress.py").exists()
     assert "demand_sys" not in actor_session
     assert "demand-sys" not in actor_session
 
 
 def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
-    tool_root = REPO_ROOT / "scripts" / "env" / "tools"
+    tool_root = REPO_ROOT / "src" / "buddyswitch" / "env" / "tools"
     assert (tool_root / "demand_sys" / "tool.py").is_file()
     assert not (tool_root / "demand").exists()
     assert not (tool_root / "demand_v2").exists()
 
     read_imports = _imports(READ_MODEL)
     cli_imports = _imports(CLI)
-    assert "env.domain.demand_sys" in read_imports
-    assert "env.domain.demand_read" in cli_imports
-    assert not any(name.startswith("env.repos") for name in cli_imports)
+    assert "buddyswitch.env.domain.demand_sys" in read_imports
+    assert "buddyswitch.env.domain.demand_read" in cli_imports
+    assert not any(name.startswith("buddyswitch.env.repos") for name in cli_imports)
 
     cli_source = (REPO_ROOT / CLI).read_text(encoding="utf-8")
     assert "list_external_demands" in cli_source
@@ -249,7 +249,7 @@ def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
     assert "demand-sys" not in cli_source
     assert "OBJECTS_ROOT" not in cli_source
 
-    for path in (REPO_ROOT / "scripts" / "env").rglob("*.py"):
+    for path in (REPO_ROOT / "src" / "buddyswitch" / "env").rglob("*.py"):
         if path in {
             REPO_ROOT / DOMAIN,
             REPO_ROOT / READ_MODEL,
@@ -264,7 +264,7 @@ def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
 
 
 def test_demand_public_surface_has_one_four_action_definition_and_no_goal_filter() -> None:
-    from env.tools.demand_sys.tool import DEFINITION
+    from buddyswitch.env.tools.demand_sys.tool import DEFINITION
 
     assert {action.name for action in DEFINITION.actions} == {
         "list",
@@ -285,7 +285,7 @@ def test_demand_public_surface_has_one_four_action_definition_and_no_goal_filter
     for retired_definition in ("def create(", "def revise(", "def cancel("):
         assert retired_definition not in domain_source
     assert "actor_creation_" + "receipts" not in repository_source
-    assert not (REPO_ROOT / "tools/launcher/demand_triage_mcp_server.py").exists()
+    assert not (REPO_ROOT / "src/buddyswitch/launcher/demand_triage_mcp_server.py").exists()
 
 
 def test_current_architecture_allows_only_opaque_task_reference_collaboration() -> None:

@@ -6,11 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import demand_triage_runtime
-import side_thread_registry
-from env.domain import demand_sys, task_sys
-from env.repos import demands
-from env.services import messages as message_service
+from buddyswitch.launcher import demand_triage_runtime
+from buddyswitch.launcher import side_thread_registry
+from buddyswitch.env.domain import demand_sys, task_sys
+from buddyswitch.env.repos import demands
+from buddyswitch.env.services import messages as message_service
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 
 

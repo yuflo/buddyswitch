@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
-from tools.launcher import imessage_channel  # noqa: E402
+from buddyswitch.launcher import imessage_channel  # noqa: E402
 
 
 @dataclass(frozen=True)

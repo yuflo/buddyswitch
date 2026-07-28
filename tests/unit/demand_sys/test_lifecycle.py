@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from env.domain import demand_sys
-from env.repos import demands
+from buddyswitch.env.domain import demand_sys
+from buddyswitch.env.repos import demands
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

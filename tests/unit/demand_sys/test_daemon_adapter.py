@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import demand_sys_daemon_adapter
+from buddyswitch.launcher import demand_sys_daemon_adapter
 
 
 class _State:

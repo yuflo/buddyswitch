@@ -11,12 +11,15 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-import env_legacy_store as env_store  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 
@@ -66,7 +69,7 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
         self.workspace = RuntimeTestWorkspace()
         self.addCleanup(self.workspace.close)
         self.runtime_root = self.workspace.root
-        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
+        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instance_json = self.workspace.path("instance.json")
         self.actor_id = self.workspace.actor_id(role="pm", label="act-feedback-runless")
@@ -159,7 +162,7 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
         self.assertFalse(payload["state_changed"])
 
     def test_artifact_owner_scope_rejection_has_structured_feedback(self) -> None:
-        env_store.create_artifact_revision(
+        object_builders.create_artifact_revision(
             artifact_id="art-pm-owner-scope-r1",
             title="Owner scope",
             summary="pm private",
@@ -279,9 +282,9 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
         )
         self.assertTrue(published["ok"], msg=published)
 
-        before_track_a = deepcopy(env_store.get_track("track-feedback-a"))
-        before_track_b = deepcopy(env_store.get_track("track-feedback-b"))
-        before_artifact = deepcopy(env_store.get_artifact("art-feedback-r1"))
+        before_track_a = deepcopy(track_repo.get_track("track-feedback-a"))
+        before_track_b = deepcopy(track_repo.get_track("track-feedback-b"))
+        before_artifact = deepcopy(artifact_repo.get_artifact("art-feedback-r1"))
 
         duplicate = self._dispatch(
             role="pm",
@@ -300,10 +303,10 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
         )
         self.assertTrue(cross_track.get("ok"), msg=cross_track)
         self.assertEqual(set(cross_track.get("updated_ids", [])), {"track-feedback-b"})
-        self.assertEqual(env_store.get_track("track-feedback-a"), before_track_a)
-        self.assertNotEqual(env_store.get_track("track-feedback-b"), before_track_b)
-        self.assertEqual(env_store.get_artifact("art-feedback-r1"), before_artifact)
-        before_track_b = deepcopy(env_store.get_track("track-feedback-b"))
+        self.assertEqual(track_repo.get_track("track-feedback-a"), before_track_a)
+        self.assertNotEqual(track_repo.get_track("track-feedback-b"), before_track_b)
+        self.assertEqual(artifact_repo.get_artifact("art-feedback-r1"), before_artifact)
+        before_track_b = deepcopy(track_repo.get_track("track-feedback-b"))
 
         wrong_owner = self._dispatch(
             role="design",
@@ -314,9 +317,9 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
         self._assert_rejection_contract(wrong_owner)
         self.assertEqual((wrong_owner.get("error") or {}).get("code"), "E_TRACK_ARTIFACT_SCOPE")
 
-        self.assertEqual(env_store.get_track("track-feedback-a"), before_track_a)
-        self.assertEqual(env_store.get_track("track-feedback-b"), before_track_b)
-        self.assertEqual(env_store.get_artifact("art-feedback-r1"), before_artifact)
+        self.assertEqual(track_repo.get_track("track-feedback-a"), before_track_a)
+        self.assertEqual(track_repo.get_track("track-feedback-b"), before_track_b)
+        self.assertEqual(artifact_repo.get_artifact("art-feedback-r1"), before_artifact)
 
     def test_write_actions_report_state_change_durability_state_changes_and_next_steps(self) -> None:
         track = self._dispatch(
@@ -396,7 +399,7 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
                 )
 
     def test_removed_track_relation_actions_expose_recovery_contract(self) -> None:
-        env_store.create_track(
+        object_builders.create_track(
             "track-feedback-foreign",
             "Foreign scope track",
             owner_actor={"actor_id": "act-pm-feedback", "role_id": "pm"},

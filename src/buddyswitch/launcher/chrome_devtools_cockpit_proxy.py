@@ -1,0 +1,1452 @@
+"""BuddySwitch stdio proxy for Chrome DevTools MCP focus control."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+from datetime import datetime, timedelta, timezone
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+import threading
+import time
+from typing import Any
+from urllib.parse import urlencode
+
+from buddyswitch.env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
+from buddyswitch.env import cdp_target  # noqa: E402
+from buddyswitch.runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
+from buddyswitch.runtime_kernel import process_identity  # noqa: E402
+
+
+STATIC_TOOLS_PATH = Path(__file__).resolve().parent / "assets" / "chrome-devtools-mcp-1.1.1-tools.json"
+DEFAULT_UPSTREAM_COMMAND = "npx chrome-devtools-mcp@1.1.1"
+UPSTREAM_EXIT_GRACE_SECONDS = 2.0
+FOCUS_METHODS = {"Page.bringToFront", "Target.activateTarget"}
+PAGE_SCOPED_USE_TOOLS = {
+    "take_snapshot",
+    "take_screenshot",
+    "click",
+    "type_text",
+    "evaluate_script",
+    "navigate_page",
+    "wait_for",
+    "fill",
+    "press_key",
+}
+BROWSER_SESSION_TOOL_DESCRIPTIONS = {
+    "new_page": "BuddySwitch chrome-devtools-cockpit forwards page creation to upstream Chrome DevTools MCP new_page with background=true and tracks the opened Chrome tab for idle cleanup.",
+    "list_pages": "Use chrome-devtools-cockpit list_pages to inspect upstream MCP pageId values, selected-page state, URLs, titles, and BuddySwitch stable tab resource projection.",
+    "select_page": "BuddySwitch selects the requested upstream MCP pageId without foreground activation and tracks its Chrome tab for idle cleanup.",
+    "take_snapshot": "Use after list_pages/select_page to inspect the selected upstream MCP pageId content.",
+    "take_screenshot": "Use after list_pages/select_page to capture the selected upstream MCP pageId.",
+    "navigate_page": "Page-scoped upstream MCP action; navigation refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "click": "Page-scoped upstream MCP action; interaction refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "type_text": "Page-scoped upstream MCP action; interaction refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "evaluate_script": "Page-scoped upstream MCP action; evaluation refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "wait_for": "Page-scoped upstream MCP action; waiting refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "fill": "Page-scoped upstream MCP action; form filling refreshes BuddySwitch selected upstream MCP pageId projection.",
+    "press_key": "Page-scoped upstream MCP action; keyboard input refreshes BuddySwitch selected upstream MCP pageId projection.",
+}
+SEARCH_ENGINES = ("google", "web", "reddit", "x")
+SEARCH_PAGE_TOOL = {
+    "name": "search_page",
+    "description": (
+        "BuddySwitch chrome-devtools-cockpit.search_page builds a supported search URL and forwards it "
+        "to upstream Chrome DevTools MCP new_page with background=true, then records the returned "
+        "selected Chrome tab as the active idle-tracked resource."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["query"],
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Non-empty search query text.",
+            },
+            "engine": {
+                "type": "string",
+                "description": "Optional search engine.",
+                "enum": list(SEARCH_ENGINES),
+            },
+        },
+    },
+}
+SELECTED_URL_RE = re.compile(r"(https?://\S+)\s+\[selected\]", re.IGNORECASE)
+SELECTED_PAGE_LINE_RE = re.compile(
+    r"^\s*(?P<page_id>\d+)\s*:\s*(?P<url>\S+)(?:\s+.*?)?\s+\[selected\]\s*$",
+    re.IGNORECASE,
+)
+LIFECYCLE_WARNING_PREFIX = "Browser lifecycle warning:"
+
+
+def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
+    parser = argparse.ArgumentParser(description="Proxy Chrome DevTools MCP through BuddySwitch focus controls.")
+    parser.add_argument(
+        "--upstream-command",
+        default=os.environ.get("BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_COMMAND", DEFAULT_UPSTREAM_COMMAND),
+        help="Command used to start the upstream Chrome DevTools MCP server.",
+    )
+    parser.add_argument("--instance-root", help="BuddySwitch instance root for browser lifecycle state.")
+    parser.add_argument("--broker-socket", help="Runtime broker Unix socket path for product-mode browser acquisition.")
+    return parser.parse_known_args(argv)
+
+
+def apply_broker_socket_arg(args: argparse.Namespace) -> None:
+    raw = getattr(args, "broker_socket", None)
+    if isinstance(raw, str) and raw.strip():
+        os.environ["BUDDYSWITCH_RUNTIME_BROKER_SOCKET"] = raw.strip()
+
+
+def build_upstream_argv(args: argparse.Namespace, passthrough_args: list[str], browser_url: str) -> list[str]:
+    upstream = shlex.split(args.upstream_command)
+    if not upstream:
+        raise ValueError("--upstream-command must not be empty")
+    argv = upstream + passthrough_args
+    for required_flag in ("--experimental-interop-tools", "--experimental-structured-content"):
+        if required_flag not in argv:
+            argv.append(required_flag)
+    return argv + [f"--browser-url={browser_url}"]
+
+
+def is_jsonrpc_request(message: dict[str, Any]) -> bool:
+    return "id" in message
+
+
+def tool_error_response(request: dict[str, Any], text: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": request.get("jsonrpc", "2.0"),
+        "id": request.get("id"),
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": text,
+                }
+            ],
+            "isError": True,
+        },
+    }
+
+
+def tool_success_response(request: dict[str, Any], text: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": request.get("jsonrpc", "2.0"),
+        "id": request.get("id"),
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": text,
+                }
+            ],
+        },
+    }
+
+
+def rpc_error_response(request: dict[str, Any], text: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": request.get("jsonrpc", "2.0"),
+        "id": request.get("id"),
+        "error": {
+            "code": -32000,
+            "message": text,
+        },
+    }
+
+
+def initialize_response(request: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "jsonrpc": request.get("jsonrpc", "2.0"),
+        "id": request.get("id"),
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {
+                "name": "chrome-devtools-cockpit",
+                "version": "1.1.1",
+            },
+        },
+    }
+
+
+def upstream_initialize_request(request_id: str, client_initialize_params: dict[str, Any] | None) -> dict[str, Any]:
+    params = copy.deepcopy(client_initialize_params) if isinstance(client_initialize_params, dict) else {}
+    params.setdefault("protocolVersion", "2024-11-05")
+    params.setdefault("capabilities", {})
+    params.setdefault(
+        "clientInfo",
+        {
+            "name": "buddyswitch-chrome-devtools-cockpit",
+            "version": "1.0.0",
+        },
+    )
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "initialize",
+        "params": params,
+    }
+
+
+def upstream_initialized_notification() -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {},
+    }
+
+
+def load_static_tools() -> list[dict[str, Any]]:
+    payload = json.loads(STATIC_TOOLS_PATH.read_text(encoding="utf-8"))
+    tools = payload.get("tools")
+    if not isinstance(tools, list):
+        raise RuntimeError("static Chrome DevTools MCP tools asset is missing tools list")
+    return [dict(tool) for tool in tools if isinstance(tool, dict)]
+
+
+def tools_list_response(request: dict[str, Any]) -> dict[str, Any]:
+    tools = load_static_tools()
+    if not any(tool.get("name") == SEARCH_PAGE_TOOL["name"] for tool in tools):
+        tools.append(copy.deepcopy(SEARCH_PAGE_TOOL))
+    return patch_tool_list_message(
+        {
+            "jsonrpc": request.get("jsonrpc", "2.0"),
+            "id": request.get("id"),
+            "result": {"tools": tools},
+        }
+    )
+
+
+def acquire_browser_url() -> str:
+    try:
+        result = request_runtime_broker("browser.acquire", {"reason": "chrome-devtools-cockpit"})
+    except RuntimeBrokerError as exc:
+        raise RuntimeError(f"browser acquire failed: {exc.message}") from exc
+    if result.get("ok") is not True:
+        error = result.get("error") if isinstance(result.get("error"), dict) else {}
+        detail = error.get("message") if isinstance(error.get("message"), str) else "broker returned a failed result"
+        raise RuntimeError(f"browser acquire failed: {detail}")
+    browser_url = result.get("browser_url")
+    if not isinstance(browser_url, str) or not browser_url.strip():
+        raise RuntimeError("browser acquire failed: broker did not return browser_url")
+    return browser_url.strip()
+
+
+def focus_block_text(method: str) -> str:
+    return (
+        f"BuddySwitch blocked {method} because chrome-devtools-cockpit runs in "
+        "non-activating mode. Use a user-visible handoff before requesting browser focus."
+    )
+
+
+def _instance_root_path(instance_root: str | None) -> Path | None:
+    if not isinstance(instance_root, str) or not instance_root.strip():
+        return None
+    return Path(instance_root.strip())
+
+
+def _idle_hint_from_result(result: dict[str, Any] | None) -> str:
+    idle_seconds = result.get("idle_seconds") if isinstance(result, dict) else None
+    if isinstance(idle_seconds, int):
+        return f"Browser page idle refreshed: {idle_seconds}s."
+    return "Browser page idle refreshed."
+
+
+def _refresh_active_idle_hint(
+    *,
+    root: Path,
+    tab_target_id: object,
+    target_url: str | None = None,
+) -> str:
+    result = browser_lifecycle.refresh_active_tab_idle(
+        instance_root=root,
+        tab_target_id=tab_target_id,
+        target_url=target_url,
+    )
+    return _idle_hint_from_result(result)
+
+
+def _normalize_search_query(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    query = value.strip()
+    return query or None
+
+
+def _normalize_search_engine(value: object) -> str | None:
+    if value is None:
+        return "google"
+    if not isinstance(value, str):
+        return None
+    engine = value.strip().lower()
+    if not engine:
+        return "google"
+    if engine not in SEARCH_ENGINES:
+        return None
+    return engine
+
+
+def _build_search_url(query: str, engine: str) -> str:
+    if engine in {"google", "web"}:
+        return f"https://www.google.com/search?{urlencode({'q': query})}"
+    if engine == "reddit":
+        return f"https://www.reddit.com/search/?{urlencode({'q': query})}"
+    if engine == "x":
+        return f"https://x.com/search?{urlencode({'q': query, 'src': 'typed_query'})}"
+    raise ValueError(f"unsupported search engine: {engine}")
+
+
+def _new_page_message(message: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+    rewritten = copy.deepcopy(message)
+    rewritten_params = rewritten.setdefault("params", {})
+    rewritten_params["name"] = "new_page"
+    rewritten_arguments = dict(arguments)
+    rewritten_arguments["background"] = True
+    rewritten_params["arguments"] = rewritten_arguments
+    return rewritten
+
+
+def _target_id(target: dict[str, Any]) -> str | None:
+    for key in ("id", "targetId"):
+        value = target.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _target_url(target: dict[str, Any]) -> str | None:
+    value = target.get("url")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _target_map(targets: object) -> dict[str, dict[str, Any]]:
+    if not isinstance(targets, list):
+        return {}
+    mapped: dict[str, dict[str, Any]] = {}
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        target_id = _target_id(target)
+        if target_id is not None:
+            mapped[target_id] = dict(target)
+    return mapped
+
+
+def _open_cleanup_metadata(browser_url: str) -> dict[str, Any]:
+    try:
+        targets = cdp_target.list_page_targets(browser_url)
+    except Exception as exc:
+        return {"pre_open_page_targets_error": str(exc)}
+    return {"pre_open_page_targets": targets}
+
+
+def _format_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc(value: str) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _browser_session_state_text(*, browser_url: str, instance_root: str | None) -> str:
+    del browser_url
+    root = _instance_root_path(instance_root)
+    if root is None:
+        return "BuddySwitch browser page resource projection:\n- unavailable: instance root missing"
+    try:
+        idle_state = browser_lifecycle._read_page_idle_state(root)
+    except Exception as exc:
+        return f"BuddySwitch browser page resource projection:\n- unavailable: {exc}"
+    active_target_id = idle_state.get("active_tab_target_id")
+    active_target_id = active_target_id.strip() if isinstance(active_target_id, str) and active_target_id.strip() else None
+    idle_targets = idle_state.get("targets")
+    idle_targets = idle_targets if isinstance(idle_targets, dict) else {}
+
+    lines = [
+        "BuddySwitch browser tab resource projection:",
+        f"- active_tab_target_id: {active_target_id or '<none>'}",
+        "- targets:",
+    ]
+    if not idle_targets:
+        lines.append("  - <none>")
+        return "\n".join(lines)
+    for target_id, target_state in sorted(idle_targets.items()):
+        if not isinstance(target_state, dict):
+            continue
+        title = target_state.get("title")
+        url = target_state.get("url")
+        last_used_at = target_state.get("last_used_at")
+        idle_seconds = target_state.get("idle_seconds")
+        expires_at = None
+        parsed_last_used = _parse_utc(last_used_at) if isinstance(last_used_at, str) else None
+        if parsed_last_used is not None:
+            if isinstance(idle_seconds, int) and not isinstance(idle_seconds, bool) and idle_seconds > 0:
+                expires_at = _format_utc(parsed_last_used + timedelta(seconds=idle_seconds))
+        lines.extend(
+            [
+                f"  - tab_target_id: {target_id}",
+                f"    title: {title if isinstance(title, str) and title else '<untitled>'}",
+                f"    url: {url if isinstance(url, str) and url else '<unknown>'}",
+                f"    active: {'true' if target_id == active_target_id else 'false'}",
+                "    idle_tracked: true",
+            ]
+        )
+        if isinstance(last_used_at, str) and last_used_at.strip():
+            lines.append(f"    last_used_at: {last_used_at.strip()}")
+        if expires_at is not None:
+            lines.append(f"    idle_expires_at: {expires_at}")
+    return "\n".join(lines)
+
+
+def _schedule_release_if_no_tracked_pages(root: Path) -> str | None:
+    try:
+        state = browser_lifecycle._read_page_idle_state(root)
+        targets = state.get("targets")
+        if isinstance(targets, dict) and targets:
+            return None
+        browser_lifecycle.schedule_browser_cockpit_release(
+            instance_root=root,
+            reason="page_idle_empty",
+        )
+        return None
+    except Exception as exc:
+        return f"{LIFECYCLE_WARNING_PREFIX} list_pages idle release was not scheduled: {exc}"
+
+
+def _refresh_tab_idle_hint(
+    *,
+    root: Path,
+    tab_target_id: object,
+    target_url: str | None = None,
+    active: bool = False,
+) -> str:
+    result = browser_lifecycle.refresh_tab_idle(
+        instance_root=root,
+        tab_target_id=tab_target_id,
+        target_url=target_url,
+        active=active,
+    )
+    return _idle_hint_from_result(result)
+
+
+def mutate_tool_call(
+    message: dict[str, Any],
+    browser_url: str,
+    instance_root: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, Any | None]:
+    params = message.get("params")
+    if not isinstance(params, dict):
+        return message, None, None
+    name = params.get("name")
+    arguments = params.get("arguments")
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        return message, None, None
+
+    if name == "search_page":
+        query = _normalize_search_query(arguments.get("query"))
+        if query is None:
+            return None, tool_error_response(
+                message,
+                "BuddySwitch blocked search_page because query must be a non-empty string.",
+            ), None
+        engine = _normalize_search_engine(arguments.get("engine"))
+        if engine is None:
+            return None, tool_error_response(
+                message,
+                f"BuddySwitch blocked search_page because engine must be one of: {', '.join(SEARCH_ENGINES)}.",
+            ), None
+        target_url = _build_search_url(query, engine)
+        return _new_page_message(
+            message,
+            {
+                "url": target_url,
+                "background": True,
+            },
+        ), None, {
+            "kind": "new_page",
+            "source_tool": "search_page",
+            "query": query,
+            "engine": engine,
+            **_open_cleanup_metadata(browser_url),
+        }
+
+    if name == "new_page":
+        if "isolatedContext" in arguments:
+            return None, tool_error_response(
+                message,
+                "BuddySwitch blocked new_page with isolatedContext because upstream Chrome DevTools MCP "
+                "does not apply background creation to isolated browser contexts. This keeps the "
+                "chrome-devtools-cockpit path non-activating.",
+            ), None
+        return _new_page_message(message, arguments), None, {"kind": "new_page", **_open_cleanup_metadata(browser_url)}
+
+    if name == "list_pages":
+        return message, None, {"kind": "list_pages"}
+
+    if name == "select_page":
+        rewritten = copy.deepcopy(message)
+        rewritten_params = rewritten.setdefault("params", {})
+        rewritten_arguments = dict(arguments)
+        rewritten_arguments["bringToFront"] = False
+        rewritten_params["arguments"] = rewritten_arguments
+        return rewritten, None, {"kind": "select_page", "page_id": arguments.get("pageId")}
+
+    if name == "close_page":
+        return message, None, {"kind": "close_page", "page_id": arguments.get("pageId")}
+
+    if name in PAGE_SCOPED_USE_TOOLS:
+        return message, None, {"kind": "current_page"}
+
+    return message, None, None
+
+
+def mutate_client_message(
+    message: dict[str, Any],
+    browser_url: str,
+    instance_root: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, Any | None]:
+    method = message.get("method")
+    if method in FOCUS_METHODS and is_jsonrpc_request(message):
+        return None, rpc_error_response(message, focus_block_text(str(method))), None
+    if method == "tools/call":
+        return mutate_tool_call(message, browser_url, instance_root=instance_root)
+    return message, None, None
+
+
+def append_description(value: object, addition: str) -> str:
+    base = value if isinstance(value, str) else ""
+    if addition in base:
+        return base
+    if base:
+        return f"{base}\n\n{addition}"
+    return addition
+
+
+def patch_schema_property(tool: dict[str, Any], property_name: str, description: str) -> None:
+    input_schema = tool.get("inputSchema")
+    if not isinstance(input_schema, dict):
+        return
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return
+    field = properties.get(property_name)
+    if not isinstance(field, dict):
+        return
+    field["description"] = description
+
+
+def patch_tool_list_message(message: dict[str, Any]) -> dict[str, Any]:
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return message
+    tools = result.get("tools")
+    if not isinstance(tools, list):
+        return message
+
+    patched = copy.deepcopy(message)
+    patched_tools = patched["result"]["tools"]
+    for tool in patched_tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        if isinstance(name, str) and name in BROWSER_SESSION_TOOL_DESCRIPTIONS:
+            tool["description"] = append_description(tool.get("description"), BROWSER_SESSION_TOOL_DESCRIPTIONS[name])
+        if name == "new_page":
+            patch_schema_property(
+                tool,
+                "background",
+                "BuddySwitch forces this to true for chrome-devtools-cockpit page creation.",
+            )
+            patch_schema_property(
+                tool,
+                "isolatedContext",
+                "BuddySwitch blocks this parameter because upstream does not apply background creation to this path.",
+            )
+        elif name == "select_page":
+            patch_schema_property(
+                tool,
+                "bringToFront",
+                "BuddySwitch forces this to false for chrome-devtools-cockpit.",
+            )
+    return patched
+
+
+def patch_tool_response_hint(message: dict[str, Any], hint: str) -> dict[str, Any]:
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return message
+    patched = copy.deepcopy(message)
+    patched_result = patched.setdefault("result", {})
+    content = patched_result.get("content")
+    if not isinstance(content, list):
+        content = []
+        patched_result["content"] = content
+    content.append({"type": "text", "text": hint})
+    return patched
+
+
+def tool_response_text(message: dict[str, Any]) -> str:
+    result = message.get("result")
+    if not isinstance(result, dict):
+        return ""
+    content = result.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
+            parts.append(item["text"])
+    return "\n".join(parts)
+
+
+def selected_url_from_response(message: dict[str, Any]) -> str | None:
+    match = SELECTED_URL_RE.search(tool_response_text(message))
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def selected_page_from_new_page_response(message: dict[str, Any]) -> dict[str, str] | None:
+    for line in tool_response_text(message).splitlines():
+        match = SELECTED_PAGE_LINE_RE.match(line)
+        if not match:
+            continue
+        page_id = match.group("page_id").strip()
+        target_url = match.group("url").strip()
+        if not page_id:
+            return None
+        selected_page = {"page_id": page_id}
+        if target_url:
+            selected_page["url"] = target_url
+        return selected_page
+    return None
+
+
+def _tool_response_succeeded(message: dict[str, Any]) -> bool:
+    result = message.get("result")
+    return isinstance(result, dict) and result.get("isError") is not True
+
+
+def _tab_target_id_from_response(message: dict[str, Any]) -> str | None:
+    result = message.get("result")
+    if not isinstance(result, dict) or result.get("isError") is True:
+        return None
+    structured = result.get("structuredContent")
+    if not isinstance(structured, dict):
+        return None
+    tab_id = structured.get("tabId")
+    return tab_id.strip() if isinstance(tab_id, str) and tab_id.strip() else None
+
+
+def _without_structured_content(message: dict[str, Any]) -> dict[str, Any]:
+    result = message.get("result")
+    if not isinstance(result, dict) or "structuredContent" not in result:
+        return message
+    patched = copy.deepcopy(message)
+    patched_result = patched.get("result")
+    if isinstance(patched_result, dict):
+        patched_result.pop("structuredContent", None)
+    return patched
+
+
+def _coerce_mcp_page_id(page_id: object) -> object:
+    if isinstance(page_id, str) and page_id.isdigit():
+        return int(page_id)
+    return page_id
+
+
+def _new_failed_open_targets(metadata: dict[str, Any], *, browser_url: str) -> list[dict[str, Any]]:
+    pre_targets = metadata.get("pre_open_page_targets")
+    if not isinstance(pre_targets, list):
+        return []
+    pre_by_id = _target_map(pre_targets)
+    post_targets = cdp_target.list_page_targets(browser_url)
+    post_by_id = _target_map(post_targets)
+    return [post_by_id[target_id] for target_id in sorted(post_by_id) if target_id not in pre_by_id]
+
+
+def _cleanup_failed_open_targets(
+    message: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    browser_url: str,
+    root: Path | None,
+    not_deliverable_reason: str,
+) -> dict[str, Any]:
+    patched = message
+    if metadata.get("pre_open_page_targets_error"):
+        return patch_tool_response_hint(
+            patched,
+            f"Browser cleanup warning: {not_deliverable_reason}; cleanup snapshot was unavailable before opening: {metadata['pre_open_page_targets_error']}",
+        )
+    try:
+        targets = _new_failed_open_targets(metadata, browser_url=browser_url)
+    except Exception as exc:
+        return patch_tool_response_hint(
+            patched,
+            f"Browser cleanup warning: {not_deliverable_reason}; cleanup snapshot was unavailable after opening: {exc}",
+        )
+    if not targets:
+        return patch_tool_response_hint(
+            patched,
+            f"Browser cleanup: {not_deliverable_reason}; BuddySwitch found no new unmanaged page target for this call.",
+        )
+
+    for target in targets:
+        target_id = _target_id(target)
+        if target_id is None:
+            patched = patch_tool_response_hint(
+                patched,
+                f"Browser cleanup warning: {not_deliverable_reason}; a new page target had no readable target id.",
+            )
+            continue
+        try:
+            cdp_target.close_target(browser_url, target_id)
+        except Exception as exc:
+            if root is None:
+                patched = patch_tool_response_hint(
+                    patched,
+                    f"Browser cleanup warning: {not_deliverable_reason}; immediate close failed for unmanaged page target {target_id}, and instance root was unavailable for scheduling: {exc}",
+                )
+                continue
+            try:
+                browser_lifecycle.schedule_failed_open_page_cleanup(
+                    instance_root=root,
+                    target_id=target_id,
+                    url=_target_url(target),
+                    attempts=1,
+                )
+            except Exception as schedule_exc:
+                patched = patch_tool_response_hint(
+                    patched,
+                    f"Browser cleanup warning: {not_deliverable_reason}; immediate close failed for unmanaged page target {target_id}, and exact cleanup scheduling failed: {schedule_exc}",
+                )
+                continue
+            patched = patch_tool_response_hint(
+                patched,
+                f"Browser cleanup warning: {not_deliverable_reason}; the failed open created an unmanaged page target, immediate close failed ({exc}), and BuddySwitch scheduled short cleanup for it.",
+            )
+            continue
+        patched = patch_tool_response_hint(
+            patched,
+            f"Browser cleanup: {not_deliverable_reason}; the failed open created 1 unmanaged page target, and BuddySwitch closed it before returning this response.",
+        )
+    return patched
+
+
+def patch_tool_response_page_use_metadata(
+    message: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    browser_url: str,
+    instance_root: str | None,
+) -> dict[str, Any]:
+    patched = message
+    page_hint = metadata.get("page_hint")
+    if isinstance(page_hint, str) and page_hint:
+        patched = patch_tool_response_hint(patched, page_hint)
+    kind = metadata.get("kind")
+    root = _instance_root_path(instance_root)
+    if kind == "new_page":
+        selected_page = selected_page_from_new_page_response(message)
+        if not _tool_response_succeeded(message):
+            return _cleanup_failed_open_targets(
+                patched,
+                metadata,
+                browser_url=browser_url,
+                root=root,
+                not_deliverable_reason="upstream new_page failed",
+            )
+        if selected_page is None:
+            patched = patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened page id was not readable from upstream new_page response; this result is not deliverable and browser idle was not refreshed.",
+            )
+            return _cleanup_failed_open_targets(
+                patched,
+                metadata,
+                browser_url=browser_url,
+                root=root,
+                not_deliverable_reason="opened page id was not readable from upstream new_page response and the result is not deliverable",
+            )
+        tab_target_id = metadata.get("tab_target_id")
+        if not isinstance(tab_target_id, str) or not tab_target_id.strip():
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened Chrome tab identity was not available; the page remains usable but idle tracking was not refreshed.",
+            )
+        if root is None:
+            return patched
+        try:
+            hint = _refresh_active_idle_hint(
+                root=root,
+                tab_target_id=tab_target_id,
+                target_url=selected_page.get("url"),
+            )
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} opened page idle was not refreshed: {exc}",
+            )
+        return patch_tool_response_hint(patched, hint)
+    if not _tool_response_succeeded(message):
+        return patched
+    if root is None:
+        return patched
+    if kind == "list_pages":
+        patched = patch_tool_response_hint(patched, _browser_session_state_text(browser_url=browser_url, instance_root=instance_root))
+        warning = _schedule_release_if_no_tracked_pages(root)
+        if warning:
+            patched = patch_tool_response_hint(patched, warning)
+        return patched
+    if kind == "select_page":
+        tab_target_id = metadata.get("tab_target_id")
+        if not isinstance(tab_target_id, str) or not tab_target_id.strip():
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} selected Chrome tab identity is missing; browser idle was not refreshed.",
+            )
+        target_url = selected_url_from_response(message)
+        try:
+            hint = _refresh_active_idle_hint(
+                root=root,
+                tab_target_id=tab_target_id,
+                target_url=target_url,
+            )
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} selected page idle was not refreshed: {exc}",
+            )
+        return patch_tool_response_hint(patched, hint)
+    if kind == "current_page":
+        return patched
+    if kind == "close_page":
+        tab_target_id = metadata.get("tab_target_id")
+        if not isinstance(tab_target_id, str) or not tab_target_id.strip():
+            return patched
+        try:
+            state = browser_lifecycle.forget_tab_idle_target(
+                instance_root=root,
+                tab_target_id=tab_target_id,
+            )
+            targets = state.get("targets")
+            if isinstance(targets, dict) and not targets:
+                browser_lifecycle.schedule_browser_cockpit_release(
+                    instance_root=root,
+                    reason="page_idle_empty",
+                )
+        except Exception as exc:
+            return patch_tool_response_hint(
+                patched,
+                f"{LIFECYCLE_WARNING_PREFIX} closed tab lifecycle state was not reconciled: {exc}",
+            )
+        return patched
+    return patched
+
+
+def write_json_line(message: dict[str, Any], output_lock: threading.Lock) -> None:
+    with output_lock:
+        sys.stdout.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+
+
+def write_raw_line(line: str, output_lock: threading.Lock) -> None:
+    with output_lock:
+        sys.stdout.write(line)
+        if not line.endswith("\n"):
+            sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
+def close_upstream(upstream: subprocess.Popen[str]) -> int:
+    if upstream.stdin is not None and not upstream.stdin.closed:
+        try:
+            upstream.stdin.close()
+        except OSError:
+            pass
+    try:
+        return upstream.wait(timeout=UPSTREAM_EXIT_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        upstream.terminate()
+    try:
+        return upstream.wait(timeout=UPSTREAM_EXIT_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        upstream.kill()
+        return upstream.wait(timeout=UPSTREAM_EXIT_GRACE_SECONDS)
+
+
+class UpstreamManager:
+    def __init__(
+        self,
+        *,
+        args: argparse.Namespace,
+        passthrough_args: list[str],
+        instance_root: str | None,
+        output_lock: threading.Lock,
+        client_initialize_params: dict[str, Any] | None = None,
+    ) -> None:
+        self.args = args
+        self.passthrough_args = passthrough_args
+        self.instance_root = instance_root
+        self.output_lock = output_lock
+        self.client_initialize_params = copy.deepcopy(client_initialize_params)
+        self.ids_lock = threading.Lock()
+        self.pending_condition = threading.Condition(self.ids_lock)
+        self.upstream_write_lock = threading.Lock()
+        self.upstream: subprocess.Popen[str] | None = None
+        self.relay: threading.Thread | None = None
+        self.browser_url: str | None = None
+        self.initialized = False
+        self.generation = 0
+        self.drop_response_ids: set[Any] = set()
+        self.pending_requests: dict[Any, tuple[dict[str, Any], subprocess.Popen[str]]] = {}
+        self.pending_hints: dict[Any, tuple[Any, str, subprocess.Popen[str]]] = {}
+        self.internal_requests: dict[Any, dict[str, Any]] = {}
+        self.internal_sequence = 0
+        self.selected_tab_target_id: str | None = None
+
+    def set_client_initialize_params(self, params: Any) -> None:
+        self.client_initialize_params = copy.deepcopy(params) if isinstance(params, dict) else {}
+
+    def is_started(self) -> bool:
+        return self.upstream is not None and self.upstream.poll() is None
+
+    def start(self, browser_url: str) -> None:
+        try:
+            upstream_argv = build_upstream_argv(self.args, self.passthrough_args, browser_url)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        try:
+            upstream = subprocess.Popen(
+                upstream_argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=sys.stderr,
+                text=True,
+                bufsize=1,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise RuntimeError(f"failed to start upstream chrome-devtools-mcp: {exc}") from exc
+        self.upstream = upstream
+        self.browser_url = browser_url
+        self.initialized = False
+        self.generation += 1
+        self.selected_tab_target_id = None
+        self.write_pid_markers(upstream)
+        self.relay = threading.Thread(target=self._relay, args=(upstream, browser_url), daemon=True)
+        self.relay.start()
+
+    def ensure_started(self, browser_url: str) -> None:
+        if self.is_started() and self.browser_url == browser_url:
+            return
+        if self.upstream is not None:
+            self.stop()
+        self.start(browser_url)
+
+    def ensure_initialized(self) -> None:
+        if self.initialized:
+            return
+        upstream = self._active_upstream()
+        request_id = f"buddyswitch.initialize.{self.generation}"
+        with self.ids_lock:
+            self.drop_response_ids.add(request_id)
+        self._write_to_upstream(upstream, upstream_initialize_request(request_id, self.client_initialize_params))
+        self._write_to_upstream(upstream, upstream_initialized_notification())
+        self.initialized = True
+
+    def send_request(self, message: dict[str, Any], response_hint: Any | None) -> None:
+        upstream = self._active_upstream()
+        metadata = copy.deepcopy(response_hint) if isinstance(response_hint, dict) else response_hint
+        root = _instance_root_path(self.instance_root)
+        if isinstance(metadata, dict) and root is not None and metadata.get("kind") == "current_page":
+            if self.selected_tab_target_id is None:
+                self._delay_for_tab_identity(upstream, message, metadata, page_id=None)
+                return
+            try:
+                metadata["page_hint"] = _refresh_tab_idle_hint(
+                    root=root,
+                    tab_target_id=self.selected_tab_target_id,
+                    active=True,
+                )
+            except Exception as exc:
+                metadata["page_hint"] = f"{LIFECYCLE_WARNING_PREFIX} current tab idle was not refreshed: {exc}"
+        if isinstance(metadata, dict) and root is not None and metadata.get("kind") == "close_page":
+            self._delay_for_tab_identity(upstream, message, metadata, page_id=metadata.get("page_id"))
+            return
+        self._send_client_request(upstream, message, metadata)
+
+    def _send_client_request(
+        self,
+        upstream: subprocess.Popen[str],
+        message: dict[str, Any],
+        response_hint: Any | None,
+    ) -> None:
+        message_id = message.get("id")
+        if is_jsonrpc_request(message):
+            with self.pending_condition:
+                self.pending_requests[message_id] = (copy.deepcopy(message), upstream)
+                if response_hint:
+                    self.pending_hints[message_id] = (response_hint, self.browser_url or "", upstream)
+                self.pending_condition.notify_all()
+        try:
+            self._write_to_upstream(upstream, message)
+        except RuntimeError:
+            if is_jsonrpc_request(message):
+                with self.pending_condition:
+                    self.pending_requests.pop(message_id, None)
+                    self.pending_hints.pop(message_id, None)
+                    self.pending_condition.notify_all()
+            raise
+
+    def _delay_for_tab_identity(
+        self,
+        upstream: subprocess.Popen[str],
+        message: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        page_id: object,
+    ) -> None:
+        client_id = message.get("id")
+        with self.pending_condition:
+            self.pending_requests[client_id] = (copy.deepcopy(message), upstream)
+            self.pending_hints[client_id] = (metadata, self.browser_url or "", upstream)
+            self.pending_condition.notify_all()
+        try:
+            self._request_tab_identity(
+                upstream,
+                page_id=page_id,
+                action={
+                    "phase": "before",
+                    "client_id": client_id,
+                    "message": copy.deepcopy(message),
+                    "metadata": metadata,
+                    "upstream": upstream,
+                },
+            )
+        except RuntimeError:
+            with self.pending_condition:
+                self.pending_requests.pop(client_id, None)
+                self.pending_hints.pop(client_id, None)
+                self.pending_condition.notify_all()
+            raise
+
+    def _request_tab_identity(
+        self,
+        upstream: subprocess.Popen[str],
+        *,
+        page_id: object,
+        action: dict[str, Any],
+    ) -> None:
+        with self.pending_condition:
+            self.internal_sequence += 1
+            internal_id = f"buddyswitch.internal.get_tab_id.{self.generation}.{self.internal_sequence}"
+            self.internal_requests[internal_id] = action
+            self.pending_condition.notify_all()
+        arguments: dict[str, Any] = {}
+        if page_id is not None:
+            arguments["pageId"] = _coerce_mcp_page_id(page_id)
+        try:
+            self._write_to_upstream(
+                upstream,
+                {
+                    "jsonrpc": "2.0",
+                    "id": internal_id,
+                    "method": "tools/call",
+                    "params": {"name": "get_tab_id", "arguments": arguments},
+                },
+            )
+        except RuntimeError:
+            with self.pending_condition:
+                self.internal_requests.pop(internal_id, None)
+                self.pending_condition.notify_all()
+            raise
+
+    def wait_for_idle(self, timeout_seconds: float) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        with self.pending_condition:
+            while self.pending_requests or self.internal_requests:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self.pending_condition.wait(timeout=remaining)
+        return True
+
+    def forward_raw_if_started(self, raw_line: str) -> None:
+        if not self.is_started():
+            return
+        upstream = self._active_upstream()
+        assert upstream.stdin is not None
+        try:
+            with self.upstream_write_lock:
+                upstream.stdin.write(raw_line)
+                upstream.stdin.flush()
+        except OSError as exc:
+            raise RuntimeError(f"failed to write raw message to upstream chrome-devtools-mcp: {exc}") from exc
+
+    def stop(self) -> None:
+        upstream = self.upstream
+        if upstream is not None:
+            close_upstream(upstream)
+        relay = self.relay
+        if relay is not None:
+            relay.join(timeout=UPSTREAM_EXIT_GRACE_SECONDS)
+        self.upstream = None
+        self.relay = None
+        self.browser_url = None
+        self.initialized = False
+        self.selected_tab_target_id = None
+        self.clear_pid_markers()
+
+    def note_exited(self, upstream: subprocess.Popen[str]) -> None:
+        pending: list[dict[str, Any]] = []
+        with self.pending_condition:
+            for message_id, (request, request_upstream) in list(self.pending_requests.items()):
+                if request_upstream is upstream:
+                    pending.append(request)
+                    self.pending_requests.pop(message_id, None)
+                    self.pending_hints.pop(message_id, None)
+            for message_id, (_hint, _browser_url, hint_upstream) in list(self.pending_hints.items()):
+                if hint_upstream is upstream:
+                    self.pending_hints.pop(message_id, None)
+            for internal_id, action in list(self.internal_requests.items()):
+                if action.get("upstream") is upstream:
+                    self.internal_requests.pop(internal_id, None)
+            self.pending_condition.notify_all()
+        for request in pending:
+            write_json_line(
+                tool_error_response(request, "Upstream chrome-devtools-mcp exited before completing this browser tool call."),
+                self.output_lock,
+            )
+        if self.upstream is upstream:
+            self.upstream = None
+            self.relay = None
+            self.browser_url = None
+            self.initialized = False
+            self.selected_tab_target_id = None
+            self.clear_pid_markers()
+
+    def write_pid_markers(self, upstream: subprocess.Popen[str]) -> None:
+        paths = self._marker_paths()
+        if paths is None:
+            return
+        pid_path, pgid_path = paths
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        process_identity.write_record(pid_path, upstream.pid)
+        try:
+            pgid = os.getpgid(upstream.pid)
+        except OSError:
+            pgid = upstream.pid
+        pgid_path.write_text(f"{pgid}\n", encoding="ascii")
+
+    def clear_pid_markers(self) -> None:
+        paths = self._marker_paths()
+        if paths is None:
+            return
+        pid_path, pgid_path = paths
+        process_identity.remove_record(pid_path)
+        for path in (pgid_path,):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _marker_paths(self) -> tuple[Path, Path] | None:
+        root = _instance_root_path(self.instance_root)
+        if root is None:
+            return None
+        runtime_dir = root / "runtime" / "browser"
+        return runtime_dir / "cockpit-upstream.pid", runtime_dir / "cockpit-upstream.pgid"
+
+    def _active_upstream(self) -> subprocess.Popen[str]:
+        if self.upstream is None or self.upstream.poll() is not None:
+            raise RuntimeError("upstream chrome-devtools-mcp is not running")
+        return self.upstream
+
+    def _write_to_upstream(self, upstream: subprocess.Popen[str], message: dict[str, Any]) -> None:
+        if upstream.stdin is None:
+            raise RuntimeError("upstream chrome-devtools-mcp stdin is unavailable")
+        try:
+            with self.upstream_write_lock:
+                upstream.stdin.write(json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n")
+                upstream.stdin.flush()
+        except OSError as exc:
+            raise RuntimeError(f"failed to write to upstream chrome-devtools-mcp: {exc}") from exc
+
+    def _finish_client_response(
+        self,
+        message_id: Any,
+        message: dict[str, Any],
+        response_hint: Any | None,
+        browser_url: str,
+    ) -> None:
+        if (
+            isinstance(response_hint, dict)
+            and response_hint.get("kind") == "close_page"
+            and _tool_response_succeeded(message)
+            and response_hint.get("tab_target_id") == self.selected_tab_target_id
+        ):
+            self.selected_tab_target_id = None
+        if isinstance(response_hint, dict):
+            message = patch_tool_response_page_use_metadata(
+                message,
+                response_hint,
+                browser_url=browser_url,
+                instance_root=self.instance_root,
+            )
+        elif response_hint:
+            message = patch_tool_response_hint(message, response_hint)
+        with self.pending_condition:
+            self.pending_requests.pop(message_id, None)
+            self.pending_hints.pop(message_id, None)
+            self.pending_condition.notify_all()
+        write_json_line(_without_structured_content(message), self.output_lock)
+
+    def _process_client_response(
+        self,
+        upstream: subprocess.Popen[str],
+        message: dict[str, Any],
+        browser_url: str,
+    ) -> None:
+        message_id = message.get("id")
+        with self.pending_condition:
+            pending = self.pending_hints.get(message_id)
+        response_hint: Any | None = None
+        hint_browser_url = browser_url
+        if pending is not None:
+            response_hint, hint_browser_url, _hint_upstream = pending
+        root = _instance_root_path(self.instance_root)
+        if (
+            isinstance(response_hint, dict)
+            and root is not None
+            and response_hint.get("kind") in {"new_page", "select_page"}
+            and _tool_response_succeeded(message)
+        ):
+            page_id: object | None
+            if response_hint.get("kind") == "new_page":
+                selected_page = selected_page_from_new_page_response(message)
+                page_id = selected_page.get("page_id") if isinstance(selected_page, dict) else None
+            else:
+                page_id = response_hint.get("page_id")
+            if page_id is not None:
+                try:
+                    self._request_tab_identity(
+                        upstream,
+                        page_id=page_id,
+                        action={
+                            "phase": "after",
+                            "client_id": message_id,
+                            "response": copy.deepcopy(message),
+                            "metadata": copy.deepcopy(response_hint),
+                            "browser_url": hint_browser_url,
+                            "upstream": upstream,
+                        },
+                    )
+                    return
+                except RuntimeError as exc:
+                    response_hint = copy.deepcopy(response_hint)
+                    response_hint["page_hint"] = f"{LIFECYCLE_WARNING_PREFIX} Chrome tab identity lookup failed: {exc}"
+        self._finish_client_response(message_id, message, response_hint, hint_browser_url)
+
+    def _handle_internal_response(
+        self,
+        action: dict[str, Any],
+        message: dict[str, Any],
+    ) -> None:
+        target_id = _tab_target_id_from_response(message)
+        metadata = copy.deepcopy(action.get("metadata"))
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if target_id is None:
+            metadata["page_hint"] = (
+                f"{LIFECYCLE_WARNING_PREFIX} stable Chrome tab identity was unavailable; "
+                "the browser operation still ran normally."
+            )
+        phase = action.get("phase")
+        if phase == "before":
+            client_message = action.get("message")
+            upstream = action.get("upstream")
+            if not isinstance(client_message, dict) or not isinstance(upstream, subprocess.Popen):
+                return
+            kind = metadata.get("kind")
+            root = _instance_root_path(self.instance_root)
+            if target_id is not None:
+                if kind == "close_page":
+                    metadata["tab_target_id"] = target_id
+                elif kind == "current_page":
+                    self.selected_tab_target_id = target_id
+                    if root is not None:
+                        try:
+                            metadata["page_hint"] = _refresh_tab_idle_hint(
+                                root=root,
+                                tab_target_id=target_id,
+                                active=True,
+                            )
+                        except Exception as exc:
+                            metadata["page_hint"] = f"{LIFECYCLE_WARNING_PREFIX} current tab idle was not refreshed: {exc}"
+            try:
+                self._send_client_request(upstream, client_message, metadata)
+            except RuntimeError as exc:
+                request_id = client_message.get("id")
+                self._finish_client_response(
+                    request_id,
+                    tool_error_response(client_message, str(exc)),
+                    None,
+                    self.browser_url or "",
+                )
+            return
+        if phase == "after":
+            client_id = action.get("client_id")
+            response = action.get("response")
+            if not isinstance(response, dict):
+                return
+            if target_id is not None:
+                metadata["tab_target_id"] = target_id
+                self.selected_tab_target_id = target_id
+            self._finish_client_response(
+                client_id,
+                response,
+                metadata,
+                str(action.get("browser_url") or self.browser_url or ""),
+            )
+
+    def _relay(self, upstream: subprocess.Popen[str], browser_url: str) -> None:
+        assert upstream.stdout is not None
+        try:
+            for raw_line in upstream.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    write_raw_line(raw_line, self.output_lock)
+                    continue
+                if not isinstance(message, dict):
+                    write_raw_line(raw_line, self.output_lock)
+                    continue
+                message_id = message.get("id")
+                with self.pending_condition:
+                    if message_id in self.drop_response_ids:
+                        self.drop_response_ids.discard(message_id)
+                        continue
+                    internal_action = self.internal_requests.pop(message_id, None)
+                    if internal_action is not None:
+                        self.pending_condition.notify_all()
+                if internal_action is not None:
+                    self._handle_internal_response(internal_action, message)
+                    continue
+                self._process_client_response(upstream, message, browser_url)
+        finally:
+            self.note_exited(upstream)
+
+
+def run_proxy(args: argparse.Namespace, passthrough_args: list[str], instance_root: str | None = None) -> int:
+    output_lock = threading.Lock()
+    manager = UpstreamManager(
+        args=args,
+        passthrough_args=passthrough_args,
+        instance_root=instance_root,
+        output_lock=output_lock,
+    )
+
+    try:
+        for raw_line in sys.stdin:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                try:
+                    manager.forward_raw_if_started(raw_line)
+                except RuntimeError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 1
+                continue
+            if not isinstance(message, dict):
+                continue
+
+            method = message.get("method")
+            if method == "initialize" and is_jsonrpc_request(message):
+                manager.set_client_initialize_params(message.get("params"))
+                write_json_line(initialize_response(message), output_lock)
+                continue
+            if method == "notifications/initialized":
+                continue
+            if method == "tools/list" and is_jsonrpc_request(message):
+                write_json_line(tools_list_response(message), output_lock)
+                continue
+            if method in FOCUS_METHODS and is_jsonrpc_request(message):
+                write_json_line(rpc_error_response(message, focus_block_text(str(method))), output_lock)
+                continue
+            if method != "tools/call":
+                if is_jsonrpc_request(message):
+                    write_json_line(rpc_error_response(message, "Unsupported chrome-devtools-cockpit method."), output_lock)
+                continue
+
+            try:
+                active_browser_url = acquire_browser_url()
+            except RuntimeError as exc:
+                if is_jsonrpc_request(message):
+                    write_json_line(tool_error_response(message, str(exc)), output_lock)
+                    continue
+                return 1
+            outbound, local_response, response_hint = mutate_client_message(
+                message,
+                active_browser_url,
+                instance_root=instance_root,
+            )
+            if local_response is not None:
+                write_json_line(local_response, output_lock)
+                continue
+            if outbound is None:
+                continue
+            try:
+                manager.ensure_started(active_browser_url)
+                manager.ensure_initialized()
+                manager.send_request(outbound, response_hint)
+            except RuntimeError as exc:
+                if is_jsonrpc_request(message):
+                    write_json_line(
+                        tool_error_response(message, str(exc)),
+                        output_lock,
+                    )
+                    continue
+                return 1
+    except BrokenPipeError:
+        return 1
+    finally:
+        manager.wait_for_idle(5.0)
+        manager.stop()
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args, passthrough_args = parse_args(sys.argv[1:] if argv is None else argv)
+    apply_broker_socket_arg(args)
+    return run_proxy(args, passthrough_args, args.instance_root)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

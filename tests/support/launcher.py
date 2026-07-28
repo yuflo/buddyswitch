@@ -14,6 +14,14 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger
 
 ROOT = REPO_ROOT
+_VERIFIED_RUNTIME_PROJECTIONS = {
+    "BUDDYSWITCH_PACKAGE_ROOT",
+    "BUDDYSWITCH_PROJECT_SOURCE",
+    "BUDDYSWITCH_PYTHON",
+    "BUDDYSWITCH_RUNTIME_DIR",
+    "BUDDYSWITCH_RUNTIME_IDENTITY",
+    "BUDDYSWITCH_SOURCE_ROOT",
+}
 
 
 class LauncherTestSupport:
@@ -35,7 +43,7 @@ class LauncherTestSupport:
             key: value
             for key, value in os.environ.items()
             if key.startswith("BUDDYSWITCH_")
-            and key != "BUDDYSWITCH_PYTHON"
+            and key not in _VERIFIED_RUNTIME_PROJECTIONS
             and not key.startswith("BUDDYSWITCH_TEST_")
         }
         for key in saved:
@@ -45,7 +53,7 @@ class LauncherTestSupport:
             for key in list(os.environ):
                 if (
                     key.startswith("BUDDYSWITCH_")
-                    and key != "BUDDYSWITCH_PYTHON"
+                    and key not in _VERIFIED_RUNTIME_PROJECTIONS
                     and not key.startswith("BUDDYSWITCH_TEST_")
                 ):
                     os.environ.pop(key, None)

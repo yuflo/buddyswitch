@@ -10,16 +10,15 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from env.repos import identities  # noqa: E402
-from env.repos import messages as message_repo  # noqa: E402
-from env.tool_runtime import context as runtime_context  # noqa: E402
-from env.tool_runtime import daemon_client  # noqa: E402
-from env.tool_runtime import im_actor_delivery  # noqa: E402
-from env.tool_runtime import im_client as im_client_module  # noqa: E402
-import central_daemon_core  # noqa: E402
+from buddyswitch.env.repos import identities  # noqa: E402
+from buddyswitch.env.repos import messages as message_repo  # noqa: E402
+from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
+from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.env.tool_runtime import im_actor_delivery  # noqa: E402
+from buddyswitch.env.tool_runtime import im_client as im_client_module  # noqa: E402
+from buddyswitch.launcher import central_daemon_core  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 

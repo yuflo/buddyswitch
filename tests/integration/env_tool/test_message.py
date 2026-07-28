@@ -10,12 +10,11 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.tools.message import _impl as message_impl  # noqa: E402
-from env.repos import identities as identity_repo  # noqa: E402
-from env.services import messages as message_service  # noqa: E402
-from env.tool_runtime import im_client as im_client_module  # noqa: E402
+from buddyswitch.env.tools.message import _impl as message_impl  # noqa: E402
+from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.env.tool_runtime import im_client as im_client_module  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 

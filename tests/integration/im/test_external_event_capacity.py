@@ -8,11 +8,11 @@ import threading
 import time
 from typing import Any
 
-from env.repos import identities as identity_repo
-from env.services import messages as message_service
+from buddyswitch.env.repos import identities as identity_repo
+from buddyswitch.env.services import messages as message_service
 from tests.support.cli import wait_until
 from tests.support.runtime import RuntimeWorkspaceTestCase
-from tools.launcher import im_http_router, imessage_channel, web_management
+from buddyswitch.launcher import im_http_router, imessage_channel, web_management
 
 
 CONTACT_COUNT = 100

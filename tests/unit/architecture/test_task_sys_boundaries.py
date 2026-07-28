@@ -7,12 +7,12 @@ from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
 
-DOMAIN = Path("scripts/env/domain/task_sys.py")
-READ_MODEL = Path("scripts/env/domain/task_read.py")
-TOOL = Path("scripts/env/tools/task_sys/tool.py")
-TOOL_IMPL = Path("scripts/env/tools/task_sys/_impl.py")
-PROTOCOL = Path("scripts/env/tool_runtime/task_goal_runtime_protocol.py")
-CLIENT = Path("scripts/env/tool_runtime/task_goal_runtime_client.py")
+DOMAIN = Path("src/buddyswitch/env/domain/task_sys.py")
+READ_MODEL = Path("src/buddyswitch/env/domain/task_read.py")
+TOOL = Path("src/buddyswitch/env/tools/task_sys/tool.py")
+TOOL_IMPL = Path("src/buddyswitch/env/tools/task_sys/_impl.py")
+PROTOCOL = Path("src/buddyswitch/env/tool_runtime/task_goal_runtime_protocol.py")
+CLIENT = Path("src/buddyswitch/env/tool_runtime/task_goal_runtime_client.py")
 
 
 def _source(relative: Path) -> str:

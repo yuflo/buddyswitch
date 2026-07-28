@@ -12,15 +12,14 @@ from unittest.mock import patch
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.tool_runtime import registry as tool_registry  # noqa: E402
-from env.tool_runtime import results as tool_results  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.env.tool_runtime import results as tool_results  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 
 
 class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):

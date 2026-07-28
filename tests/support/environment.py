@@ -52,14 +52,26 @@ class RunEnvironment:
 
         ledger_path = root / "owned-resources.jsonl"
         ledger_path.touch()
-        configured_python = os.environ.get("BUDDYSWITCH_PYTHON")
+        runtime_environment = {
+            name: value
+            for name, value in os.environ.items()
+            if name
+            in {
+                "BUDDYSWITCH_PACKAGE_ROOT",
+                "BUDDYSWITCH_PROJECT_SOURCE",
+                "BUDDYSWITCH_PYTHON",
+                "BUDDYSWITCH_RUNTIME_DIR",
+                "BUDDYSWITCH_RUNTIME_IDENTITY",
+                "BUDDYSWITCH_SOURCE_ROOT",
+            }
+        }
         environ = {
             name: value
             for name, value in os.environ.items()
             if not name.startswith("BUDDYSWITCH_")
         }
-        if configured_python:
-            environ["BUDDYSWITCH_PYTHON"] = configured_python
+        environ.pop("PYTHONPATH", None)
+        environ.update(runtime_environment)
         environ.update({name: str(path) for name, path in paths.items()})
         environ.update(
             {

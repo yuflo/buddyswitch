@@ -11,27 +11,30 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-from env.repos import artifacts as artifact_repo  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.integration.env_tool._artifact_env_tool_case import ArtifactEnvToolCase
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
 class ArtifactListingTests(ArtifactEnvToolCase):
     def test_create_revision_from_archived_published_artifact_rejects_without_new_artifact(self) -> None:
-        track = env_store.create_track(
+        track = object_builders.create_track(
             "track-art-revision-archived",
             "Archived Revision",
             owner_identity="act-pm-system",
             outcome="Archived revision outcome",
             now={"next": "seed", "blocker": None},
         )
-        artifact = env_store.create_artifact_revision(
+        artifact = object_builders.create_artifact_revision(
             artifact_id="art-revision-archived-r1",
             title="Archived source",
             summary="source",
@@ -42,15 +45,15 @@ class ArtifactListingTests(ArtifactEnvToolCase):
             authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id=str(track["id"]),
             artifact_id=str(artifact["id"]),
             label="Archived source",
             from_role="pm",
             summary="source",
         )
-        env_store.update_track(str(track["id"]), {"archived_at": "2026-05-19T00:00:00Z"})
-        before_artifacts = {row["id"] for row in env_store.list_artifacts()}
+        track_repo.update_track(str(track["id"]), {"archived_at": "2026-05-19T00:00:00Z"})
+        before_artifacts = {row["id"] for row in artifact_repo.list_artifacts()}
         instance_json = self._instance_json(actor_id="act-pm-art-archived-revision", role="pm")
 
         rejected = self._dispatch(
@@ -69,7 +72,7 @@ class ArtifactListingTests(ArtifactEnvToolCase):
             },
         )
         self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual(set(row["id"] for row in env_store.list_artifacts()), before_artifacts)
+        self.assertEqual(set(row["id"] for row in artifact_repo.list_artifacts()), before_artifacts)
 
     def test_archive_track_blocks_track_open_and_published_artifact_reads(self) -> None:
         instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")

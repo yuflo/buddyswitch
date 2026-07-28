@@ -13,17 +13,16 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from tools.launcher import daemon_mailbox  # noqa: E402
-from tools.launcher import im_http_router  # noqa: E402
-from tools.launcher import im_wake_handler  # noqa: E402
-from env.domain import demand_sys  # noqa: E402
-from env.repos import identities  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
-from env.services import messages as message_service  # noqa: E402
-from env.tool_runtime import im_actor_delivery  # noqa: E402
-from env.tool_runtime import im_client as im_client_module  # noqa: E402
+from buddyswitch.launcher import daemon_mailbox  # noqa: E402
+from buddyswitch.launcher import im_http_router  # noqa: E402
+from buddyswitch.launcher import im_wake_handler  # noqa: E402
+from buddyswitch.env.domain import demand_sys  # noqa: E402
+from buddyswitch.env.repos import identities  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.env.tool_runtime import im_actor_delivery  # noqa: E402
+from buddyswitch.env.tool_runtime import im_client as im_client_module  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
@@ -545,10 +544,10 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
     def test_no_external_reply_loop_shortcuts_in_active_surfaces(self) -> None:
         active_surface = "\n".join(
             (
-                (ROOT / "tools/launcher/web_management.py").read_text(encoding="utf-8"),
-                (ROOT / "tools/launcher/assets/web-management/app.js").read_text(encoding="utf-8"),
-                (ROOT / "scripts/env/tool_runtime/im_client.py").read_text(encoding="utf-8"),
-                (ROOT / "scripts/env/tools/message/_impl.py").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/launcher/web_management.py").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/launcher/assets/web-management/app.js").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/env/tool_runtime/im_client.py").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/env/tools/message/_impl.py").read_text(encoding="utf-8"),
             )
         )
 

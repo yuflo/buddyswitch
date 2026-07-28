@@ -5,20 +5,20 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from env.tool_runtime import registry as tool_catalog
+from buddyswitch.env.tool_runtime import registry as tool_catalog
 from tests.support.paths import REPO_ROOT
 
 
 GENERIC_DAEMON_PATHS = (
-    Path("tools/launcher/daemon_contracts.py"),
-    Path("tools/launcher/daemon_state.py"),
-    Path("tools/launcher/daemon_runtime.py"),
-    Path("tools/launcher/daemon_core.py"),
-    Path("tools/launcher/daemon_mailbox.py"),
-    Path("scripts/env/tool_runtime/daemon_client.py"),
+    Path("src/buddyswitch/launcher/daemon_contracts.py"),
+    Path("src/buddyswitch/launcher/daemon_state.py"),
+    Path("src/buddyswitch/launcher/daemon_runtime.py"),
+    Path("src/buddyswitch/launcher/daemon_core.py"),
+    Path("src/buddyswitch/launcher/daemon_mailbox.py"),
+    Path("src/buddyswitch/env/tool_runtime/daemon_client.py"),
 )
 
-DEMAND_REPOSITORY_PATH = Path("scripts/env/repos/demands.py")
+DEMAND_REPOSITORY_PATH = Path("src/buddyswitch/env/repos/demands.py")
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -66,26 +66,25 @@ def _call_count(path: Path, name: str) -> int:
 
 def test_public_launcher_is_a_thin_python_cli_bootstrap() -> None:
     launcher = (REPO_ROOT / "buddyswitch-codex").read_text(encoding="utf-8")
-    cli_adapter = REPO_ROOT / "tools" / "launcher" / "cli.py"
+    cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "launcher" / "cli.py"
 
     assert cli_adapter.is_file()
-    assert 'source "${ENV_HELPER}"' in launcher
-    assert "buddyswitch_env_init" in launcher
-    assert (
-        'exec "${BUDDYSWITCH_PYTHON}" '
-        '"${REPO_ROOT}/tools/launcher/cli.py" "$@"'
-    ) in launcher
+    assert 'activation.json' in launcher
+    assert 'venv/bin/python' in launcher
+    assert '-m buddyswitch.application.entrypoints.cli' in launcher
+    assert "source " not in launcher
+    assert "PYTHONPATH" not in launcher
 
 
 def test_public_cli_adapter_delegates_to_concrete_read_owners() -> None:
-    cli_adapter = REPO_ROOT / "tools" / "launcher" / "cli.py"
+    cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "launcher" / "cli.py"
     imports = _imported_modules(cli_adapter)
     calls = _called_names(cli_adapter)
 
-    assert "tools.launcher.host_control" in imports
-    assert "tools.launcher.actor_session" in imports
-    assert "env.domain.task_read" in imports
-    assert "env.domain.track_read" in imports
+    assert "buddyswitch.launcher.host_control" in imports
+    assert "buddyswitch.launcher.actor_session" in imports
+    assert "buddyswitch.env.domain.task_read" in imports
+    assert "buddyswitch.env.domain.track_read" in imports
     assert not {
         "save_track",
         "create_track",
@@ -111,9 +110,9 @@ def test_generic_daemon_modules_do_not_depend_on_product_adapters() -> None:
         "browser_page",
         "browser_release",
         "web_management",
-        "env.services.messages",
-        "env.repos.messages",
-        "env.repos.tracks",
+        "buddyswitch.env.services.messages",
+        "buddyswitch.env.repos.messages",
+        "buddyswitch.env.repos.tracks",
     )
     for relative in GENERIC_DAEMON_PATHS:
         imports = _imported_modules(REPO_ROOT / relative)
@@ -134,11 +133,11 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
         "task_goal_handler.py",
         "demand_orchestration_handler.py",
     )
-    launcher_root = REPO_ROOT / "tools" / "launcher"
+    launcher_root = REPO_ROOT / "src" / "buddyswitch" / "launcher"
     for name in handlers:
         imports = _imported_modules(launcher_root / name)
-        assert "daemon_contracts" in imports
-        assert "daemon_core" not in imports
+        assert "buddyswitch.launcher.daemon_contracts" in imports
+        assert "buddyswitch.launcher.daemon_core" not in imports
 
     product_adapters = (
         "demand_triage_handler",
@@ -152,7 +151,7 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
     composition_roots: list[str] = []
     for path in sorted(launcher_root.glob("*.py")):
         imports = _imported_modules(path)
-        if "daemon_core" in imports and any(
+        if "buddyswitch.launcher.daemon_core" in imports and any(
             fragment in imported
             for imported in imports
             for fragment in product_adapters
@@ -163,10 +162,10 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
 
 def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
     roots = (
-        REPO_ROOT / "scripts" / "turn_runtime.py",
-        REPO_ROOT / "scripts" / "env" / "tools",
-        REPO_ROOT / "scripts" / "env" / "domain",
-        REPO_ROOT / "scripts" / "env" / "repos",
+        REPO_ROOT / "src" / "buddyswitch" / "runtime_support" / "turn_runtime.py",
+        REPO_ROOT / "src" / "buddyswitch" / "env" / "tools",
+        REPO_ROOT / "src" / "buddyswitch" / "env" / "domain",
+        REPO_ROOT / "src" / "buddyswitch" / "env" / "repos",
     )
     violations: list[str] = []
     for root in roots:
@@ -189,7 +188,7 @@ def test_demand_actor_aggregate_has_one_atomic_repository_owner() -> None:
     assert _call_count(repository, "write_json_object") == 1
 
     path_owners: list[str] = []
-    for root in (REPO_ROOT / "scripts" / "env", REPO_ROOT / "tools" / "launcher"):
+    for root in (REPO_ROOT / "src" / "buddyswitch" / "env", REPO_ROOT / "src" / "buddyswitch" / "launcher"):
         for path in sorted(root.rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             constants = {
@@ -246,7 +245,7 @@ def test_env_tool_catalog_excludes_source_write_capabilities() -> None:
     supported_tools = set(tool_catalog.supported_tools())
     tool_packages = {
         path.name
-        for path in (REPO_ROOT / "scripts" / "env" / "tools").iterdir()
+        for path in (REPO_ROOT / "src" / "buddyswitch" / "env" / "tools").iterdir()
         if path.is_dir() and not path.name.startswith("_")
     }
 

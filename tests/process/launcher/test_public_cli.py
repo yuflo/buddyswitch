@@ -18,6 +18,26 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 
 class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
+    def test_root_launcher_uses_only_verified_installed_package(self) -> None:
+        source = LAUNCHER.read_text(encoding="utf-8")
+
+        self.assertIn('BUDDYSWITCH_RUNTIME_DIR', source)
+        self.assertIn('activation.json', source)
+        self.assertIn('venv/bin/python', source)
+        self.assertIn(
+            '-m buddyswitch.application.entrypoints.cli',
+            source,
+        )
+        for forbidden in (
+            "source ",
+            "tools/launcher",
+            "PYTHONPATH",
+            "python3",
+            "cli.py",
+        ):
+            self.assertNotIn(forbidden, source)
+        self.assertIn("unset BUDDYSWITCH_PYTHON", source)
+
     def test_env_reset_rejects_symlinked_shared_root_without_touching_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_parent, tempfile.TemporaryDirectory() as external:
             temp_parent_path = Path(temp_parent)
@@ -48,7 +68,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve\n")
 
     def test_reset_owner_removes_owned_filesystem_without_workspace_or_git_path(self) -> None:
-        source = (ROOT / "tools" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "launcher" / "cli.py").read_text(encoding="utf-8")
         helper_block = source.split("def _source_helpers_script(", 1)[1].split(
             "def _reset_locked_script()",
             1,
@@ -202,7 +222,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
         for argv in cases:
             with self.subTest(argv=argv):
                 completed = run_process(
-                    [PYTHON, "scripts/env_manifest.py", *argv],
+                    [PYTHON, "-m", "buddyswitch.runtime_support.env_manifest", *argv],
                     cwd=ROOT,
                     text=True,
                     capture_output=True,
@@ -217,7 +237,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                 self.assertIsInstance(payload, dict)
         role_ids = {row["id"] for row in json.loads(
             run_process(
-                [PYTHON, "scripts/env_manifest.py", "list-roles"],
+                [PYTHON, "-m", "buddyswitch.runtime_support.env_manifest", "list-roles"],
                 cwd=ROOT,
                 text=True,
                 capture_output=True,
@@ -228,7 +248,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
         self.assertIn("dev", role_ids)
     def test_env_manifest_list_roles_rejects_removed_json_flag(self) -> None:
         removed = run_process(
-            [PYTHON, "scripts/env_manifest.py", "list-roles", "--" + "json"],
+            [PYTHON, "-m", "buddyswitch.runtime_support.env_manifest", "list-roles", "--" + "json"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -244,11 +264,12 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             preview = run_process(
                 [
                     PYTHON,
-                    "scripts/env_cleanup.py",
-                    "--repo-root",
+                    "-m",
+                    "buddyswitch.application.entrypoints.cleanup",
+                    "--state-root",
                     str(repo_root),
                     "--manifest",
-                    str(ROOT / "buddyswitch" / "manifest.toml"),
+                    str(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"),
                     "--role",
                     "pm",
                 ],
@@ -268,11 +289,12 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             removed = run_process(
                 [
                     PYTHON,
-                    "scripts/env_cleanup.py",
-                    "--repo-root",
+                    "-m",
+                    "buddyswitch.application.entrypoints.cleanup",
+                    "--state-root",
                     str(repo_root),
                     "--manifest",
-                    str(ROOT / "buddyswitch" / "manifest.toml"),
+                    str(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"),
                     "--role",
                     "pm",
                     "--" + "json",
@@ -300,7 +322,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                     [
                         "/bin/bash",
                         "-c",
-                        'source tools/launcher/cleanup.sh; buddyswitch_cleanup_parse_args "$@"',
+                        'source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/cleanup.sh"; buddyswitch_cleanup_parse_args "$@"',
                         "cleanup-parse-test",
                         option,
                     ],

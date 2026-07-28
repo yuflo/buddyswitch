@@ -15,7 +15,7 @@ ROOT = REPO_ROOT
 class SearchCliTests(unittest.TestCase):
     def test_search_cli_help_exposes_status_and_request_only(self) -> None:
         resource_help = run_process(
-            [PYTHON, "scripts/env/client.py", "search", "--help"],
+            [PYTHON, "-m", "buddyswitch.env.client", "search", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -31,7 +31,7 @@ class SearchCliTests(unittest.TestCase):
         self.assertNotIn("--engine", resource_help.stdout)
 
         action_help = run_process(
-            [PYTHON, "scripts/env/client.py", "search", "request", "--help"],
+            [PYTHON, "-m", "buddyswitch.env.client", "search", "request", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -42,7 +42,7 @@ class SearchCliTests(unittest.TestCase):
 
     def test_search_cli_rejects_missing_backend_and_removed_open_browser_command(self) -> None:
         missing_backend = run_process(
-            [PYTHON, "scripts/env/client.py", "search", "request", "--payload", '{"query":"x"}'],
+            [PYTHON, "-m", "buddyswitch.env.client", "search", "request", "--payload", '{"query":"x"}'],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -56,7 +56,8 @@ class SearchCliTests(unittest.TestCase):
         removed_open_browser = run_process(
             [
                 PYTHON,
-                "scripts/env/client.py",
+                "-m",
+                "buddyswitch.env.client",
                 "search",
                 "open-browser",
                 "--payload",

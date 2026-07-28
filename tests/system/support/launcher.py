@@ -11,11 +11,11 @@ import subprocess
 import time
 from pathlib import Path
 
-import app_server
-import central_daemon_core
-import daemon_core
-import daemon_mailbox
-from runtime_kernel import lifecycle, process_identity
+from buddyswitch.launcher import app_server
+from buddyswitch.launcher import central_daemon_core
+from buddyswitch.launcher import daemon_core
+from buddyswitch.launcher import daemon_mailbox
+from buddyswitch.runtime_kernel import lifecycle, process_identity
 from tests.support.launcher import LauncherTestSupport
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
@@ -344,23 +344,10 @@ class SystemLauncherHarness(LauncherTestSupport):
             )
 
     def _assert_pm_runtime_shape(self, workspace_dir: Path, shared_root: Path) -> None:
-        required_runtime_surface = (
-            "scripts/env/client.py",
-            "scripts/runtime_kernel/broker.py",
-            "scripts/turn_runtime.py",
-            "scripts/env_store.py",
-            "scripts/env_legacy_store.py",
-            "scripts/env_manifest.py",
-            "scripts/env_profiles.py",
-            "scripts/browser_evidence.py",
-            "buddyswitch/manifest.toml",
-            "buddyswitch/env-profiles/pm.json",
-            "framework/contracts/pm.md",
-            "AGENTS.md",
+        self.assertEqual(
+            {path.name for path in workspace_dir.iterdir()},
+            {".agents", "AGENTS.md", "private", "projects"},
         )
-        for relative_path in required_runtime_surface:
-            candidate = workspace_dir / relative_path
-            self.assertTrue(candidate.exists(), msg=f"runtime workspace missing: {relative_path}")
         self._assert_pm_runtime_skills(workspace_dir)
 
         self.assertEqual(

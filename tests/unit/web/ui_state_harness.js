@@ -10,7 +10,8 @@ const rendererModule = require(path.join(
   '..',
   '..',
   '..',
-  'tools',
+  'src',
+  'buddyswitch',
   'launcher',
   'assets',
   'web-management',
@@ -21,7 +22,8 @@ const MarkdownIt = require(path.join(
   '..',
   '..',
   '..',
-  'tools',
+  'src',
+  'buddyswitch',
   'launcher',
   'assets',
   'web-management',
@@ -44,7 +46,20 @@ globalThis.BuddySwitchMarkdownRenderer = {
   },
 };
 
-const app = require(path.join(__dirname, '..', '..', '..', 'tools', 'launcher', 'assets', 'web-management', 'app.js'));
+const app = require(
+  path.join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    'src',
+    'buddyswitch',
+    'launcher',
+    'assets',
+    'web-management',
+    'app.js'
+  )
+);
 
 function identityRef(identityId) {
   return { id: identityId, type: identityId.indexOf('ext-') === 0 ? 'external' : 'actor' };

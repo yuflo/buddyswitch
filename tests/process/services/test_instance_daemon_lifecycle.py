@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import daemon_core
-import daemon_mailbox
+from buddyswitch.launcher import daemon_core
+from buddyswitch.launcher import daemon_mailbox
 import pytest
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 
 
 def test_instance_daemon_early_exit_removes_pid_identity_and_mailbox(

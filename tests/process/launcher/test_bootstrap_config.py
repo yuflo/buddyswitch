@@ -22,8 +22,8 @@ LAUNCHER = ROOT / "buddyswitch-codex"
 
 class TestLauncherBootstrapConfig(ProcessLauncherHarness, unittest.TestCase):
     def test_parent_codex_config_projects_demand_tools_and_skills_once(self) -> None:
-        actor_environment = importlib.import_module("actor_environment")
-        codex_config = importlib.import_module("codex_config")
+        actor_environment = importlib.import_module("buddyswitch.launcher.actor_environment")
+        codex_config = importlib.import_module("buddyswitch.launcher.codex_config")
         existing = (
             actor_environment._BASE_CODEX_CONFIG
             + """
@@ -54,7 +54,7 @@ args = ["/runtime/env_tool_mcp_server.py"]
             shared_root = Path(temp_root) / ".codex-buddyswitch"
             command = r'''
 set -euo pipefail
-source tools/launcher/env.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
 export BUDDYSWITCH_SHARED_ROOT="$1"
 buddyswitch_env_init
 buddyswitch_ensure_browser_ttl_config
@@ -83,7 +83,7 @@ buddyswitch_ensure_browser_ttl_config
             config_path.write_text("schema_version = 2\n", encoding="utf-8")
             command = r'''
 set -euo pipefail
-source tools/launcher/env.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
 export BUDDYSWITCH_SHARED_ROOT="$1"
 buddyswitch_env_init
 buddyswitch_ensure_browser_ttl_config
@@ -102,40 +102,16 @@ buddyswitch_ensure_browser_ttl_config
             self.assertIn(str(config_path), self._output_error_text(completed))
             self.assertEqual(config_path.read_text(encoding="utf-8"), "schema_version = 2\n")
 
-    def test_public_launcher_bootstrap_python_resolution_failure_emits_contract_json(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
-            bin_dir = Path(temp_root) / "bin"
-            bin_dir.mkdir()
-            env = {
-                "HOME": source_home,
-                "PATH": self._minimal_launcher_path_without_python(bin_dir),
-            }
-
-            completed = run_process(
-                [str(LAUNCHER), "instance", "roles"],
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(completed.returncode, 5)
-            self.assertEqual(completed.stderr, "")
-            error = self._cli_error(completed, code="RUNTIME_UNAVAILABLE")
-            self.assertIn("BUDDYSWITCH_PYTHON", str(error["message"]))
-    def test_public_launcher_missing_env_helper_emits_contract_json_without_python(self) -> None:
+    def test_public_launcher_missing_runtime_emits_contract_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             launcher = Path(temp_root) / "buddyswitch-codex"
             launcher.write_text(LAUNCHER.read_text(encoding="utf-8"), encoding="utf-8")
             launcher.chmod(LAUNCHER.stat().st_mode | stat.S_IXUSR)
-            bin_dir = Path(temp_root) / "bin"
-            bin_dir.mkdir()
 
             completed = run_process(
                 [str(launcher), "instance", "roles"],
                 cwd=ROOT,
-                env={"HOME": temp_root, "PATH": self._minimal_launcher_path_without_python(bin_dir)},
+                env={"HOME": temp_root, "PATH": os.environ.get("PATH", "")},
                 text=True,
                 capture_output=True,
                 check=False,
@@ -144,8 +120,30 @@ buddyswitch_ensure_browser_ttl_config
             self.assertEqual(completed.returncode, 5)
             self.assertEqual(completed.stderr, "")
             error = self._cli_error(completed, code="RUNTIME_UNAVAILABLE")
-            self.assertIn("Launcher env helper is missing", str(error["message"]))
-    def test_python_resolver_uses_only_path_python_and_overwrites_inherited_value(self) -> None:
+            self.assertIn("activation.json", str(error["message"]))
+    def test_public_launcher_missing_runtime_python_emits_contract_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            launcher = Path(temp_root) / "buddyswitch-codex"
+            launcher.write_text(LAUNCHER.read_text(encoding="utf-8"), encoding="utf-8")
+            launcher.chmod(LAUNCHER.stat().st_mode | stat.S_IXUSR)
+            runtime_dir = Path(temp_root) / ".buddyswitch-runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "activation.json").write_text("{}\n", encoding="utf-8")
+
+            completed = run_process(
+                [str(launcher), "instance", "roles"],
+                cwd=ROOT,
+                env={"HOME": temp_root, "PATH": os.environ.get("PATH", "")},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 5)
+            self.assertEqual(completed.stderr, "")
+            error = self._cli_error(completed, code="RUNTIME_UNAVAILABLE")
+            self.assertIn("venv/bin/python", str(error["message"]))
+    def test_python_resolver_preserves_verified_absolute_interpreter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             bin_dir = Path(temp_root) / "bin"
             bin_dir.mkdir()
@@ -153,7 +151,7 @@ buddyswitch_ensure_browser_ttl_config
 
             command = r'''
 set -euo pipefail
-source tools/launcher/env.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
 printf '%s\n' "$BUDDYSWITCH_PYTHON"
@@ -161,33 +159,34 @@ printf '%s\n' "$BUDDYSWITCH_PYTHON"
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
                 cwd=ROOT,
-                env={**os.environ, "BUDDYSWITCH_PYTHON": "/ignored/inherited/interpreter"},
+                env={**os.environ, "BUDDYSWITCH_PYTHON": PYTHON},
                 text=True,
                 capture_output=True,
                 check=False,
             )
 
             self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
-            self.assertEqual(completed.stdout.strip(), str(bin_dir / "python"))
-    def test_python_resolver_fails_when_path_has_no_python(self) -> None:
+            self.assertEqual(completed.stdout.strip(), PYTHON)
+    def test_python_resolver_fails_without_verified_interpreter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             command = r'''
 set -euo pipefail
-source tools/launcher/env.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
 '''
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", temp_root],
                 cwd=ROOT,
+                env={name: value for name, value in os.environ.items() if name != "BUDDYSWITCH_PYTHON"},
                 text=True,
                 capture_output=True,
                 check=False,
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("requires an executable 'python' on PATH", self._output_error_text(completed))
-    def test_python_resolver_rejects_unusable_path_python(self) -> None:
+            self.assertIn("verified absolute runtime Python", self._output_error_text(completed))
+    def test_python_resolver_rejects_unusable_verified_python(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             bin_dir = Path(temp_root) / "bin"
             bin_dir.mkdir()
@@ -197,21 +196,22 @@ buddyswitch_resolve_python
 
             command = r'''
 set -euo pipefail
-source tools/launcher/env.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
 '''
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
                 cwd=ROOT,
+                env={**os.environ, "BUDDYSWITCH_PYTHON": str(fake_python)},
                 text=True,
                 capture_output=True,
                 check=False,
             )
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("could not execute PATH python", self._output_error_text(completed))
-    def test_python_resolver_rejects_path_python_without_standard_toml(self) -> None:
+            self.assertIn("verified absolute runtime Python", self._output_error_text(completed))
+    def test_python_resolver_accepts_verified_executable_without_path_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             bin_dir = Path(temp_root) / "bin"
             bin_dir.mkdir()
@@ -227,20 +227,22 @@ buddyswitch_resolve_python
 
             command = r'''
 set -euo pipefail
-source tools/launcher/env.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
+printf '%s\n' "$BUDDYSWITCH_PYTHON"
 '''
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
                 cwd=ROOT,
+                env={**os.environ, "BUDDYSWITCH_PYTHON": str(fake_python)},
                 text=True,
                 capture_output=True,
                 check=False,
             )
 
-            self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("could not execute PATH python", self._output_error_text(completed))
+            self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
+            self.assertEqual(completed.stdout.strip(), str(fake_python))
     def test_env_mcp_reconciles_stale_interpreter_path_with_resolved_python(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
@@ -263,7 +265,7 @@ set -euo pipefail
 temp_root="$1"
 source_home="$2"
 codex_home="$3"
-source tools/launcher/env.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
 export BUDDYSWITCH_SOURCE_HOME="${source_home}"
 export BUDDYSWITCH_CODEX_HOME="${codex_home}"
 export BUDDYSWITCH_CODEX_BIN="${temp_root}/bin/codex"
@@ -282,7 +284,7 @@ mkdir -p "${BUDDYSWITCH_CODEX_HOME}" "${BUDDYSWITCH_HOME}" "${BUDDYSWITCH_XDG_CO
 cat > "${BUDDYSWITCH_CODEX_HOME}/config.toml" <<EOF
 [mcp_servers.buddyswitch-env]
 command = "/stale/runtime/python"
-args = ["${BUDDYSWITCH_ENV_MCP_SERVER}", "--repo-root", "${BUDDYSWITCH_REPO_ROOT}", "--actor-id", "${BUDDYSWITCH_ACTOR_ID}", "--role", "${BUDDYSWITCH_ROLE_ID}", "--broker-socket", "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}"]
+args = ["-m", "buddyswitch.application.entrypoints.env_mcp", "--actor-id", "${BUDDYSWITCH_ACTOR_ID}", "--role", "${BUDDYSWITCH_ROLE_ID}", "--broker-socket", "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}"]
 EOF
 buddyswitch_env_mcp_ensure
 '''
@@ -333,8 +335,8 @@ set -euo pipefail
 temp_root="$1"
 source_home="$2"
 codex_home="$3"
-source tools/launcher/env.sh
-source tools/launcher/browser_cockpit.sh
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/browser_cockpit.sh"
 export BUDDYSWITCH_SOURCE_HOME="${source_home}"
 export BUDDYSWITCH_CODEX_HOME="${codex_home}"
 export BUDDYSWITCH_CODEX_BIN="${temp_root}/bin/codex"
@@ -354,7 +356,7 @@ buddyswitch_browser_init_defaults
 cat > "${BUDDYSWITCH_CODEX_HOME}/config.toml" <<EOF
 [mcp_servers.chrome-devtools-cockpit]
 command = "/stale/runtime/python"
-args = ["${BUDDYSWITCH_BROWSER_COCKPIT_PROXY}", "--upstream-command", "npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}", "--broker-socket", "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}", "--instance-root=${BUDDYSWITCH_INSTANCE_ROOT}"]
+args = ["-m", "buddyswitch.application.entrypoints.browser_cockpit_proxy", "--upstream-command", "npx ${BUDDYSWITCH_BROWSER_COCKPIT_UPSTREAM_PACKAGE}", "--broker-socket", "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}", "--instance-root=${BUDDYSWITCH_INSTANCE_ROOT}"]
 EOF
 buddyswitch_browser_ensure_cockpit_mcp
 '''
@@ -423,12 +425,14 @@ writable_roots = ["/old"]
 
             command = [
                 PYTHON,
-                str(ROOT / "tools" / "launcher" / "codex_config.py"),
+                "-m",
+                "buddyswitch.application.entrypoints.actor_build",
+                "patch-config",
                 "--config",
                 str(config_path),
                 "--shared-root",
                 str(shared_root),
-                "--repo-root",
+                "--source-root",
                 str(ROOT),
                 "--temp-root",
                 "/tmp",
@@ -478,12 +482,14 @@ writable_roots = ["/old"]
                 completed = run_process(
                     [
                         PYTHON,
-                        str(ROOT / "tools" / "launcher" / "codex_config.py"),
+                        "-m",
+                        "buddyswitch.application.entrypoints.actor_build",
+                        "patch-config",
                         "--config",
                         str(config_path),
                         "--shared-root",
                         str(shared_root),
-                        "--repo-root",
+                        "--source-root",
                         str(ROOT),
                         "--temp-root",
                         "/tmp",
@@ -511,14 +517,16 @@ writable_roots = ["/old"]
             completed = run_process(
                 [
                     PYTHON,
-                    str(ROOT / "tools" / "launcher" / "codex_config.py"),
+                    "-m",
+                    "buddyswitch.application.entrypoints.actor_build",
+                    "patch-config",
                     "--config",
                     str(config_path),
                     "--shared-root",
                     str(shared_root),
                     "--source-codex-home",
                     str(custom_codex_home),
-                    "--repo-root",
+                    "--source-root",
                     str(ROOT),
                     "--temp-root",
                     "/tmp",

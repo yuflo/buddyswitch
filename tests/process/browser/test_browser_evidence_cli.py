@@ -4,7 +4,7 @@ from tests.integration.browser.market_evidence_harness import *  # noqa: F401,F4
 class TestBrowserEvidenceCli(MarketEvidenceHarness):
     def test_browser_evidence_cli_target_type_is_artifact_only(self) -> None:
         help_result = run_process(
-            [PYTHON, "scripts/browser_evidence.py", "issue", "--help"],
+            [PYTHON, "-m", "buddyswitch.application.entrypoints.browser_evidence", "issue", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -17,7 +17,8 @@ class TestBrowserEvidenceCli(MarketEvidenceHarness):
         rejected = run_process(
             [
                 PYTHON,
-                "scripts/browser_evidence.py",
+                "-m",
+                "buddyswitch.application.entrypoints.browser_evidence",
                 "issue",
                 "--target-type",
                 "memory",

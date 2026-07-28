@@ -3,7 +3,7 @@ from tests.integration.web.management_harness import *  # noqa: F401,F403
 
 class WebManagementStableImIdentityTests(RuntimeWorkspaceTestCase):
     def _service(self, host_control: RecordingHostControl | None = None) -> WEB_MANAGEMENT.WebManagementService:
-        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control or RecordingHostControl())
+        return WEB_MANAGEMENT.WebManagementService(host_control=host_control or RecordingHostControl())
 
     def _identity_path(self) -> Path:
         return self.runtime_state_root / "buddyswitch" / "local" / "web-management" / "im-session.json"

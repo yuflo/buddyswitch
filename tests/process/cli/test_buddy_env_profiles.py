@@ -13,21 +13,21 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-import env_profiles  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.runtime_support import env_profiles  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
 
 class BuddyEnvProfilesTests(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
+        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.role_ids = [role["id"] for role in self.manifest["roles"]]
         self.role_set = set(self.role_ids)
-        self.profile_root = ROOT / "buddyswitch" / "env-profiles"
+        self.package_root = ROOT / "src" / "buddyswitch"
+        self.profile_root = self.package_root / "catalog" / "env-profiles"
 
     def test_profile_files_match_manifest_buddies(self) -> None:
         files = {
@@ -43,9 +43,12 @@ class BuddyEnvProfilesTests(unittest.TestCase):
             profile = env_profiles.require_env_profile(
                 role_id,
                 manifest_path=self.manifest_path,
-                repo_root=ROOT,
+                package_root=self.package_root,
             )
-            self.assertEqual(list(profile.keys()), env_profiles.profile_contract(ROOT)["top_level_key_order"])
+            self.assertEqual(
+                list(profile.keys()),
+                env_profiles.profile_contract(self.package_root)["top_level_key_order"],
+            )
             self.assertEqual(profile["role_id"], role_id)
             self.assertEqual(profile["private_workspace"]["root"], env_profiles.PRIVATE_WORKSPACE_ROOT)
             self.assertEqual(profile["context_projection"]["skills"], "role-profile-only")
@@ -118,7 +121,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         )
 
     def test_profile_contract_uses_source_root_permission_semantics(self) -> None:
-        contract = env_profiles.profile_contract(ROOT)
+        contract = env_profiles.profile_contract(self.package_root)
         enums = contract.get("enums")
         self.assertIsInstance(enums, dict)
         assert isinstance(enums, dict)
@@ -126,7 +129,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
         self.assertNotIn("filesystem_capability.project_workspace", enums)
 
     def test_profile_skill_projection_uses_role_profile_enum(self) -> None:
-        contract_text = (ROOT / "framework/contracts/role-env-profile.json").read_text(encoding="utf-8")
+        contract_text = (ROOT / "src/buddyswitch/contracts/role-env-profile.json").read_text(encoding="utf-8")
         self.assertNotIn("active-role-only", contract_text)
         self.assertIn("role-profile-only", contract_text)
 
@@ -139,7 +142,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
 
     def test_validate_all_cli(self) -> None:
         completed = run_process(
-            [PYTHON, str(ROOT / "scripts" / "env_profiles.py"), "validate-all"],
+            [PYTHON, "-m", "buddyswitch.runtime_support.env_profiles", "validate-all"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -154,17 +157,22 @@ class BuddyEnvProfilesTests(unittest.TestCase):
     def test_corrupted_temp_profile_fails_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
-            (temp_root / "buddyswitch" / "env-profiles").mkdir(parents=True)
-            src = ROOT / "buddyswitch" / "env-profiles" / "market.json"
+            (temp_root / "catalog" / "env-profiles").mkdir(parents=True)
+            (temp_root / "contracts").mkdir(parents=True)
+            src = self.profile_root / "market.json"
             bad = json.loads(src.read_text(encoding="utf-8"))
             bad["role_id"] = "pm"
-            dst = temp_root / "buddyswitch" / "env-profiles" / "market.json"
+            dst = temp_root / "catalog" / "env-profiles" / "market.json"
             dst.write_text(json.dumps(bad, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+            (temp_root / "contracts" / "role-env-profile.json").write_text(
+                (self.package_root / "contracts" / "role-env-profile.json").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
             with self.assertRaises(env_profiles.EnvProfileError):
                 env_profiles.require_env_profile(
                     "market",
                     manifest_path=self.manifest_path,
-                    repo_root=temp_root,
+                    package_root=temp_root,
                 )
 
     def test_validation_rejects_profiles_with_retired_project_workspace_key(self) -> None:
@@ -177,7 +185,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 profile,
                 role_id="dev",
                 manifest=manifest,
-                repo_root=ROOT,
+                package_root=self.package_root,
             )
 
     def test_search_capability_boundary_is_required_and_validated(self) -> None:
@@ -195,7 +203,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 missing_search,
                 role_id="market",
                 manifest=manifest,
-                repo_root=ROOT,
+                package_root=self.package_root,
             )
 
         bad_api = json.loads(json.dumps(market))
@@ -205,7 +213,7 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 bad_api,
                 role_id="market",
                 manifest=manifest,
-                repo_root=ROOT,
+                package_root=self.package_root,
             )
 
         dev = json.loads((self.profile_root / "dev.json").read_text(encoding="utf-8"))
@@ -220,5 +228,5 @@ class BuddyEnvProfilesTests(unittest.TestCase):
                 dev,
                 role_id="dev",
                 manifest=manifest,
-                repo_root=ROOT,
+                package_root=self.package_root,
             )

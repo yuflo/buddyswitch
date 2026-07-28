@@ -14,7 +14,7 @@ import time
 from typing import IO, Any, Mapping, Sequence
 import uuid
 
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 
 
 POLL_INTERVAL = 0.02
@@ -415,19 +415,19 @@ class ResourceLedger:
         )
         try:
             if strategy == "central_daemon_stop":
-                import central_daemon
-                import central_daemon_core
+                from buddyswitch.launcher import central_daemon
+                from buddyswitch.launcher import central_daemon_core
 
                 paths = central_daemon_core.central_daemon_paths(
                     Path(str(args["shared_root"]))
                 )
                 result = central_daemon.stop_central_daemon(paths)
             elif strategy == "instance_daemon_stop":
-                import daemon_core
+                from buddyswitch.launcher import daemon_core
 
                 result = daemon_core.stop_daemon(Path(str(args["instance_json"])))
             elif strategy == "runtime_broker_stop":
-                from runtime_kernel import lifecycle
+                from buddyswitch.runtime_kernel import lifecycle
 
                 result = lifecycle.stop_broker(
                     lifecycle.BrokerPaths(
@@ -438,7 +438,7 @@ class ResourceLedger:
                     )
                 )
             elif strategy == "app_server_stop":
-                import app_server
+                from buddyswitch.launcher import app_server
 
                 result = app_server.stop_app_server(
                     Path(str(args["socket_path"])),
@@ -447,7 +447,7 @@ class ResourceLedger:
                     Path(str(args["log_file"])),
                 )
             elif strategy == "browser_stop":
-                import browser_runtime_manager
+                from buddyswitch.launcher import browser_runtime_manager
 
                 result = browser_runtime_manager.release(
                     instance_root=Path(str(args["instance_root"])),

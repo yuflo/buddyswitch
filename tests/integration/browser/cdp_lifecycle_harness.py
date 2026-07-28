@@ -28,10 +28,10 @@ from tests.support.fake_cdp import (
 )
 
 ROOT = REPO_ROOT
-SESSION_PATH = ROOT / "scripts" / "env" / ("cdp_browser_" + "session.py")
-LIFECYCLE_PATH = ROOT / "scripts" / "env" / "cdp_browser_lifecycle.py"
-TARGET_TRANSPORT_PATH = ROOT / "scripts" / "env" / "cdp_target.py"
-BROWSER_RUNTIME_MANAGER_PATH = ROOT / "tools" / "launcher" / "browser_runtime_manager.py"
+SESSION_PATH = ROOT / "src" / "buddyswitch" / "env" / ("cdp_browser_" + "session.py")
+LIFECYCLE_PATH = ROOT / "src" / "buddyswitch" / "env" / "cdp_browser_lifecycle.py"
+TARGET_TRANSPORT_PATH = ROOT / "src" / "buddyswitch" / "env" / "cdp_target.py"
+BROWSER_RUNTIME_MANAGER_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "browser_runtime_manager.py"
 MODULE_COUNTER = count()
 LEGACY_CURRENT_TARGET_FIELD = "current_" + "target_id"
 LEGACY_PAGE_TARGET_MAP_FIELD = "page_id_to_" + "target_id"
@@ -41,13 +41,13 @@ LEGACY_TARGETS_FIELD = "tar" + "gets"
 def load_lifecycle() -> Any:
     if not LIFECYCLE_PATH.exists():
         raise AssertionError(f"expected module to exist: {LIFECYCLE_PATH}")
-    return importlib.reload(importlib.import_module("env.cdp_browser_lifecycle"))
+    return importlib.reload(importlib.import_module("buddyswitch.env.cdp_browser_lifecycle"))
 
 
 def load_target_transport() -> Any:
     if not TARGET_TRANSPORT_PATH.exists():
         raise AssertionError(f"expected module to exist: {TARGET_TRANSPORT_PATH}")
-    return importlib.reload(importlib.import_module("env.cdp_target"))
+    return importlib.reload(importlib.import_module("buddyswitch.env.cdp_target"))
 
 
 def _make_cdp_browser_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:

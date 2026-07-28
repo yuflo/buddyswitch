@@ -13,15 +13,18 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_cleanup  # noqa: E402
-import env_legacy_store as env_store  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.domain import source_refs  # noqa: E402
-from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.runtime_support import env_cleanup  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.domain import source_refs  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -122,7 +125,7 @@ class MemoryRemovalContractTests(unittest.TestCase):
         return payload
 
     def _copy_manifest_into_runtime(self) -> Path:
-        runtime_manifest = self._runtime_path("buddyswitch/manifest.toml")
+        runtime_manifest = self._runtime_path("catalog/manifest.toml")
         runtime_manifest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(MANIFEST, runtime_manifest)
         return runtime_manifest

@@ -16,9 +16,8 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
 SHIPPED_TOOLS = {
@@ -38,7 +37,7 @@ RETIRED_SHARED_RUNTIME_FILES = {"catalog.py", "cli_helpers.py", "discovery.py", 
 
 class EnvToolPackageIndependenceTests(unittest.TestCase):
     def _tool_dir(self, tool: str) -> Path:
-        return ROOT / "scripts" / "env" / "tools" / tool
+        return ROOT / "src" / "buddyswitch" / "env" / "tools" / tool
 
     def _run_python(self, script: str) -> subprocess.CompletedProcess[str]:
         return run_process(
@@ -60,7 +59,7 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
                     self.assertFalse((package_dir / retired).exists(), msg=f"retired file still exists: {package_dir / retired}")
 
     def test_no_legacy_shared_runtime_files_remain(self) -> None:
-        shared_root = ROOT / "scripts" / "env" / "tools"
+        shared_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
         for name in sorted(RETIRED_SHARED_RUNTIME_FILES):
             self.assertFalse((shared_root / name).exists(), msg=f"retired shared runtime file exists: {name}")
 
@@ -75,21 +74,23 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
                             name = alias.name
-                            if name.startswith(("env.repos", "env.domain", "env_manifest", "runtime_kernel")):
+                            if name.startswith(("buddyswitch.env.repos", "buddyswitch.env.domain", "env_manifest", "runtime_kernel")):
                                 violations.append(f"{rel}:{node.lineno}: import {name}")
-                            if name.startswith("env.tools."):
+                            if name.startswith("buddyswitch.env.tools."):
                                 parts = name.split(".")
                                 if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
                                     violations.append(f"{rel}:{node.lineno}: import sibling tool {name}")
                     if isinstance(node, ast.ImportFrom):
                         module = node.module or ""
-                        if module.startswith(("env.repos", "env.domain", "env_manifest", "runtime_kernel")):
+                        if module.startswith(("buddyswitch.env.repos", "buddyswitch.env.domain", "env_manifest", "runtime_kernel")):
                             violations.append(f"{rel}:{node.lineno}: from {module} import ...")
-                        if module == "env.tools":
+                        if module == "buddyswitch.env.tools":
                             for alias in node.names:
                                 if alias.name in SHIPPED_TOOLS and alias.name != tool:
-                                    violations.append(f"{rel}:{node.lineno}: from env.tools import {alias.name}")
-                        if module.startswith("env.tools."):
+                                    violations.append(
+                                        f"{rel}:{node.lineno}: from buddyswitch.env.tools import {alias.name}"
+                                    )
+                        if module.startswith("buddyswitch.env.tools."):
                             parts = module.split(".")
                             if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
                                 violations.append(f"{rel}:{node.lineno}: from {module} import ...")
@@ -99,7 +100,7 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
         script = """
 import json
 import sys
-from env.tool_runtime import registry
+from buddyswitch.env.tool_runtime import registry
 
 tools = sorted(registry.supported_tools())
 for tool in tools:
@@ -109,9 +110,9 @@ registry.operation_semantics()
 registry.compact_tool_affordances()
 registry.tool_catalog_errors()
 
-loaded_impl = sorted(name for name in sys.modules if name.startswith("env.tools.") and name.endswith("._impl"))
-loaded_repos = sorted(name for name in sys.modules if name.startswith("env.repos."))
-loaded_domains = sorted(name for name in sys.modules if name.startswith("env.domain."))
+loaded_impl = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.tools.") and name.endswith("._impl"))
+loaded_repos = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.repos."))
+loaded_domains = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.domain."))
 print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "domains": loaded_domains}))
 """
         completed = self._run_python(script)
@@ -133,8 +134,8 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
                     """
                     from __future__ import annotations
 
-                    from env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, TASK_REQUIREMENT_FREE, ToolDefinition
-                    from env.tool_runtime import results
+                    from buddyswitch.env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, TASK_REQUIREMENT_FREE, ToolDefinition
+                    from buddyswitch.env.tool_runtime import results
 
                     DEFINITION = ToolDefinition(
                         id="probe",
@@ -202,11 +203,11 @@ import sys
 from pathlib import Path
 
 root = Path.cwd()
-import env.tools
-from env.tool_runtime import registry
+import buddyswitch.env.tools as env_tools
+from buddyswitch.env.tool_runtime import registry
 
 probe_root = Path({str(Path(temp_dir) / "env" / "tools")!r})
-env.tools.__path__.append(str(probe_root))
+env_tools.__path__.append(str(probe_root))
 importlib.invalidate_caches()
 registry.clear_cache()
 

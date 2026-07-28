@@ -81,7 +81,12 @@ def maybe_capture_prepare_probe() -> dict[str, object] | None:
     if not os.environ.get("BUDDYSWITCH_TEST_PREPARE_TEXT"):
         return None
     prepare_result = subprocess.run(
-        [os.environ["BUDDYSWITCH_PYTHON"], "scripts/turn_runtime.py", "status"],
+        [
+            os.environ["BUDDYSWITCH_PYTHON"],
+            "-m",
+            "buddyswitch.application.entrypoints.diagnostics",
+            "status",
+        ],
         cwd=os.getcwd(),
         text=True,
         capture_output=True,
@@ -111,7 +116,8 @@ def maybe_capture_broker_probe(entry: dict[str, object]) -> dict[str, object] | 
     runtime_dir = instance_json_path.parent / "runtime"
     status_command = [
         os.environ["BUDDYSWITCH_PYTHON"],
-        "scripts/runtime_kernel/broker.py",
+        "-m",
+        "buddyswitch.application.entrypoints.runtime_broker",
         "status",
         "--socket",
         entry.get("runtime_broker_socket") or str(runtime_dir / "runtime-broker.sock"),
@@ -123,12 +129,7 @@ def maybe_capture_broker_probe(entry: dict[str, object]) -> dict[str, object] | 
         str(runtime_dir / "runtime-broker.log"),
         "--instance-json",
         str(instance_json_path),
-        "--manifest",
-        str(Path(os.getcwd()) / "buddyswitch" / "manifest.toml"),
     ]
-    repo_root = entry.get("repo_root")
-    if isinstance(repo_root, str) and repo_root:
-        status_command.extend(["--repo-root", repo_root])
     status_result = subprocess.run(
         status_command,
         cwd=os.getcwd(),
@@ -165,10 +166,27 @@ def maybe_capture_runtime_smoke() -> list[dict[str, object]] | None:
         return None
     rows: list[dict[str, object]] = []
     smoke_commands = (
-        ("turn_runtime.status", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/turn_runtime.py", "status"]),
-        ("context.summarize", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/env/client.py", "context", "summarize"]),
-        ("actor_private.desc", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/env/client.py", "actor_private", "desc"]),
-        ("search.status", [os.environ["BUDDYSWITCH_PYTHON"], "scripts/env/client.py", "search", "status"]),
+        (
+            "turn_runtime.status",
+            [
+                os.environ["BUDDYSWITCH_PYTHON"],
+                "-m",
+                "buddyswitch.application.entrypoints.diagnostics",
+                "status",
+            ],
+        ),
+        (
+            "context.summarize",
+            [os.environ["BUDDYSWITCH_PYTHON"], "-m", "buddyswitch.env.client", "context", "summarize"],
+        ),
+        (
+            "actor_private.desc",
+            [os.environ["BUDDYSWITCH_PYTHON"], "-m", "buddyswitch.env.client", "actor_private", "desc"],
+        ),
+        (
+            "search.status",
+            [os.environ["BUDDYSWITCH_PYTHON"], "-m", "buddyswitch.env.client", "search", "status"],
+        ),
     )
     for name, command in smoke_commands:
         result = subprocess.run(
@@ -353,6 +371,9 @@ def run_fake_app_server(socket_url: str, entry: dict[str, object]) -> int:
 
 
 def main(argv: list[str]) -> int:
+    invoked_cwd = os.environ.pop("BUDDYSWITCH_TEST_INVOKED_CWD", None)
+    if invoked_cwd:
+        os.chdir(invoked_cwd)
     if argv == ["--version"]:
         print("codex-cli fake-test")
         return 0
@@ -378,7 +399,7 @@ def main(argv: list[str]) -> int:
         "active_role": os.environ.get("BUDDYSWITCH_ROLE_ID"),
         "actor_id": os.environ.get("BUDDYSWITCH_ACTOR_ID"),
         "instance_json": os.environ.get("BUDDYSWITCH_INSTANCE_JSON"),
-        "repo_root": os.environ.get("BUDDYSWITCH_REPO_ROOT"),
+        "project_source": os.environ.get("BUDDYSWITCH_PROJECT_SOURCE"),
         "actor_private_dir": os.environ.get("BUDDYSWITCH_ACTOR_PRIVATE_DIR"),
         "instance_tmp": os.environ.get("BUDDYSWITCH_INSTANCE_TMP"),
         "project_workspace_dir": os.environ.get("BUDDYSWITCH_PROJECT_WORKSPACE_DIR"),

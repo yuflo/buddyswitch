@@ -9,15 +9,14 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
 class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
     def test_actor_identity_profile_is_the_actor_static_identity_owner(self) -> None:
-        from env.domain.identity import ActorIdentityProfile
-        from env.domain.identity import IdentityRef
+        from buddyswitch.env.domain.identity import ActorIdentityProfile
+        from buddyswitch.env.domain.identity import IdentityRef
 
         profile = ActorIdentityProfile.from_payload(
             {
@@ -38,8 +37,8 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("actor_address", profile.to_payload())
 
     def test_external_identity_profile_is_the_external_static_identity_owner(self) -> None:
-        from env.domain.identity import ExternalIdentityProfile
-        from env.domain.identity import IdentityRef
+        from buddyswitch.env.domain.identity import ExternalIdentityProfile
+        from buddyswitch.env.domain.identity import IdentityRef
 
         profile = ExternalIdentityProfile.from_payload(
             {
@@ -56,8 +55,8 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("external_id", profile.to_payload())
 
     def test_identity_helpers_reject_cross_type_ids(self) -> None:
-        from env.domain.identity import actor_identity
-        from env.domain.identity import external_identity
+        from buddyswitch.env.domain.identity import actor_identity
+        from buddyswitch.env.domain.identity import external_identity
 
         with self.assertRaisesRegex(ValueError, "actor identity id"):
             actor_identity("ext-not-actor")
@@ -65,13 +64,13 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
             external_identity("act-not-external")
 
     def test_identity_domain_has_no_im_participant_adapter(self) -> None:
-        import env.domain.identity as identity
+        import buddyswitch.env.domain.identity as identity
 
         legacy_adapter = "identity" + "_from_im_participant"
         self.assertFalse(hasattr(identity, legacy_adapter))
 
     def test_identity_repo_persists_actor_and_external_profiles(self) -> None:
-        from env.repos import identities as identity_repo
+        from buddyswitch.env.repos import identities as identity_repo
 
         actor = identity_repo.save_actor_identity_profile(
             {
@@ -108,8 +107,8 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
         )
 
     def test_tool_context_uses_identity_profile_without_actor_address(self) -> None:
-        from env.domain.identity import ActorIdentityProfile
-        from env.tool_runtime.context import ToolContext
+        from buddyswitch.env.domain.identity import ActorIdentityProfile
+        from buddyswitch.env.tool_runtime.context import ToolContext
 
         instance_root = self.runtime_root / "instances" / "act-dev-context"
         instance_json = instance_root / "actor.json"

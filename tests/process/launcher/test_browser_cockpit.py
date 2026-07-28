@@ -18,10 +18,18 @@ from tests.support.python import PYTHON, executable_python_source
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger, run_process
 from tests.support.cli import write_executable
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "buddyswitch-codex"
+_VERIFIED_RUNTIME_PROJECTIONS = {
+    "BUDDYSWITCH_PACKAGE_ROOT",
+    "BUDDYSWITCH_PROJECT_SOURCE",
+    "BUDDYSWITCH_PYTHON",
+    "BUDDYSWITCH_RUNTIME_DIR",
+    "BUDDYSWITCH_RUNTIME_IDENTITY",
+    "BUDDYSWITCH_SOURCE_ROOT",
+}
 
 
 class BrowserCockpitLauncherTests(unittest.TestCase):
@@ -33,7 +41,7 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
             key: value
             for key, value in os.environ.items()
             if key.startswith("BUDDYSWITCH_")
-            and key != "BUDDYSWITCH_PYTHON"
+            and key not in _VERIFIED_RUNTIME_PROJECTIONS
             and not key.startswith("BUDDYSWITCH_TEST_")
         }
         for key in saved:
@@ -43,7 +51,7 @@ class BrowserCockpitLauncherTests(unittest.TestCase):
             for key in list(os.environ):
                 if (
                     key.startswith("BUDDYSWITCH_")
-                    and key != "BUDDYSWITCH_PYTHON"
+                    and key not in _VERIFIED_RUNTIME_PROJECTIONS
                     and not key.startswith("BUDDYSWITCH_TEST_")
                 ):
                     os.environ.pop(key, None)
@@ -560,7 +568,10 @@ with Path(os.environ["BUDDYSWITCH_TEST_CAPTURE"]).open("a", encoding="utf-8") as
         self.assertIn("--", argv)
         separator_index = argv.index("--")
         self.assertEqual(argv[separator_index + 1], expected_python)
-        self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
+        self.assertEqual(
+            argv[separator_index + 2 : separator_index + 4],
+            ["-m", "buddyswitch.application.entrypoints.browser_cockpit_proxy"],
+        )
         self.assertIn("--upstream-command", argv)
         upstream_index = argv.index("--upstream-command")
         self.assertEqual(argv[upstream_index + 1], "npx chrome-devtools-mcp@1.1.1")
@@ -1247,11 +1258,11 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             )
 
     def test_browser_launcher_source_is_instance_only(self) -> None:
-        text = (ROOT / "tools" / "launcher" / "browser_cockpit.sh").read_text(encoding="utf-8")
+        text = (ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "browser_cockpit.sh").read_text(encoding="utf-8")
         self.assertIn("chrome-devtools-cockpit", text)
-        self.assertIn("chrome_devtools_cockpit_proxy.py", text)
-        self.assertIn("scripts/env/cdp_target.py", text)
-        self.assertNotIn("scripts/env/cdp_background_page.py", text)
+        self.assertIn("buddyswitch.application.entrypoints.browser_cockpit_proxy", text)
+        self.assertIn("buddyswitch.application.entrypoints.browser_runtime target", text)
+        self.assertNotIn("cdp_background_page", text)
         self.assertNotIn("/json/new?about:blank", text)
         self.assertNotIn("chrome-devtools-mcp@latest", text)
         self.assertNotIn("chrome/shared-browser", text)

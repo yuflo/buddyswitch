@@ -28,28 +28,27 @@ from tests.support.processes import ResourceLedger, run_process
 from tests.support.cli import pid_alive, wait_until, write_executable
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_state  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
-from runtime_kernel import protocol  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.runtime_kernel import protocol  # noqa: E402
 
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
-DAEMON_CORE = ROOT / "tools" / "launcher" / "daemon_core.py"
-DAEMON_MAILBOX = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
-PAGE_EXPIRED_HANDLER = ROOT / "tools" / "launcher" / "browser_page_expired_handler.py"
-RELEASE_HANDLER = ROOT / "tools" / "launcher" / "browser_release_handler.py"
-BROWSER_RUNTIME_MANAGER = ROOT / "tools" / "launcher" / "browser_runtime_manager.py"
-TRIGGERS = ROOT / "tools" / "launcher" / "daemon_triggers.py"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
+PROXY = ROOT / "src" / "buddyswitch" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+DAEMON_CORE = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_MAILBOX = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
+PAGE_EXPIRED_HANDLER = ROOT / "src" / "buddyswitch" / "launcher" / "browser_page_expired_handler.py"
+RELEASE_HANDLER = ROOT / "src" / "buddyswitch" / "launcher" / "browser_release_handler.py"
+BROWSER_RUNTIME_MANAGER = ROOT / "src" / "buddyswitch" / "launcher" / "browser_runtime_manager.py"
+TRIGGERS = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_triggers.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
-    return importlib.reload(importlib.import_module(path.stem))
+    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
 
 
 def port_accepts(port: int) -> bool:
@@ -555,8 +554,11 @@ for raw_line in sys.stdin:
     def _write_ensure_script(self, path: Path) -> None:
         write_executable(
             path,
-            executable_python_source(
-                r'''
+            "#!/bin/sh\n"
+            "set -eu\n"
+            f"cd {shlex.quote(str(ROOT))}\n"
+            f"exec {shlex.quote(PYTHON)} -B - \"$@\" <<'PY'\n"
+            + r'''
 from __future__ import annotations
 
 import json
@@ -570,7 +572,7 @@ from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from tests.support.cli import pid_alive
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 
 
 def endpoint_ready(port: int) -> bool:
@@ -676,8 +678,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
         )
         + "\n"
     )
-''',
-            ),
+'''
+            + "PY\n",
         )
 
     def _start_fake_runtime_broker(
@@ -700,7 +702,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
 
         def acquire_browser(request_id: str | None) -> dict[str, Any]:
             completed = run_process(
-                [PYTHON, str(ensure_script), str(instance_root)],
+                [str(ensure_script), str(instance_root)],
                 cwd=ROOT,
                 env=os.environ.copy(),
                 text=True,
@@ -1086,7 +1088,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "BUDDYSWITCH_SOURCE_HOME": str(source_home),
                     "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
                     "BUDDYSWITCH_STATE_ROOT": str(runtime_state_root),
-                    "BUDDYSWITCH_REPO_ROOT": str(ROOT),
                     "BUDDYSWITCH_TEST_INSTANCE_ROOT": str(instance_root),
                     "BUDDYSWITCH_TEST_INSTANCE_JSON": str(instance_json),
                     "BUDDYSWITCH_TEST_FAKE_CHROME_PORT": "0",
@@ -1212,7 +1213,6 @@ with calls_path.open("a", encoding="utf-8") as handle:
                     "BUDDYSWITCH_SOURCE_HOME": str(source_home),
                     "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
                     "BUDDYSWITCH_STATE_ROOT": str(runtime_state_root),
-                    "BUDDYSWITCH_REPO_ROOT": str(ROOT),
                     "BUDDYSWITCH_TEST_INSTANCE_ROOT": str(instance_root),
                     "BUDDYSWITCH_TEST_INSTANCE_JSON": str(instance_json),
                     "BUDDYSWITCH_TEST_FAKE_CHROME_PORT": "0",

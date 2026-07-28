@@ -10,14 +10,13 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-from env.tool_runtime.definition import ActionDefinition  # noqa: E402
-from env.tool_runtime.definition import ToolDefinition  # noqa: E402
-from env.tool_runtime.definition import validate_definition  # noqa: E402
-from env.tool_runtime import registry as catalog  # noqa: E402
-from env.tool_runtime import role_auth  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.tool_runtime.definition import ActionDefinition  # noqa: E402
+from buddyswitch.env.tool_runtime.definition import ToolDefinition  # noqa: E402
+from buddyswitch.env.tool_runtime.definition import validate_definition  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as catalog  # noqa: E402
+from buddyswitch.env.tool_runtime import role_auth  # noqa: E402
 
 _EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 _EXPECTED_ACTIONS_BY_TOOL = {
@@ -37,7 +36,7 @@ _EXPECTED_ACTIONS_BY_TOOL = {
     },
     "artifact": {"list", "get", "create_revision", "update_metadata", "attach_file", "list_attachments", "get_attachment"},
     "context": {"get", "summarize", "list_sources"},
-    "demand_sys": {"list", "get", "create", "revise", "complete", "cancel"},
+    "demand_sys": {"list", "get", "resolve_inbound", "complete"},
     "evidence": {"issue_browser", "approve_downgrade"},
     "search": {"status", "request"},
     "message": {"contacts", "send", "get", "list", "conversation"},
@@ -54,12 +53,10 @@ _EXPECTED_FREE_ACTIONS = {
     "context.summarize",
     "context.get",
     "context.list_sources",
-    "demand_sys.create",
-    "demand_sys.revise",
     "demand_sys.list",
     "demand_sys.get",
+    "demand_sys.resolve_inbound",
     "demand_sys.complete",
-    "demand_sys.cancel",
     "message.contacts",
     "message.send",
     "message.get",
@@ -282,7 +279,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
     def test_demand_exact_replay_actions_advertise_idempotency(self) -> None:
         operations = catalog.operation_semantics()
 
-        for action in ("create", "complete", "cancel"):
+        for action in ("resolve_inbound", "complete"):
             with self.subTest(action=action):
                 self.assertIs(operations[f"demand_sys.{action}"]["risk_hints"]["idempotent"], True)
 
@@ -372,7 +369,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             validate_definition(invalid_definition)
 
     def test_operation_semantics_permissions_are_covered_by_role_policy(self) -> None:
-        manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        manifest = env_manifest.load_manifest(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml")
         manifest_roles = role_auth.manifest_role_ids(manifest)
         for key, row in catalog.operation_semantics().items():
             required_permission = row["required_permission"]
@@ -606,7 +603,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={},
             manifest={"roles": [{"id": "market"}]},
-            manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+            manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
         )
         self.assertFalse(hyphenated.get("ok"), msg=hyphenated)
         self.assertEqual((hyphenated.get("error") or {}).get("code"), "E_ENV_TOOL")
@@ -619,7 +616,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={"browser_port": None},
             manifest={"roles": [{"id": "market"}]},
-            manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+            manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
         )
         self.assertFalse(canonical.get("ok"), msg=canonical)
         self.assertEqual((canonical.get("error") or {}).get("code"), "E_ENV_TOOL", msg=canonical)

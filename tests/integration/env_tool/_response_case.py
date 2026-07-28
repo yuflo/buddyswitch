@@ -22,20 +22,19 @@ from tests.support.fake_cdp import (
 )
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.repos import messages as message_repo  # noqa: E402
-from env.services import messages as message_service  # noqa: E402
-from env.tool_runtime import registry as tool_catalog  # noqa: E402
-from env.tool_runtime import results as tool_results  # noqa: E402
-from env.tool_runtime import context as runtime_context  # noqa: E402
-import env.tools.search._impl as search_impl  # noqa: E402
-import turn_runtime  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.repos import messages as message_repo  # noqa: E402
+from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.env.tool_runtime import results as tool_results  # noqa: E402
+from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
+import buddyswitch.env.tools.search._impl as search_impl  # noqa: E402
+from buddyswitch.runtime_support import turn_runtime  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):

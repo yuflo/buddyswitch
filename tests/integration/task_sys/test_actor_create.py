@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from env.domain import task_sys
+from buddyswitch.env.domain import task_sys
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

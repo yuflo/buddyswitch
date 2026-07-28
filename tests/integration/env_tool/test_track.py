@@ -13,13 +13,16 @@ from unittest import mock
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 ALL_BUDDIES = ("pm", "design", "dev", "market", "test")
 
@@ -186,8 +189,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         }
 
         with self.assertRaisesRegex(ValueError, "from_identity_id"):
-            env_store.save_track(legacy_rejection_payload)
-        self.assertIsNone(env_store.get_track("track-retired-relation-source"))
+            track_repo.save_track(legacy_rejection_payload)
+        self.assertIsNone(track_repo.get_track("track-retired-relation-source"))
 
     def test_create_sets_current_identity_as_owner(self) -> None:
         instance_json = self._pm_instance()
@@ -235,7 +238,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
     def test_update_requirements_rejects_owner_role_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-role-requirements").get("ok"))
-        before = env_store.track_file("track-owner-role-requirements").read_text(encoding="utf-8")
+        before = track_repo._track_file("track-owner-role-requirements").read_text(encoding="utf-8")
 
         rejected = self._dispatch(
             instance_json=pm_instance,
@@ -254,12 +257,12 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(rejected.get("permission_boundary"), "request-payload")
         self.assertIs(rejected.get("state_changed"), False)
         self.assertIn("unsupported payload fields: owner_role", str(rejected.get("why_blocked")))
-        self.assertEqual(env_store.track_file("track-owner-role-requirements").read_text(encoding="utf-8"), before)
+        self.assertEqual(track_repo._track_file("track-owner-role-requirements").read_text(encoding="utf-8"), before)
 
     def test_add_update_rejects_owner_role_without_state_mutation(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-owner-role-update").get("ok"))
-        before = env_store.track_file("track-owner-role-update").read_text(encoding="utf-8")
+        before = track_repo._track_file("track-owner-role-update").read_text(encoding="utf-8")
 
         design_instance = self._instance_json(actor_id="act-design-owner-update", role="design")
         rejected = self._dispatch(
@@ -279,7 +282,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(rejected.get("permission_boundary"), "request-payload")
         self.assertIs(rejected.get("state_changed"), False)
         self.assertIn("unsupported payload fields: owner_role", str(rejected.get("why_blocked")))
-        self.assertEqual(env_store.track_file("track-owner-role-update").read_text(encoding="utf-8"), before)
+        self.assertEqual(track_repo._track_file("track-owner-role-update").read_text(encoding="utf-8"), before)
 
     def test_add_update_defaults_kind_to_progress_when_omitted(self) -> None:
         pm_instance = self._pm_instance()
@@ -300,7 +303,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertTrue(updated.get("ok"), msg=updated)
         self.assertTrue(bool(updated.get("state_changed")), msg=updated)
 
-        track = env_store.get_track("track-update-default-kind")
+        track = track_repo.get_track("track-update-default-kind")
         self.assertIsInstance(track, dict)
         assert isinstance(track, dict)
         updates = [row for row in track.get("updates", []) if isinstance(row, dict)]
@@ -412,7 +415,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
             body="material body",
         )
         self.assertTrue(draft.get("ok"), msg=draft)
-        before_artifact = deepcopy(env_store.get_artifact("art-material-r1"))
+        before_artifact = deepcopy(artifact_repo.get_artifact("art-material-r1"))
 
         related = self._dispatch(
             instance_json=instance_json,
@@ -437,10 +440,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("published_material", changes)
         self.assertIn("material_relation_added", changes)
 
-        artifact = env_store.get_artifact("art-material-r1")
+        artifact = artifact_repo.get_artifact("art-material-r1")
         self.assertEqual(artifact, before_artifact)
 
-        track_store = env_store.get_track("track-material-relation")
+        track_store = track_repo.get_track("track-material-relation")
         self.assertIsInstance(track_store, dict)
         assert isinstance(track_store, dict)
         relations = [row for row in track_store.get("artifact_relations", []) if isinstance(row, dict)]
@@ -506,10 +509,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         )
         self.assertTrue(archived.get("ok"), msg=archived)
 
-        baseline_track = env_store.get_track("track-material-main")
-        baseline_r1 = env_store.get_artifact("art-replace-r1")
-        baseline_r2 = env_store.get_artifact("art-replace-r2")
-        baseline_other = env_store.get_track("track-material-other")
+        baseline_track = track_repo.get_track("track-material-main")
+        baseline_r1 = artifact_repo.get_artifact("art-replace-r1")
+        baseline_r2 = artifact_repo.get_artifact("art-replace-r2")
+        baseline_other = track_repo.get_track("track-material-other")
         self.assertIsInstance(baseline_track, dict)
         self.assertIsInstance(baseline_r1, dict)
         self.assertIsInstance(baseline_r2, dict)
@@ -532,10 +535,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
             args={"track_id": "track-material-other", "artifact_id": "art-replace-r2", "label": "Brief", "summary": "r2"},
         )
         self.assertTrue(cross_track.get("ok"), msg=cross_track)
-        self.assertEqual(env_store.get_track("track-material-main"), baseline_track)
-        self.assertEqual(env_store.get_artifact("art-replace-r1"), baseline_r1)
-        self.assertEqual(env_store.get_artifact("art-replace-r2"), baseline_r2)
-        other_after = env_store.get_track("track-material-other")
+        self.assertEqual(track_repo.get_track("track-material-main"), baseline_track)
+        self.assertEqual(artifact_repo.get_artifact("art-replace-r1"), baseline_r1)
+        self.assertEqual(artifact_repo.get_artifact("art-replace-r2"), baseline_r2)
+        other_after = track_repo.get_track("track-material-other")
         self.assertIsInstance(other_after, dict)
         assert isinstance(other_after, dict)
         other_relations = [row for row in other_after.get("artifact_relations", []) if isinstance(row, dict)]
@@ -553,9 +556,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertFalse(archived_reject.get("ok"), msg=archived_reject)
         self.assertEqual(archived_reject.get("permission_boundary"), "track.lifecycle_status")
         self.assertFalse(bool(archived_reject.get("state_changed")), msg=archived_reject)
-        self.assertEqual(env_store.get_track("track-material-main"), baseline_track)
-        self.assertEqual(env_store.get_artifact("art-replace-r1"), baseline_r1)
-        self.assertEqual(env_store.get_artifact("art-replace-r2"), baseline_r2)
+        self.assertEqual(track_repo.get_track("track-material-main"), baseline_track)
+        self.assertEqual(artifact_repo.get_artifact("art-replace-r1"), baseline_r1)
+        self.assertEqual(artifact_repo.get_artifact("art-replace-r2"), baseline_r2)
 
         pub_r2 = self._dispatch(
             instance_json=instance_json,
@@ -567,9 +570,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         )
         self.assertTrue(pub_r2.get("ok"), msg=pub_r2)
 
-        track = env_store.get_track("track-material-main")
-        r1_store = env_store.get_artifact("art-replace-r1")
-        r2_store = env_store.get_artifact("art-replace-r2")
+        track = track_repo.get_track("track-material-main")
+        r1_store = artifact_repo.get_artifact("art-replace-r1")
+        r2_store = artifact_repo.get_artifact("art-replace-r2")
         self.assertIsInstance(track, dict)
         self.assertIsInstance(r1_store, dict)
         self.assertIsInstance(r2_store, dict)
@@ -753,9 +756,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         )
         self.assertTrue(first_relation.get("ok"), msg=first_relation)
 
-        before_track_a = deepcopy(env_store.get_track("track-material-a"))
-        before_track_b = deepcopy(env_store.get_track("track-material-b"))
-        before_artifact = deepcopy(env_store.get_artifact("art-cross-track-material-r1"))
+        before_track_a = deepcopy(track_repo.get_track("track-material-a"))
+        before_track_b = deepcopy(track_repo.get_track("track-material-b"))
+        before_artifact = deepcopy(artifact_repo.get_artifact("art-cross-track-material-r1"))
 
         duplicate = self._dispatch(
             instance_json=pm_instance,
@@ -794,15 +797,15 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual((wrong_owner.get("error") or {}).get("code"), "E_TRACK_ARTIFACT_SCOPE")
         self.assertFalse(bool(wrong_owner.get("state_changed")), msg=wrong_owner)
 
-        self.assertEqual(env_store.get_artifact("art-cross-track-material-r1"), before_artifact)
-        track_a = env_store.get_track("track-material-a")
-        track_b = env_store.get_track("track-material-b")
+        self.assertEqual(artifact_repo.get_artifact("art-cross-track-material-r1"), before_artifact)
+        track_a = track_repo.get_track("track-material-a")
+        track_b = track_repo.get_track("track-material-b")
         self.assertIsInstance(track_a, dict)
         self.assertIsInstance(track_b, dict)
         assert isinstance(track_a, dict)
         assert isinstance(track_b, dict)
-        self.assertEqual(env_store.get_track("track-material-a"), before_track_a)
-        self.assertNotEqual(env_store.get_track("track-material-b"), before_track_b)
+        self.assertEqual(track_repo.get_track("track-material-a"), before_track_a)
+        self.assertNotEqual(track_repo.get_track("track-material-b"), before_track_b)
         self.assertEqual([row.get("artifact_id") for row in track_a.get("artifact_relations", [])], ["art-cross-track-material-r1"])
         self.assertEqual([row.get("artifact_id") for row in track_b.get("artifact_relations", [])], ["art-cross-track-material-r1"])
 
@@ -821,14 +824,14 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         )
         self.assertTrue(draft.get("ok"), msg=draft)
 
-        before_track = deepcopy(env_store.get_track(track_id))
-        before_artifact = deepcopy(env_store.get_artifact(artifact_id))
+        before_track = deepcopy(track_repo.get_track(track_id))
+        before_artifact = deepcopy(artifact_repo.get_artifact(artifact_id))
         self.assertIsInstance(before_track, dict)
         self.assertIsInstance(before_artifact, dict)
         assert isinstance(before_track, dict)
         assert isinstance(before_artifact, dict)
 
-        original_save_track = env_store.save_track
+        original_save_track = track_repo.save_track
         call_count = {"count": 0}
 
         def _fail_first_track_save(track: dict[str, object]) -> dict[str, object]:
@@ -838,7 +841,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
                     raise ValueError("simulated track save failure")
             return original_save_track(track)
 
-        with mock.patch("env_legacy_store.save_track", side_effect=_fail_first_track_save):
+        with mock.patch(
+            "buddyswitch.env.repos.tracks.save_track",
+            side_effect=_fail_first_track_save,
+        ):
             rejected = self._dispatch(
                 instance_json=pm_instance,
                 actor_id="act-pm-track",
@@ -851,8 +857,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
         self.assertEqual(rejected.get("durability"), "none")
-        self.assertEqual(env_store.get_track(track_id), before_track)
-        self.assertEqual(env_store.get_artifact(artifact_id), before_artifact)
+        self.assertEqual(track_repo.get_track(track_id), before_track)
+        self.assertEqual(artifact_repo.get_artifact(artifact_id), before_artifact)
 
     def test_add_proof_creates_relation_without_timeline_or_artifact_mutation(self) -> None:
         pm_instance = self._pm_instance()
@@ -868,7 +874,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
             body="pass",
         )
         self.assertTrue(draft.get("ok"), msg=draft)
-        before_artifact = deepcopy(env_store.get_artifact("art-proof-r1"))
+        before_artifact = deepcopy(artifact_repo.get_artifact("art-proof-r1"))
 
         proof = self._dispatch(
             instance_json=test_instance,
@@ -886,10 +892,10 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIn("proof_relation_added", changes)
         self.assertNotIn("update_added", changes)
 
-        artifact = env_store.get_artifact("art-proof-r1")
+        artifact = artifact_repo.get_artifact("art-proof-r1")
         self.assertEqual(artifact, before_artifact)
 
-        track = env_store.get_track("track-proof-relation")
+        track = track_repo.get_track("track-proof-relation")
         self.assertIsInstance(track, dict)
         assert isinstance(track, dict)
         relations = [row for row in track.get("artifact_relations", []) if isinstance(row, dict)]
@@ -948,9 +954,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         )
         self.assertTrue(r2.get("ok"), msg=r2)
 
-        baseline_track = deepcopy(env_store.get_track("track-proof-main"))
-        baseline_r1 = deepcopy(env_store.get_artifact("art-proof-replace-r1"))
-        baseline_r2 = deepcopy(env_store.get_artifact("art-proof-replace-r2"))
+        baseline_track = deepcopy(track_repo.get_track("track-proof-main"))
+        baseline_r1 = deepcopy(artifact_repo.get_artifact("art-proof-replace-r1"))
+        baseline_r2 = deepcopy(artifact_repo.get_artifact("art-proof-replace-r2"))
 
         rejected = self._dispatch(
             instance_json=test_instance,
@@ -963,9 +969,9 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual(rejected.get("permission_boundary"), "track.lifecycle_status")
         self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
-        self.assertEqual(env_store.get_track("track-proof-main"), baseline_track)
-        self.assertEqual(env_store.get_artifact("art-proof-replace-r1"), baseline_r1)
-        self.assertEqual(env_store.get_artifact("art-proof-replace-r2"), baseline_r2)
+        self.assertEqual(track_repo.get_track("track-proof-main"), baseline_track)
+        self.assertEqual(artifact_repo.get_artifact("art-proof-replace-r1"), baseline_r1)
+        self.assertEqual(artifact_repo.get_artifact("art-proof-replace-r2"), baseline_r2)
 
         published = self._dispatch(
             instance_json=test_instance,
@@ -976,7 +982,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
             args={"track_id": "track-proof-main", "artifact_id": "art-proof-replace-r2", "label": "Smoke", "summary": "r2"},
         )
         self.assertTrue(published.get("ok"), msg=published)
-        track = env_store.get_track("track-proof-main")
+        track = track_repo.get_track("track-proof-main")
         self.assertIsInstance(track, dict)
         assert isinstance(track, dict)
         relations = [row for row in track.get("artifact_relations", []) if isinstance(row, dict)]
@@ -986,8 +992,8 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertTrue(by_id["art-proof-replace-r2"])
         self.assertTrue(all(row.get("role") == "proof" for row in relations), msg=relations)
 
-        r1_store = env_store.get_artifact("art-proof-replace-r1")
-        r2_store = env_store.get_artifact("art-proof-replace-r2")
+        r1_store = artifact_repo.get_artifact("art-proof-replace-r1")
+        r2_store = artifact_repo.get_artifact("art-proof-replace-r2")
         self.assertIsInstance(r1_store, dict)
         self.assertIsInstance(r2_store, dict)
         assert isinstance(r1_store, dict)
@@ -1000,7 +1006,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
     def test_archive_boundaries(self) -> None:
         pm_instance = self._pm_instance()
         self.assertTrue(self._create_track(instance_json=pm_instance, track_id="track-archive").get("ok"))
-        before_archive = env_store.get_track("track-archive")
+        before_archive = track_repo.get_track("track-archive")
         self.assertIsInstance(before_archive, dict)
         assert isinstance(before_archive, dict)
         self.assertIsNone(before_archive.get("archived_at"))
@@ -1019,7 +1025,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(denied.get("permission_boundary"), "track.owner_identity_id")
         self.assertEqual(denied.get("active_role"), "design")
         self.assertIs(denied.get("state_changed"), False)
-        after_denied_archive = env_store.get_track("track-archive")
+        after_denied_archive = track_repo.get_track("track-archive")
         self.assertIsInstance(after_denied_archive, dict)
         assert isinstance(after_denied_archive, dict)
         self.assertIsNone(after_denied_archive.get("archived_at"))

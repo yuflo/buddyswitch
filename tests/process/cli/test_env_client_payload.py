@@ -1,4 +1,4 @@
-"""CLI payload parsing contract tests for scripts/env/client.py."""
+"""CLI payload parsing contract tests for the installed env client module."""
 
 from __future__ import annotations
 
@@ -17,16 +17,15 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.tool_runtime import registry as tool_registry  # noqa: E402
-from runtime_kernel.client import RuntimeBrokerError  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.runtime_kernel.client import RuntimeBrokerError  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
 
 class EnvClientPayloadCliTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = importlib.import_module("env.client")
+        self.client = importlib.import_module("buddyswitch.env.client")
 
     def _run_client(
         self,
@@ -44,7 +43,7 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def _tool_help_actions(self, tool: str) -> set[str]:
         completed = run_process(
-            [PYTHON, "scripts/env/client.py", tool, "--help"],
+            [PYTHON, "-m", "buddyswitch.env.client", tool, "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -60,7 +59,7 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def test_cli_help_lists_tools_from_registry(self) -> None:
         completed = run_process(
-            [PYTHON, "scripts/env/client.py", "--help"],
+            [PYTHON, "-m", "buddyswitch.env.client", "--help"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -144,7 +143,7 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def test_actor_private_cli_resource_is_not_registered(self) -> None:
         completed = run_process(
-            [PYTHON, str(ROOT / "scripts" / "env" / "client.py"), "actor_private", "write", "--payload", "{}"],
+            [PYTHON, "-m", "buddyswitch.env.client", "actor_private", "write", "--payload", "{}"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -204,7 +203,7 @@ class EnvClientPayloadCliTests(unittest.TestCase):
                 broker.assert_not_called()
 
     def test_client_has_no_per_tool_dispatch_branches(self) -> None:
-        source = (ROOT / "scripts" / "env" / "client.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "env" / "client.py").read_text(encoding="utf-8")
         for tool in sorted(tool_registry.supported_tools()):
             with self.subTest(tool=tool):
                 self.assertNotIn(f"def _dispatch_{tool}(", source)

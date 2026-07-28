@@ -11,14 +11,13 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
 def _task_sys() -> Any:
-    return importlib.import_module("env.domain.task_sys")
+    return importlib.import_module("buddyswitch.env.domain.task_sys")
 
 
 class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestCase):

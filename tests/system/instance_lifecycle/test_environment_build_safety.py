@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -16,7 +18,69 @@ from tests.support.processes import run_process
 LAUNCHER = REPO_ROOT / "buddyswitch-codex"
 
 
+def _activated_runtime_identity() -> dict[str, object]:
+    configured = os.environ.get("BUDDYSWITCH_RUNTIME_DIR")
+    runtime_dir = (
+        Path(configured)
+        if configured is not None
+        else REPO_ROOT / ".buddyswitch-runtime"
+    )
+    payload = json.loads(
+        (runtime_dir / "activation.json").read_text(encoding="utf-8")
+    )
+    assert isinstance(payload, dict)
+    return payload
+
+
 class TestEnvironmentBuildSafety(SystemLauncherHarness, unittest.TestCase):
+    def test_started_actor_is_code_free_and_runtime_attributable(self) -> None:
+        with ExitStack() as cleanup:
+            temp_root = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
+            source_home = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
+            ctx = self._start_service_instance(
+                temp_root,
+                source_home,
+                cleanup_stack=cleanup,
+                role="pm",
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=self._output_error_text(completed),
+            )
+
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            instance_root = Path(str(ctx["instance_root"]))
+            workspace = instance_root / "workspace"
+            copied_implementation = [
+                relative
+                for relative in (
+                    "scripts",
+                    "tools",
+                    "framework",
+                    "src",
+                    "tests",
+                    "docs",
+                    "buddyswitch/manifest.toml",
+                )
+                if (workspace / relative).exists()
+            ]
+
+            self.assertEqual(
+                (
+                    instance_payload.get("runtime_identity"),
+                    copied_implementation,
+                ),
+                (
+                    _activated_runtime_identity(),
+                    [],
+                ),
+            )
+            self._stop_service_instance(ctx)
+
     def test_two_actor_starts_share_one_preserved_git_free_project_environment(self) -> None:
         with ExitStack() as cleanup:
             first_temp = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
@@ -98,7 +162,7 @@ class TestEnvironmentBuildSafety(SystemLauncherHarness, unittest.TestCase):
 
             self.assertFalse(shared_root.exists())
 
-    def test_inactive_resume_does_not_reenter_source_build_inputs(self) -> None:
+    def test_inactive_resume_ignores_retired_source_locator(self) -> None:
         with ExitStack() as cleanup:
             temp_root = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
             source_home = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
@@ -116,9 +180,6 @@ class TestEnvironmentBuildSafety(SystemLauncherHarness, unittest.TestCase):
             detached_repo.mkdir()
             resume_env = dict(ctx["env"])
             resume_env["BUDDYSWITCH_REPO_ROOT"] = str(detached_repo)
-            resume_env["BUDDYSWITCH_ENV_MCP_SERVER"] = str(
-                REPO_ROOT / "tools" / "launcher" / "env_tool_mcp_server.py"
-            )
 
             resumed = run_process(
                 [str(LAUNCHER), "instance", "resume", str(ctx["actor_id"])],

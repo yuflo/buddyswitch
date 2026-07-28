@@ -16,9 +16,11 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
-DAEMON_SH_PATH = ROOT / "tools" / "launcher" / "daemon.sh"
-CENTRAL_DAEMON_PATH = ROOT / "tools" / "launcher" / "central_daemon.py"
+INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
+DAEMON_SH_PATH = (
+    ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "daemon.sh"
+)
+CENTRAL_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py"
 MODULE_COUNTER = count()
 EXPECTED_SUBSCRIPTIONS = ["im.message.created", "track.comment.added"]
 EXPECTED_HANDLER_TYPES = [
@@ -46,7 +48,7 @@ EXPECTED_HANDLER_NAMES = [
 def load_instance_daemon() -> Any:
     if not INSTANCE_DAEMON_PATH.exists():
         raise AssertionError(f"expected module to exist: {INSTANCE_DAEMON_PATH}")
-    return importlib.reload(importlib.import_module("instance_daemon"))
+    return importlib.reload(importlib.import_module("buddyswitch.launcher.instance_daemon"))
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -67,7 +69,7 @@ def imported_modules(path: Path) -> set[str]:
 class InstanceDaemonEntrypointTests(unittest.TestCase):
     def test_task_application_commands_are_registered_only_at_composition_root(self) -> None:
         imports = imported_modules(INSTANCE_DAEMON_PATH)
-        self.assertIn("task_goal_handler", imports)
+        self.assertIn("buddyswitch.launcher.task_goal_handler", imports)
         self.assertNotIn("task_sys_daemon_adapter", imports)
         factories = self.instance_daemon.default_application_command_factories()
         self.assertEqual(factories, [self.instance_daemon.task_goal_handler.command_handlers])
@@ -78,17 +80,17 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
     def test_default_daemon_handlers_are_built_through_notification_center(self) -> None:
         imports = imported_modules(INSTANCE_DAEMON_PATH)
 
-        self.assertIn("notification_center", imports)
-        self.assertIn("browser_inbound", imports)
-        self.assertIn("message_inbound", imports)
-        self.assertIn("track_comment_inbound", imports)
-        self.assertIn("demand_triage_handler", imports)
-        self.assertIn("demand_orchestration_handler", imports)
+        self.assertIn("buddyswitch.launcher.notification_center", imports)
+        self.assertIn("buddyswitch.launcher.browser_inbound", imports)
+        self.assertIn("buddyswitch.launcher.message_inbound", imports)
+        self.assertIn("buddyswitch.launcher.track_comment_inbound", imports)
+        self.assertIn("buddyswitch.launcher.demand_triage_handler", imports)
+        self.assertIn("buddyswitch.launcher.demand_orchestration_handler", imports)
         self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("browser_page_expired_handler", imports)
         self.assertNotIn("task_" + "checkout_handler", imports)
-        self.assertFalse((ROOT / "tools" / "launcher" / ("task_" + "checkout_handler.py")).exists())
+        self.assertFalse((ROOT / "src" / "buddyswitch" / "launcher" / ("task_" + "checkout_handler.py")).exists())
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
         handlers = self.instance_daemon.default_daemon_handlers()
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
@@ -208,11 +210,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
     def test_daemon_shell_still_calls_instance_daemon_entrypoint(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")
-        self.assertIn("instance_daemon.py", shell_source)
+        self.assertIn("-m buddyswitch.application.entrypoints.instance_daemon", shell_source)
 
     def test_daemon_shell_ensures_central_daemon_lifecycle(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")
-        self.assertIn("central_daemon.py", shell_source)
+        self.assertIn("-m buddyswitch.application.entrypoints.central_daemon", shell_source)
         self.assertIn("buddyswitch_central_daemon_ensure", shell_source)
         self.assertIn("buddyswitch_central_daemon_stop_if_idle", shell_source)
         self.assertTrue(CENTRAL_DAEMON_PATH.exists())

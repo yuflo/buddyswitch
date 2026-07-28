@@ -1,2 +1,0 @@
-"""BuddySwitch host tooling package."""
-

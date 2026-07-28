@@ -15,16 +15,15 @@ from tests.support.paths import REPO_ROOT
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.tool_runtime import context as context_module  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
-from env.repos import track_comments as comment_repo  # noqa: E402
-from env.repos import tracks as track_repo  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.tool_runtime import context as context_module  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
+from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 

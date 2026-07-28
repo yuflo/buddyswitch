@@ -12,10 +12,9 @@ from tests.support.paths import REPO_ROOT
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.repos import runtime_files  # noqa: E402
-from env.repos import track_comments as comment_repo  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
 
 
 ACTOR_DEV = {"actor_id": "act-dev-track-comments", "role_id": "dev"}

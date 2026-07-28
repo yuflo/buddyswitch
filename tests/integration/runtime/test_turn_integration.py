@@ -10,10 +10,9 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-from env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 
@@ -22,7 +21,7 @@ class TurnRuntimeIntegrationTests(unittest.TestCase):
         self.workspace = RuntimeTestWorkspace()
         self.addCleanup(self.workspace.close)
         self.runtime_root = self.workspace.root
-        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
+        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.actor_id = self.workspace.actor_id(role="pm", label="act-runless-integration")
         self.instance_json = self.workspace.path("instance.json")

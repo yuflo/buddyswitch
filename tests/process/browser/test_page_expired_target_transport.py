@@ -58,11 +58,9 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 
-repo_root = Path(sys.argv[1])
-instance_root = Path(sys.argv[2])
-sys.path[:0] = [str(repo_root / "tools" / "launcher"), str(repo_root / "scripts"), str(repo_root / "scripts" / "env")]
+instance_root = Path(sys.argv[1])
 
-from browser_page_expired_handler import BrowserPageExpiredHandler
+from buddyswitch.launcher.browser_page_expired_handler import BrowserPageExpiredHandler
 
 context = SimpleNamespace(
     actor_id="act-browser",
@@ -83,7 +81,7 @@ result = BrowserPageExpiredHandler().handle(context, None, runtime, trigger)
 print(json.dumps({"status": result.status, "message": result.message}))
 """
             completed = run_process(
-                [PYTHON, "-c", script, str(ROOT), str(instance_root)],
+                [PYTHON, "-c", script, str(instance_root)],
                 cwd=ROOT,
                 text=True,
                 capture_output=True,

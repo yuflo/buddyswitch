@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from tools.launcher import imessage_channel
+from buddyswitch.launcher import imessage_channel
 
 from tests.integration.im._imessage_fakes import (
     _FailingImsg,

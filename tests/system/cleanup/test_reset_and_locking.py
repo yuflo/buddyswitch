@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 from tests.system.support.launcher import SystemLauncherHarness
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger, run_process
@@ -35,7 +35,7 @@ class TestResetAndLocking(SystemLauncherHarness, unittest.TestCase):
             first = run_process(
                 [
                     PYTHON,
-                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    str(ROOT / "src" / "buddyswitch" / "launcher" / "runtime_lock.py"),
                     "--",
                     "bash",
                     "-c",
@@ -68,7 +68,7 @@ class TestResetAndLocking(SystemLauncherHarness, unittest.TestCase):
                 second = run_process(
                     [
                         PYTHON,
-                        str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                        str(ROOT / "src" / "buddyswitch" / "launcher" / "runtime_lock.py"),
                         "--",
                         PYTHON,
                         "-c",
@@ -114,7 +114,7 @@ class TestResetAndLocking(SystemLauncherHarness, unittest.TestCase):
             wrapper = self._ledger.start_process(
                 [
                     PYTHON,
-                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    str(ROOT / "src" / "buddyswitch" / "launcher" / "runtime_lock.py"),
                     "--",
                     PYTHON,
                     "-c",

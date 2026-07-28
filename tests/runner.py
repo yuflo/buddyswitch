@@ -12,6 +12,11 @@ import subprocess
 import sys
 import time
 
+import buddyswitch
+from buddyswitch.foundation.process_runtime.invocation import (
+    current_runtime_identity,
+    publish_verified_environment,
+)
 from tests.support.environment import RunEnvironment
 from tests.support.paths import LAUNCHER_ROOT, REPO_ROOT, SCRIPTS_ROOT
 from tests.support.processes import (
@@ -33,6 +38,20 @@ class RunnerSignal(BaseException):
 
 
 def _preflight() -> None:
+    os.environ.pop("PYTHONPATH", None)
+    identity = current_runtime_identity()
+    package_file = Path(str(buddyswitch.__file__)).resolve(strict=True)
+    package_root = Path(identity.package_root).resolve(strict=True)
+    if package_file.parent != package_root:
+        raise RuntimeError(
+            "BuddySwitch tests must import the activated installed package"
+        )
+    source_package = REPO_ROOT / "src" / "buddyswitch"
+    if package_file.is_relative_to(source_package):
+        raise RuntimeError(
+            "BuddySwitch tests must not import implementation from the source checkout"
+        )
+    publish_verified_environment(identity)
     if sys.version_info[:2] != (3, 13):
         raise RuntimeError(
             f"BuddySwitch tests require Python 3.13; got {sys.version_info.major}.{sys.version_info.minor}"
@@ -197,8 +216,17 @@ def _node_command(targets: Sequence[str], node_name_pattern: str | None) -> list
 
 def _shell_syntax_files() -> list[Path]:
     files = [REPO_ROOT / "buddyswitch-test", REPO_ROOT / "buddyswitch-codex"]
-    files.extend(sorted((REPO_ROOT / "tools").rglob("*.sh")))
-    files.extend(sorted((REPO_ROOT / "scripts").rglob("*.sh")))
+    files.extend(
+        sorted(
+            (
+                REPO_ROOT
+                / "src"
+                / "buddyswitch"
+                / "launcher"
+                / "shell"
+            ).rglob("*.sh")
+        )
+    )
     return files
 
 

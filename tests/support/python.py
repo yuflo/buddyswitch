@@ -10,8 +10,7 @@ def configured_python() -> str:
     raw = os.environ.get("BUDDYSWITCH_PYTHON")
     if not raw:
         raise RuntimeError(
-            "BUDDYSWITCH_PYTHON is not initialized; source tools/launcher/env.sh and call "
-            "buddyswitch_env_init before running tests."
+            "BUDDYSWITCH_PYTHON is not initialized by the verified test runner."
         )
     path = Path(raw)
     if not path.is_absolute():

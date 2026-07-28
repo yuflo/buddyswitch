@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 from tests.process.launcher._harness import ProcessLauncherHarness
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
@@ -17,7 +17,12 @@ from tests.support.cli import write_executable
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "buddyswitch-codex"
-HOST_CONTROL = ROOT / "tools" / "launcher" / "host_control.sh"
+HOST_CONTROL = (
+    Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"])
+    / "launcher"
+    / "shell"
+    / "host_control.sh"
+)
 
 
 class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
@@ -798,7 +803,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             direct_start = run_process(
                 [
                     PYTHON,
-                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    "-m",
+                    "buddyswitch.launcher.runtime_lock",
                     "--",
                     str(HOST_CONTROL),
                     "start-bootstrap-locked",
@@ -837,7 +843,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             completed = run_process(
                 [
                     PYTHON,
-                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    "-m",
+                    "buddyswitch.launcher.runtime_lock",
                     "--shared-root",
                     str(shared_root),
                     "--",
@@ -874,7 +881,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             direct_inactive = run_process(
                 [
                     PYTHON,
-                    str(ROOT / "tools" / "launcher" / "runtime_lock.py"),
+                    "-m",
+                    "buddyswitch.launcher.runtime_lock",
                     "--",
                     str(HOST_CONTROL),
                     "instance-set-inactive-locked",
@@ -918,8 +926,6 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            runtime_lock = ROOT / "tools" / "launcher" / "runtime_lock.py"
-
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
@@ -931,7 +937,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             completed = run_process(
                 [
                     PYTHON,
-                    str(runtime_lock),
+                    "-m",
+                    "buddyswitch.launcher.runtime_lock",
                     "--shared-root",
                     str(shared_root),
                     "--",
@@ -953,8 +960,6 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            runtime_lock = ROOT / "tools" / "launcher" / "runtime_lock.py"
-
             env = os.environ.copy()
             env["HOME"] = str(source_home_path)
             env.pop("CODEX_HOME", None)
@@ -966,7 +971,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             completed = run_process(
                 [
                     PYTHON,
-                    str(runtime_lock),
+                    "-m",
+                    "buddyswitch.launcher.runtime_lock",
                     "--shared-root",
                     str(shared_root),
                     "--",

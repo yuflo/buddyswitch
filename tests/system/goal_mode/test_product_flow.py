@@ -28,9 +28,9 @@ from tests.system.goal_mode.support import (
     response_completed,
     response_created,
 )
-import app_server
-import codex_runtime
-import daemon_core
+from buddyswitch.launcher import app_server
+from buddyswitch.launcher import codex_runtime
+from buddyswitch.launcher import daemon_core
 
 
 LAUNCHER = REPO_ROOT / "buddyswitch-codex"

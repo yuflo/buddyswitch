@@ -16,7 +16,6 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
 from tests.support.python import PYTHON  # noqa: E402
 
@@ -54,9 +53,9 @@ LEGACY_SHARED_RUNTIME_FILES = {
 }
 
 LEGACY_TOOL_PUBLIC_FILES = {"contract.py", "semantics.py", "handlers.py", "cli.py", "service.py"}
-FORBIDDEN_IMPORT_PREFIXES = ("env.repos", "env.domain", "env_manifest", "runtime_kernel")
+FORBIDDEN_IMPORT_PREFIXES = ("buddyswitch.env.repos", "buddyswitch.env.domain", "env_manifest", "runtime_kernel")
 FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS = {
-    f"env.tools.{name}"
+    f"buddyswitch.env.tools.{name}"
     for name in (
         "catalog",
         "dispatch",
@@ -73,7 +72,7 @@ FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS = {
 
 class ToolRuntimeProcessTests(unittest.TestCase):
     def _tool_dir(self, tool: str) -> Path:
-        return ROOT / "scripts" / "env" / "tools" / tool
+        return ROOT / "src" / "buddyswitch" / "env" / "tools" / tool
     def _run_python(self, script: str) -> subprocess.CompletedProcess[str]:
         return run_process(
             [PYTHON, "-c", script],
@@ -86,7 +85,7 @@ class ToolRuntimeProcessTests(unittest.TestCase):
         script = """
 import json
 import sys
-from env.tool_runtime import registry
+from buddyswitch.env.tool_runtime import registry
 
 registry.supported_tools()
 registry.env_tools_description()
@@ -94,11 +93,11 @@ registry.operation_semantics()
 
 loaded_private = sorted(
     name for name in sys.modules
-    if name.startswith("env.tools.") and "._impl" in name
+    if name.startswith("buddyswitch.env.tools.") and "._impl" in name
 )
-loaded_repos = sorted(name for name in sys.modules if name.startswith("env.repos."))
-loaded_domains = sorted(name for name in sys.modules if name.startswith("env.domain."))
-loaded_runtime = sorted(name for name in sys.modules if name.startswith("runtime_kernel."))
+loaded_repos = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.repos."))
+loaded_domains = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.domain."))
+loaded_runtime = sorted(name for name in sys.modules if name.startswith("buddyswitch.runtime_kernel."))
 print(json.dumps({
     "loaded_private": loaded_private,
     "loaded_repos": loaded_repos,
@@ -122,14 +121,15 @@ from pathlib import Path
 
 root = Path.cwd()
 
-from env.tool_runtime.registry import dispatch_env_tool_request
-import env_manifest
+from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.runtime_support import env_manifest
 
-manifest = env_manifest.load_manifest(root / "buddyswitch" / "manifest.toml")
+manifest_path = root / "src" / "buddyswitch" / "catalog" / "manifest.toml"
+manifest = env_manifest.load_manifest(manifest_path)
 
 class BlockMessageImpl(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "env.tools.message._impl":
+        if fullname == "buddyswitch.env.tools.message._impl":
             raise RuntimeError("blocked message _impl import")
         return None
 
@@ -145,7 +145,7 @@ base = {
         "workspace_dir": str(root),
     },
     "manifest": manifest,
-    "manifest_path": root / "buddyswitch" / "manifest.toml",
+    "manifest_path": manifest_path,
 }
 context = dispatch_env_tool_request(payload={"tool": "context", "action": "list_sources", "args": {}}, **base)
 message = dispatch_env_tool_request(payload={"tool": "message", "action": "list", "args": {}}, **base)
@@ -174,8 +174,8 @@ print(json.dumps({"context": context, "message": message}, sort_keys=True))
                     """
                     from __future__ import annotations
 
-                    from env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, TASK_REQUIREMENT_FREE, ToolDefinition
-                    from env.tool_runtime import results
+                    from buddyswitch.env.tool_runtime.definition import ActionDefinition, MUTATES_NONE, TASK_REQUIREMENT_FREE, ToolDefinition
+                    from buddyswitch.env.tool_runtime import results
 
                     DEFINITION = ToolDefinition(
                         id="probe",
@@ -252,11 +252,11 @@ from pathlib import Path
 
 root = Path.cwd()
 
-from env.tool_runtime import registry
-import env.tools
+from buddyswitch.env.tool_runtime import registry
+import buddyswitch.env.tools as env_tools
 
 probe_root = Path({str(Path(temp_dir) / "env" / "tools")!r})
-env.tools.__path__.append(str(probe_root))
+env_tools.__path__.append(str(probe_root))
 importlib.invalidate_caches()
 registry.clear_cache()
 
@@ -272,7 +272,7 @@ payload = registry.dispatch_env_tool_request(
     manifest_path=None,
 )
 
-env.tools.__path__.remove(str(probe_root))
+env_tools.__path__.remove(str(probe_root))
 importlib.invalidate_caches()
 registry.clear_cache()
 supported_after = sorted(registry.supported_tools())

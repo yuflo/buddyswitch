@@ -20,14 +20,13 @@ from tests.support.fake_cdp import (
 )
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-import env.tools.search._impl as search_impl  # noqa: E402
-from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+import buddyswitch.env.tools.search._impl as search_impl  # noqa: E402
+from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -417,7 +416,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
         self._assert_cockpit_search_page_guidance(response)
 
     def test_search_source_has_no_direct_json_new_page_open(self) -> None:
-        text = (ROOT / "scripts" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
+        text = (ROOT / "src" / "buddyswitch" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
         self.assertNotIn("/json/new", text)
         self.assertNotIn('"tools"', text)
         self.assertNotIn('"launcher"', text)
@@ -429,7 +428,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("scripts/env/client.py", text)
         self.assertNotIn("cdp_background_page.py", text)
         self.assertNotIn("Target." + "createTarget", text)
-        self.assertFalse((ROOT / "tools" / "launcher" / "cdp_background_page.py").exists())
+        self.assertFalse((ROOT / "src" / "buddyswitch" / "launcher" / "cdp_background_page.py").exists())
 
     def test_search_rejects_empty_query_and_unknown_engine(self) -> None:
         instance_json = self._instance_json()

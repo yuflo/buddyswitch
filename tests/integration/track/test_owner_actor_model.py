@@ -11,14 +11,17 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.tools.track.tool import DEFINITION as TRACK_DEFINITION  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.tools.track.tool import DEFINITION as TRACK_DEFINITION  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 ALL_ROLES = ("pm", "design", "dev", "market", "test")
 OLD_TRACK_FIELDS = ("owner_role", "created_by_actor", "health", "appetite")
@@ -306,7 +309,7 @@ class TrackOwnerActorModelTests(RuntimeWorkspaceTestCase):
             args={"track_id": "track-status-proof", "kind": "blocker", "summary": "Blocked by missing proof"},
         )
         self.assertTrue(blocker_update.get("ok"), msg=blocker_update)
-        track = env_store.get_track("track-status-proof")
+        track = track_repo.get_track("track-status-proof")
         self.assertIsInstance(track, dict)
         assert isinstance(track, dict)
         self.assertEqual(track.get("state"), "active")
@@ -329,7 +332,7 @@ class TrackOwnerActorModelTests(RuntimeWorkspaceTestCase):
             artifact_id="art-status-proof-r1",
         )
         self.assertTrue(draft.get("ok"), msg=draft)
-        before_proof = env_store.get_track("track-status-proof")
+        before_proof = track_repo.get_track("track-status-proof")
         self.assertIsInstance(before_proof, dict)
         assert isinstance(before_proof, dict)
         before_update_count = len([row for row in before_proof.get("updates", []) if isinstance(row, dict)])
@@ -348,7 +351,7 @@ class TrackOwnerActorModelTests(RuntimeWorkspaceTestCase):
             },
         )
         self.assertTrue(proof.get("ok"), msg=proof)
-        after_proof = env_store.get_track("track-status-proof")
+        after_proof = track_repo.get_track("track-status-proof")
         self.assertIsInstance(after_proof, dict)
         assert isinstance(after_proof, dict)
         self.assertEqual(after_proof.get("state"), "active")

@@ -5,16 +5,14 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
 
 import pytest
 
-from runtime_kernel import lifecycle, process_identity
+from buddyswitch.runtime_kernel import lifecycle, process_identity
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger, run_process
-
-
-BROKER = REPO_ROOT / "scripts" / "runtime_kernel" / "broker.py"
 
 
 def _paths(root: Path) -> lifecycle.BrokerPaths:
@@ -31,7 +29,8 @@ def _paths(root: Path) -> lifecycle.BrokerPaths:
 def _command(paths: lifecycle.BrokerPaths, root: Path) -> list[str]:
     return [
         os.environ["BUDDYSWITCH_PYTHON"],
-        str(BROKER),
+        "-m",
+        "buddyswitch.application.entrypoints.runtime_broker",
         "serve",
         "--socket",
         str(paths.socket_path),
@@ -44,9 +43,7 @@ def _command(paths: lifecycle.BrokerPaths, root: Path) -> list[str]:
         "--instance-json",
         str(root / "instance.json"),
         "--manifest",
-        str(REPO_ROOT / "buddyswitch" / "manifest.toml"),
-        "--repo-root",
-        str(REPO_ROOT),
+        str(Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"]) / "catalog" / "manifest.toml"),
     ]
 
 
@@ -59,6 +56,21 @@ def _wait_ready(paths: lifecycle.BrokerPaths, process: subprocess.Popen[str]) ->
             raise AssertionError(f"broker exited before ready: {process.returncode}")
         time.sleep(0.02)
     raise AssertionError("broker did not become ready")
+
+
+def test_broker_command_uses_only_installed_module_and_explicit_state_paths(
+    tmp_path: Path,
+) -> None:
+    command = _command(_paths(tmp_path), tmp_path)
+
+    assert command[:3] == [
+        sys.executable,
+        "-m",
+        "buddyswitch.application.entrypoints.runtime_broker",
+    ]
+    assert "--repo-root" not in command
+    assert not [argument for argument in command if argument.endswith(".py")]
+    assert str(REPO_ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml") not in command
 
 
 @pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])

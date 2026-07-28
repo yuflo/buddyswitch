@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from env.services import messages as message_service
+from buddyswitch.env.services import messages as message_service
 
 
 class ImDeliveryTests(unittest.TestCase):

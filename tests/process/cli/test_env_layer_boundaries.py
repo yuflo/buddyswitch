@@ -15,14 +15,13 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+CODEX_CONFIG = ROOT / "src" / "buddyswitch" / "launcher" / "codex_config.py"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
@@ -57,7 +56,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         return violations
 
     def test_tool_package_cross_imports_are_forbidden(self) -> None:
-        tool_root = ROOT / "scripts" / "env" / "tools"
+        tool_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
         violations: list[str] = []
         for tool in sorted(self._SHIPPED_TOOLS):
             package_dir = tool_root / tool
@@ -70,7 +69,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
-                            if alias.name.startswith("env.tools."):
+                            if alias.name.startswith("buddyswitch.env.tools."):
                                 parts = alias.name.split(".")
                                 if len(parts) >= 3:
                                     target = parts[2]
@@ -78,11 +77,13 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                                         violations.append(f"{rel}:{node.lineno}: import {alias.name}")
                     elif isinstance(node, ast.ImportFrom):
                         module = node.module or ""
-                        if module == "env.tools":
+                        if module == "buddyswitch.env.tools":
                             for alias in node.names:
                                 if alias.name in self._SHIPPED_TOOLS and alias.name != tool:
-                                    violations.append(f"{rel}:{node.lineno}: from env.tools import {alias.name}")
-                        elif module.startswith("env.tools."):
+                                    violations.append(
+                                        f"{rel}:{node.lineno}: from buddyswitch.env.tools import {alias.name}"
+                                    )
+                        elif module.startswith("buddyswitch.env.tools."):
                             parts = module.split(".")
                             if len(parts) >= 3:
                                 target = parts[2]
@@ -92,7 +93,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(violations, [], msg="\n".join(violations))
 
     def test_legacy_env_services_tool_entrypoints_are_removed(self) -> None:
-        runtime_roots = [ROOT / "scripts"]
+        runtime_roots = [ROOT / "src" / "buddyswitch"]
         import_violations: list[str] = []
         for root in runtime_roots:
             for path in sorted(root.rglob("*.py")):
@@ -102,22 +103,22 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
-                            if alias.name.startswith("env.services") and alias.name != "env.services.messages":
+                            if alias.name.startswith("buddyswitch.env.services") and alias.name != "buddyswitch.env.services.messages":
                                 import_violations.append(f"{rel}:{node.lineno}: import {alias.name}")
                     elif isinstance(node, ast.ImportFrom):
                         module = node.module or ""
-                        if module == "env.services":
+                        if module == "buddyswitch.env.services":
                             for alias in node.names:
                                 if alias.name != "messages":
                                     import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
-                        elif module.startswith("env.services") and module != "env.services.messages":
+                        elif module.startswith("buddyswitch.env.services") and module != "buddyswitch.env.services.messages":
                             import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
         self.assertEqual(import_violations, [], msg="\n".join(import_violations))
 
-        service_dir = ROOT / "scripts" / "env" / "services"
+        service_dir = ROOT / "src" / "buddyswitch" / "env" / "services"
         allowed_service_files = {
-            "scripts/env/services/__init__.py",
-            "scripts/env/services/messages.py",
+            "src/buddyswitch/env/services/__init__.py",
+            "src/buddyswitch/env/services/messages.py",
         }
         if service_dir.exists():
             service_files = {
@@ -141,10 +142,12 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         completed = run_process(
             [
                 PYTHON,
-                str(CODEX_CONFIG),
+                "-m",
+            "buddyswitch.application.entrypoints.actor_build",
+            "patch-config",
                 "--config",
                 str(config_path),
-                "--repo-root",
+                "--source-root",
                 str(ROOT),
                 "--shared-root",
                 str(shared_root),
@@ -360,7 +363,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                 "rg",
                 "-n",
                 r"\.mkdir\(|\.write_text\(|\.write_bytes\(|\.unlink\(|os\.replace\(|NamedTemporaryFile\(",
-                "scripts/env/tools",
+                "src/buddyswitch/env/tools",
             ],
             cwd=ROOT,
             text=True,
@@ -372,9 +375,13 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_object_repo_sibling_imports_are_restricted_to_runtime_files(self) -> None:
-        repo_files = sorted(path for path in ROOT.glob("scripts/**/repos/*.py") if path.name != "__init__.py")
+        repo_files = sorted(
+            path
+            for path in ROOT.glob("src/buddyswitch/**/repos/*.py")
+            if path.name != "__init__.py"
+        )
         if not repo_files:
-            self.skipTest("No scripts/**/repos/*.py modules exist in this migration stage; repo boundary scan deferred.")
+            self.skipTest("No packaged repository modules exist.")
         violations: list[str] = []
         for path in repo_files:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -396,7 +403,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(violations, [], msg="\n".join(violations))
 
     def test_track_comment_repo_owns_only_track_comment_storage(self) -> None:
-        path = ROOT / "scripts/env/repos/track_comments.py"
+        path = ROOT / "src/buddyswitch/env/repos/track_comments.py"
         source = path.read_text(encoding="utf-8")
         self.assertNotIn("env_legacy_store", source)
         self.assertNotIn("artifact_revision_chain", source)
@@ -411,7 +418,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(forbidden, [], msg=", ".join(forbidden))
 
     def test_active_object_repos_do_not_import_env_legacy_store(self) -> None:
-        repo_files = sorted(path for path in (ROOT / "scripts/env/repos").glob("*.py") if path.name != "__init__.py")
+        repo_files = sorted(path for path in (ROOT / "src/buddyswitch/env/repos").glob("*.py") if path.name != "__init__.py")
         violations: list[str] = []
         for path in repo_files:
             if path.name == "runtime_files.py":
@@ -423,9 +430,9 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
 
     def test_active_runtime_modules_do_not_import_env_legacy_store(self) -> None:
         roots = [
-            ROOT / "scripts/env/domain",
-            ROOT / "scripts/env/repos",
-            ROOT / "scripts/env/tools",
+            ROOT / "src/buddyswitch/env/domain",
+            ROOT / "src/buddyswitch/env/repos",
+            ROOT / "src/buddyswitch/env/tools",
         ]
         violations = self._legacy_store_import_violations(roots)
         self.assertEqual(violations, [], msg="\n".join(violations))
@@ -439,10 +446,10 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
             "close_proof",
         )
         allowed_paths = {
-            "scripts/env/repos/artifacts.py",
-            "scripts/env/repos/tracks.py",
+            "src/buddyswitch/env/repos/artifacts.py",
+            "src/buddyswitch/env/repos/tracks.py",
         }
-        scanned_roots = [ROOT / "scripts/env/domain"]
+        scanned_roots = [ROOT / "src/buddyswitch/env/domain"]
         violations: list[str] = []
         for root in scanned_roots:
             for path in sorted(root.glob("*.py")):
@@ -455,21 +462,25 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(violations, [], msg="\n".join(violations))
 
     def test_retired_task_domain_and_repository_imports_are_absent(self) -> None:
-        self.assertFalse((ROOT / "scripts/env/domain/tasks.py").exists())
+        self.assertFalse((ROOT / "src/buddyswitch/env/domain/tasks.py").exists())
         violations: list[str] = []
-        for scan_root in (ROOT / "scripts", ROOT / "tools", ROOT / "buddyswitch"):
+        for scan_root in (ROOT / "src" / "buddyswitch",):
             for path in sorted(scan_root.rglob("*")):
                 if not path.is_file() or path.suffix not in {".py", ".md"}:
                     continue
                 source = path.read_text(encoding="utf-8")
-                if "env.domain.tasks" in source or "env.repos.tasks" in source:
+                if "buddyswitch.env.domain.tasks" in source or "buddyswitch.env.repos.tasks" in source:
                     violations.append(path.relative_to(ROOT).as_posix())
         self.assertEqual(violations, [])
 
     def test_domain_cross_object_imports_are_allowlisted(self) -> None:
-        domain_files = sorted(path for path in ROOT.glob("scripts/**/domain/*.py") if path.name != "__init__.py")
+        domain_files = sorted(
+            path
+            for path in ROOT.glob("src/buddyswitch/**/domain/*.py")
+            if path.name != "__init__.py"
+        )
         if not domain_files:
-            self.skipTest("No scripts/**/domain/*.py modules exist in this migration stage; domain boundary scan deferred.")
+            self.skipTest("No packaged domain modules exist.")
         violations: list[str] = []
         for path in domain_files:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -502,9 +513,9 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                     + "|\\|\\s*action\\s*\\|\\s*payload"
                     + "|##\\s*`[^`]+`\\s+payload"
                 ),
-                "buddyswitch/skills",
-                "framework/contracts",
-                "tools/launcher/assets/roles",
+                "src/buddyswitch/skills",
+                "src/buddyswitch/contracts",
+                "src/buddyswitch/launcher/assets/roles",
             ],
             cwd=ROOT,
             text=True,

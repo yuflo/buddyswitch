@@ -13,8 +13,8 @@ from tests.support.runtime import RuntimeWorkspaceTestCase
 
 
 ROOT = REPO_ROOT
-WEB_MANAGEMENT_PATH = ROOT / "tools" / "launcher" / "web_management.py"
-WEB_MANAGEMENT = importlib.import_module("web_management")
+WEB_MANAGEMENT_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py"
+WEB_MANAGEMENT = importlib.import_module("buddyswitch.launcher.web_management")
 
 
 def _restore_env_value(name: str, value: str | None) -> None:
@@ -125,14 +125,20 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
                 self.assertNotIn(marker, source)
 
     def test_build_attach_cli_command_is_short_shell_safe_and_paste_ready(self) -> None:
-        command = WEB_MANAGEMENT.build_attach_cli_command(
-            Path("/tmp/Buddy Switch"),
-            "act-pm.demo",
-        )
+        command = WEB_MANAGEMENT.build_attach_cli_command("act-pm.demo")
 
         self.assertEqual(
             command,
-            "cd '/tmp/Buddy Switch' && ./buddyswitch-codex instance attach act-pm.demo",
+            " ".join(
+                [
+                    WEB_MANAGEMENT.current_runtime_identity().python_executable,
+                    "-m",
+                    "buddyswitch.application.entrypoints.cli",
+                    "instance",
+                    "attach",
+                    "act-pm.demo",
+                ]
+            ),
         )
 
     def test_open_macos_terminal_app_targets_one_window_for_running_and_stopped_terminal(self) -> None:
@@ -220,20 +226,20 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         self.assertEqual(str(raised.exception), "automation denied")
 
     def test_open_tui_task_does_not_expand_launcher_public_surface(self) -> None:
-        source = (ROOT / "tools" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "launcher" / "cli.py").read_text(encoding="utf-8")
 
         self.assertNotIn("attach-open", source)
         self.assertIn("instance attach", source)
 
     def test_web_launcher_ensures_central_daemon_for_web_user_actor(self) -> None:
-        source = (ROOT / "tools" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "launcher" / "cli.py").read_text(encoding="utf-8")
         start = source.index("def _run_web(")
         end = source.index("\ndef _actor_session(", start)
         block = source[start:end]
 
         ensure_index = block.index("central_daemon.start_central_daemon")
         run_index = block.index("subprocess.run")
-        helper_index = block.index("web_management.py")
+        helper_index = block.index("buddyswitch.application.entrypoints.web")
         stop_index = block.index("central_daemon.stop_if_idle")
         self.assertLess(ensure_index, run_index)
         self.assertLess(helper_index, run_index)
@@ -325,7 +331,7 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("[Message From", source)
 
     def test_web_runtime_binds_shared_state_for_server_owned_web_im_identity(self) -> None:
-        from env.repos import runtime_files
+        from buddyswitch.env.repos import runtime_files
 
         original_state_root = os.environ.get("BUDDYSWITCH_STATE_ROOT")
         original_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
@@ -344,7 +350,7 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
             runtime_files.refresh_runtime_roots_from_env()
 
             WEB_MANAGEMENT.bind_web_runtime_state()
-            service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=RecordingHostControl())
+            service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
             status, payload = service.handle_api("GET", "/api/im/session", b"", {})
 
             self.assertEqual(status, 200)
@@ -435,7 +441,7 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
 
     def test_im_delivery_delegates_to_im_owned_delivery(self) -> None:
         runner = RecordingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
         payload = {
             "type": "im.message.created",
             "target_identity_id": "act-pm-demo",

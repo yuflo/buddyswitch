@@ -19,13 +19,12 @@ from tests.support.paths import REPO_ROOT
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
-HELPER_DIR = ROOT / "tools" / "launcher"
-SCRIPTS = ROOT / "scripts"
+HELPER_DIR = ROOT / "src" / "buddyswitch" / "launcher"
 ACTOR_SESSION_PATH = HELPER_DIR / "actor_session.py"
 
-from env.domain import task_sys  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
-import actor_capability  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.launcher import actor_capability  # noqa: E402
 
 MODULE_COUNTER = count()
 
@@ -33,7 +32,9 @@ MODULE_COUNTER = count()
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    return importlib.reload(importlib.import_module(path.stem))
+    return importlib.reload(
+        importlib.import_module(f"buddyswitch.launcher.{path.stem}")
+    )
 
 
 class ActorSessionTests(RuntimeWorkspaceTestCase):
@@ -86,6 +87,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
                     "project_workspace_dir": str(project_workspace_dir),
                     "thread_id": thread_id,
                     "app_server_socket": socket_path,
+                    "runtime_identity": self.actor_session.current_runtime_identity().to_record(),
                     "codex_runtime": {
                         "executable": str(codex_bin.resolve(strict=False)),
                         "version": "codex-cli test-runtime",
@@ -104,7 +106,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
     def test_actor_session_constructor_has_no_runtime_override(self) -> None:
         self.assertEqual(
             list(inspect.signature(self.actor_session.ActorSession).parameters),
-            ["shared_root", "repo_root"],
+            ["shared_root"],
         )
 
     def test_input_actor_turn_updates_capability_then_uses_shared_input_turn_for_start_and_steer(self) -> None:
@@ -185,7 +187,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
         self.actor_session.app_server.input_turn = fake_input
         before = task_sys.list_tasks()
 
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
         result = session.input("act-dev-session", "direct parent input")
 
         self.assertEqual(result["action"], "start")
@@ -194,7 +196,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
 
     def test_input_rejects_empty_text_missing_actor_and_runtime_unavailable_with_stable_errors(self) -> None:
         instance_json = self._write_instance()
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaisesRegex(self.actor_session.ActorSessionError, "input text is required"):
             session.input("act-pm-session", "")
@@ -245,7 +247,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
         self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
         self.actor_session.app_server.thread_resume = fake_resume
 
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
         with mock.patch.dict(
             os.environ,
             {"BUDDYSWITCH_TEST_PRIVATE_SENTINEL": "must-not-propagate"},
@@ -295,7 +297,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
 
         self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
         self.actor_session.app_server.thread_resume = fake_resume
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaises(self.actor_session.codex_runtime.CodexRuntimeError) as raised:
             session.resolve_attach("act-pm-session")
@@ -328,7 +330,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
         self.actor_session.codex_runtime._read_version = (
             lambda _executable, *, code: "codex-cli changed-runtime"
         )
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaises(self.actor_session.codex_runtime.CodexRuntimeError) as raised:
             session.resolve_attach("act-pm-session")
@@ -349,7 +351,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
 
         self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
         self.actor_session.app_server.thread_resume = fake_resume
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaisesRegex(self.actor_session.ActorSessionError, "instance root"):
             session.resolve_attach("act-pm-session")
@@ -367,7 +369,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
 
         self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
         self.actor_session.app_server.thread_resume = fake_resume
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaisesRegex(self.actor_session.ActorSessionError, "instance root"):
             session.resolve_attach("act-pm-session")
@@ -386,7 +388,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
 
         self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
         self.actor_session.app_server.thread_resume = fake_resume
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaisesRegex(self.actor_session.ActorSessionError, "project workspace"):
             session.resolve_attach("act-pm-session")
@@ -406,7 +408,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
 
         self.addCleanup(setattr, self.actor_session.app_server, "thread_resume", original_resume)
         self.actor_session.app_server.thread_resume = fake_resume
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaisesRegex(self.actor_session.ActorSessionError, "project workspace"):
             session.resolve_attach("act-pm-session")
@@ -429,7 +431,7 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
         self.addCleanup(setattr, self.actor_session.os, "execvpe", original_execvpe)
         self.actor_session.app_server.thread_resume = fake_resume
         self.actor_session.os.execvpe = fake_execvpe
-        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2], repo_root=ROOT)
+        session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
 
         with self.assertRaisesRegex(RuntimeError, "execvpe called"):
             session.exec_attach("act-pm-session")

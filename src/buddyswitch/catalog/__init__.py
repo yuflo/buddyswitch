@@ -1,0 +1,1 @@
+"""Installed BuddySwitch catalog resources."""

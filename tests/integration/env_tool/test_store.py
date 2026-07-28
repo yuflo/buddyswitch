@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import sys
@@ -14,11 +13,14 @@ from unittest import mock
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import messages as message_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.domain import task_sys  # noqa: E402
 
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -28,7 +30,7 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestCase):
         return self._state_path(f"buddyswitch/objects/artifacts/{artifact_id}.json")
 
     def test_create_artifact_uses_independent_content_carrier_shape(self) -> None:
-        artifact = env_store.create_artifact_revision(
+        artifact = object_builders.create_artifact_revision(
             artifact_id="art-pm-canonical-r1",
             title="Artifact canonical contract",
             summary="seed",
@@ -58,8 +60,8 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestCase):
         }
         self.assertEqual(set(artifact.keys()), expected_keys)
         self.assertEqual(artifact["template"], "brief")
-        self.assertEqual(artifact["created_by_identity_id"], "act-pm-legacy")
-        self.assertEqual(artifact["author_identity_ids"], ["act-pm-legacy"])
+        self.assertEqual(artifact["created_by_identity_id"], "act-pm-fixture")
+        self.assertEqual(artifact["author_identity_ids"], ["act-pm-fixture"])
         self.assertEqual(artifact["attachments"], [])
         self.assertEqual(artifact["body"], "## Context\n\nSeed")
 
@@ -106,10 +108,10 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestCase):
             payload[retired_field] = "published" if retired_field == "status" else "x"
             with self.subTest(field=retired_field):
                 with self.assertRaises(ValueError):
-                    env_store.validate_artifact(payload)
+                    artifact_repo.validate_artifact(payload)
 
     def test_superseding_artifact_is_artifact_local_currentness(self) -> None:
-        r1 = env_store.create_artifact_revision(
+        r1 = object_builders.create_artifact_revision(
             artifact_id="art-pm-lineage-r1",
             title="Artifact lineage r1",
             summary="r1",
@@ -122,7 +124,7 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestCase):
         )
         self.assertTrue(r1["is_current"], msg=r1)
 
-        r2 = env_store.create_artifact_revision(
+        r2 = object_builders.create_artifact_revision(
             artifact_id="art-pm-lineage-r2",
             title="Artifact lineage r2",
             summary="r2",
@@ -134,8 +136,8 @@ class ArtifactStoreContractTests(RuntimeWorkspaceTestCase):
             source_refs=[{"type": "artifact", "id": "art-pm-lineage-r1"}],
         )
 
-        stored_r1 = env_store.get_artifact("art-pm-lineage-r1")
-        stored_r2 = env_store.get_artifact("art-pm-lineage-r2")
+        stored_r1 = artifact_repo.get_artifact("art-pm-lineage-r1")
+        stored_r2 = artifact_repo.get_artifact("art-pm-lineage-r2")
         self.assertIsInstance(stored_r1, dict)
         self.assertIsInstance(stored_r2, dict)
         assert isinstance(stored_r1, dict)
@@ -154,12 +156,12 @@ class RuntimeRootFoundationTests(RuntimeWorkspaceTestCase):
     def test_environment_bound_runtime_roots_route_object_writes_to_state(self) -> None:
         runtime_root = self.runtime_root.resolve(strict=False)
         runtime_state_root = self.runtime_state_root.resolve(strict=False)
-        self.assertEqual(env_store.ROOT, ROOT)
-        self.assertEqual(env_store.STATE_ROOT, runtime_state_root)
-        self.assertEqual(env_store.runtime_workspace_root(), runtime_root)
+        self.assertEqual(runtime_files.ROOT, runtime_root)
+        self.assertEqual(runtime_files.STATE_ROOT, runtime_state_root)
+        self.assertEqual(runtime_files.runtime_workspace_root(), runtime_root)
 
         artifact_id = f"art-pm-runtime-root-{uuid.uuid4().hex[:8]}-r1"
-        env_store.create_artifact_revision(
+        object_builders.create_artifact_revision(
             artifact_id=artifact_id,
             title="Runtime Root",
             summary="root override proof",
@@ -197,12 +199,12 @@ class RuntimeRootFoundationTests(RuntimeWorkspaceTestCase):
                 },
             ):
                 runtime_files.refresh_runtime_roots_from_env()
-                self.assertEqual(env_store.ROOT, ROOT)
-                self.assertEqual(env_store.STATE_ROOT, alternate_state_root.resolve(strict=False))
-                self.assertEqual(env_store.runtime_workspace_root(), alternate_runtime_root.resolve(strict=False))
+                self.assertEqual(runtime_files.ROOT, alternate_shared_root.resolve(strict=False))
+                self.assertEqual(runtime_files.STATE_ROOT, alternate_state_root.resolve(strict=False))
+                self.assertEqual(runtime_files.runtime_workspace_root(), alternate_runtime_root.resolve(strict=False))
 
                 artifact_id = f"art-pm-env-sync-{uuid.uuid4().hex[:8]}-r1"
-                env_store.create_artifact_revision(
+                object_builders.create_artifact_revision(
                     artifact_id=artifact_id,
                     title="Environment Sync Runtime Root",
                     summary="listener proof",
@@ -239,26 +241,26 @@ class ArtifactCompatibilityTests(RuntimeWorkspaceTestCase):
             "created_at": "2026-05-18T10:00:00+08:00",
             "updated_at": "2026-05-18T10:01:00+08:00",
         }
-        env_store.artifact_file("art-design-legacy-r1").parent.mkdir(parents=True, exist_ok=True)
-        env_store.artifact_file("art-design-legacy-r1").write_text(
+        artifact_repo.artifact_file("art-design-legacy-r1").parent.mkdir(parents=True, exist_ok=True)
+        artifact_repo.artifact_file("art-design-legacy-r1").write_text(
             json.dumps(legacy_payload, ensure_ascii=True, indent=2) + "\n",
             encoding="utf-8",
         )
 
         with self.assertRaisesRegex(ValueError, "retired"):
-            env_store.get_artifact("art-design-legacy-r1")
+            artifact_repo.get_artifact("art-design-legacy-r1")
 
 
 class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
     def test_task_track_id_hint_does_not_mutate_track_state(self) -> None:
-        env_store.create_track(
+        object_builders.create_track(
             "track-task-hint",
             "Task Hint",
             owner_identity="act-pm-task-hint",
             outcome="Task hint outcome",
             now={"next": "seed", "blocker": None},
         )
-        before = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
+        before = json.loads(track_repo._track_file("track-task-hint").read_text(encoding="utf-8"))
 
         instance_root = self._instance_root("act-task-track-hint")
         result = task_sys.create(
@@ -273,7 +275,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
         )
         task = result["task"]
 
-        after = json.loads(env_store.track_file("track-task-hint").read_text(encoding="utf-8"))
+        after = json.loads(track_repo._track_file("track-task-hint").read_text(encoding="utf-8"))
         self.assertEqual(after, before)
         self.assertEqual(
             task["demand_ref"],
@@ -314,13 +316,13 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
             "created_at": "2026-05-18T10:00:00+08:00",
             "updated_at": "2026-05-18T10:00:00+08:00",
         }
-        with self.assertRaisesRegex(ValueError, "legacy task fields are retired: artifact_ids, artifact_slots"):
-            env_store.validate_task(payload)
+        with self.assertRaisesRegex(ValueError, "retired or invalid Task record"):
+            task_sys._validate_task(payload)
 
 
 class TrackStoreContractTests(RuntimeWorkspaceTestCase):
     def test_create_track_uses_artifact_relations_not_publication_slots(self) -> None:
-        track = env_store.create_track(
+        track = object_builders.create_track(
             "track-relation-shape",
             "Relation Shape",
             owner_identity="act-pm-relation",
@@ -333,7 +335,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("shared_materials", track)
         self.assertNotIn("close_proof", track)
 
-        stored = env_store.get_track("track-relation-shape")
+        stored = track_repo.get_track("track-relation-shape")
         self.assertIsInstance(stored, dict)
         assert isinstance(stored, dict)
         self.assertIn("artifact_relations", stored)
@@ -359,10 +361,10 @@ class TrackStoreContractTests(RuntimeWorkspaceTestCase):
             payload[stale_field] = []
             with self.subTest(field=stale_field):
                 with self.assertRaisesRegex(ValueError, "legacy track fields are retired"):
-                    env_store.validate_track(payload)
+                    track_repo.validate_track(payload)
 
     def test_validate_track_normalizes_artifact_relations(self) -> None:
-        track = env_store.validate_track(
+        track = track_repo.validate_track(
             {
                 "id": "track-relation-normalize",
                 "title": "Relation Normalize",
@@ -425,7 +427,7 @@ class TrackStoreContractTests(RuntimeWorkspaceTestCase):
             "archived_at": None,
         }
         with self.assertRaisesRegex(ValueError, "track.artifact_relations\\[\\].role"):
-            env_store.validate_track(payload)
+            track_repo.validate_track(payload)
 
     def test_validate_track_rejects_legacy_task_ids(self) -> None:
         payload = {
@@ -438,61 +440,38 @@ class TrackStoreContractTests(RuntimeWorkspaceTestCase):
             "updated_at": "2026-05-18T10:00:00+08:00",
         }
         with self.assertRaisesRegex(ValueError, "legacy track fields are retired: owner_role, status, summary, task_ids"):
-            env_store.validate_track(payload)
+            track_repo.validate_track(payload)
 
 
 class MessageStoreRetirementTests(RuntimeWorkspaceTestCase):
     def test_legacy_message_object_apis_are_retired(self) -> None:
-        legacy_rejection_payload = {
-            "id": "msg-retired-object",
-            "from_role": "pm",
-            "to_role": "dev",
-            "content": "retired object message",
-            "created_at": "2026-07-04T00:00:00+08:00",
-        }
-
-        cases = [
-            ("validate_message", lambda: env_store.validate_message(legacy_rejection_payload)),
-            ("save_message", lambda: env_store.save_message(legacy_rejection_payload)),
-            ("list_messages", env_store.list_messages),
-            ("get_message", lambda: env_store.get_message("msg-retired-object")),
-            (
-                "create_message",
-                lambda: env_store.create_message(from_role="pm", to_role="dev", content="retired object message"),
-            ),
-        ]
-
-        for name, call in cases:
-            with self.subTest(name=name):
-                with self.assertRaisesRegex(RuntimeError, "identity-first IM"):
-                    call()
-
-    def test_runtime_env_store_message_api_guidance_points_to_identity_im(self) -> None:
-        runtime_env_store = importlib.import_module("env_store")
-
         for name in ("validate_message", "list_messages", "get_message", "save_message", "create_message"):
             with self.subTest(name=name):
-                with self.assertRaisesRegex(AttributeError, "env.services.messages|env.repos.messages"):
-                    getattr(runtime_env_store, name)
+                self.assertFalse(hasattr(message_repo, name))
+
+    def test_runtime_env_store_message_api_guidance_points_to_identity_im(self) -> None:
+        for name in ("save_im_message", "list_im_messages", "get_im_message"):
+            with self.subTest(name=name):
+                self.assertTrue(callable(getattr(message_repo, name)))
 
 
 class CommentStoreTests(RuntimeWorkspaceTestCase):
     def test_track_comment_helper_normalizes_role_author_to_identity(self) -> None:
-        created = env_store.create_track_comment(
+        created = object_builders.create_track_comment(
             track_id="track-helper-comments",
             by_role="pm",
             content="track scoped",
         )
 
         self.assertEqual(created["track_id"], "track-helper-comments")
-        self.assertEqual(created["by_identity_id"], "act-pm-legacy")
+        self.assertEqual(created["by_identity_id"], "act-pm-fixture")
         self.assertNotIn("target_type", created)
         self.assertNotIn("target_id", created)
         self.assertEqual(created["thread_id"], created["id"])
         self.assertEqual(created["status"], "open")
         self.assertEqual(created["mentioned_identity_ids"], [])
 
-        persisted = env_store.get_track_comment("track-helper-comments", created["id"])
+        persisted = track_comment_repo.get_track_comment("track-helper-comments", created["id"])
         self.assertEqual(persisted, created)
-        path = env_store.track_comment_file("track-helper-comments", created["id"])
+        path = track_comment_repo.track_comment_file("track-helper-comments", created["id"])
         self.assertTrue(path.exists(), msg=path)

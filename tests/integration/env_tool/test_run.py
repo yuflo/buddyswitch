@@ -10,12 +10,15 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-import env_legacy_store as env_store  # noqa: E402
-from env.tool_runtime import registry as tool_catalog  # noqa: E402
-from env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 _RETIRED_ACTOR_PRIVATE_FILE_ROWS_FIELD = "actor_private_" + "files"
@@ -24,7 +27,7 @@ _RETIRED_ACTOR_PRIVATE_FILE_ROWS_FIELD = "actor_private_" + "files"
 class RunEnvToolReplacementTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        self.manifest = env_manifest.load_manifest(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml")
         self.actor_id = self._runtime_actor_id(role="pm", label="act-pm-runless")
         self.instance_json = self._runtime_path("instance.json")
         self.instance_json.write_text(
@@ -52,7 +55,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestCase):
             instance_json=self.instance_json,
             instance_payload={"actor_id": actor_id, "role": role, "workspace_dir": str(self.runtime_root)},
             manifest=self.manifest,
-            manifest_path=ROOT / "buddyswitch" / "manifest.toml",
+            manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
         )
 
     def test_registry_excludes_retired_run_and_binding_tools(self) -> None:
@@ -70,7 +73,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestCase):
         self.assertIn("unsupported", str(payload["error"]["message"]).lower())
 
     def test_context_summarize_exposes_runless_decision_surface(self) -> None:
-        track = env_store.create_track(
+        track = object_builders.create_track(
             "track-runless-router",
             "Runless Router",
             owner_actor={"actor_id": "act-pm-runless", "role_id": "pm"},
@@ -84,7 +87,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestCase):
             title="Prepare design intake",
             track_id=track["id"],
         )
-        artifact = env_store.create_artifact_revision(
+        artifact = object_builders.create_artifact_revision(
             artifact_id="art-pm-router-r1",
             title="Router PRD",
             summary="router artifact",
@@ -95,7 +98,7 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestCase):
             authors=["pm"],
             source_refs=None,
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id=track["id"],
             artifact_id=artifact["id"],
             label="Router PRD",

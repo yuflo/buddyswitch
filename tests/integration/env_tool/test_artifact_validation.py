@@ -11,14 +11,17 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-from env.repos import artifacts as artifact_repo  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.integration.env_tool._artifact_env_tool_case import ArtifactEnvToolCase
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -39,12 +42,12 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
             "created_at": "2026-05-18T10:00:00+08:00",
             "updated_at": "2026-05-18T10:01:00+08:00",
         }
-        path = env_store.artifact_file("art-legacy-normalize-r1")
+        path = artifact_repo.artifact_file("art-legacy-normalize-r1")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(legacy, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
         with self.assertRaisesRegex(ValueError, "retired"):
-            env_store.get_artifact("art-legacy-normalize-r1")
+            artifact_repo.get_artifact("art-legacy-normalize-r1")
 
     def test_validate_payload_rejects_retired_fields(self) -> None:
         instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
@@ -74,7 +77,7 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
                 self.assertFalse(bool(payload.get("state_changed")), msg=payload)
 
     def test_validate_artifact_normalizes_missing_attachments_to_empty_list(self) -> None:
-        normalized = env_store.validate_artifact(
+        normalized = artifact_repo.validate_artifact(
             {
                 "id": "art-attachments-normalize-r1",
                 "title": "Normalize attachments",
@@ -117,7 +120,7 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
         for row in invalid_rows:
             with self.subTest(row=row):
                 with self.assertRaises(ValueError):
-                    env_store.validate_artifact({**base_artifact, "attachments": [row]})
+                    artifact_repo.validate_artifact({**base_artifact, "attachments": [row]})
 
     def test_create_revision_rejects_direct_publication_without_orphan(self) -> None:
         instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
@@ -146,7 +149,7 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
         self.assertEqual(rejected.get("durability"), "none")
         self.assertIn("published_to_track", rejected.get("correctable_fields", []))
 
-        self.assertFalse(env_store.artifact_file("art-orphan-r1").exists())
+        self.assertFalse(artifact_repo.artifact_file("art-orphan-r1").exists())
 
         opened = self._dispatch(
             instance_json=instance_json,
@@ -186,7 +189,7 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
         self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
         self.assertEqual(rejected.get("durability"), "none")
         self.assertEqual(rejected.get("correctable_fields"), ["status"])
-        self.assertFalse(env_store.artifact_file("art-reject-status-r1").exists())
+        self.assertFalse(artifact_repo.artifact_file("art-reject-status-r1").exists())
 
     def test_create_revision_creates_private_draft_without_task(self) -> None:
         instance_json = self._instance_json(actor_id="act-pm-art", role="pm")
@@ -251,7 +254,7 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
                 )
                 with self.subTest(role=role, template=template, expected="allowed"):
                     self.assertTrue(created.get("ok"), msg=created)
-                    stored = env_store.get_artifact(artifact_id)
+                    stored = artifact_repo.get_artifact(artifact_id)
                     self.assertIsInstance(stored, dict, msg=created)
                     assert isinstance(stored, dict)
                     self.assertEqual(stored.get("template"), template)
@@ -288,4 +291,4 @@ class ArtifactValidationTests(ArtifactEnvToolCase):
                     self.assertEqual(rejected.get("correctable_fields"), ["template"])
                     self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
                     self.assertEqual(rejected.get("durability"), "none")
-                    self.assertFalse(env_store.artifact_file(artifact_id).exists())
+                    self.assertFalse(artifact_repo.artifact_file(artifact_id).exists())

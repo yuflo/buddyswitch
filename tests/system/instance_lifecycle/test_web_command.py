@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import central_daemon_core
+from buddyswitch.launcher import central_daemon_core
 from tests.system.support.launcher import SystemLauncherHarness
 from tests.support.paths import REPO_ROOT
 
@@ -48,7 +48,12 @@ class TestWebCommandLifecycle(SystemLauncherHarness, unittest.TestCase):
             pgid = os.getpgid(proc.pid)
             try:
                 line = self._read_process_line(proc, timeout_seconds=8.0)
-                self.assertTrue(line.endswith("\n"), msg=line)
+                if not line.endswith("\n"):
+                    self.fail(
+                        "web command emitted no ready line; "
+                        f"returncode={proc.poll()!r}, "
+                        f"stderr={self._read_available_process_lines(proc, stream_name='stderr')!r}"
+                    )
                 self.assertNotIn("listening", line.lower())
                 payload = json.loads(line)
                 self.assertEqual(payload["ok"], True)

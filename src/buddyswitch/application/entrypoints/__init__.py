@@ -1,0 +1,1 @@
+"""Installed BuddySwitch process entrypoints."""

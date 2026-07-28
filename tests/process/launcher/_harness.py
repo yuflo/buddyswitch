@@ -10,7 +10,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 from tests.support.cli import write_executable
 from tests.support.launcher import LauncherTestSupport
 from tests.support.paths import REPO_ROOT
@@ -228,7 +228,10 @@ class ProcessLauncherHarness(LauncherTestSupport):
         self.assertIn("--", argv)
         separator_index = argv.index("--")
         self.assertEqual(argv[separator_index + 1], expected_python)
-        self.assertIn("tools/launcher/chrome_devtools_cockpit_proxy.py", str(argv[separator_index + 2]))
+        self.assertEqual(
+            argv[separator_index + 2 : separator_index + 4],
+            ["-m", "buddyswitch.application.entrypoints.browser_cockpit_proxy"],
+        )
         self.assertIn("--upstream-command", argv)
         upstream_index = argv.index("--upstream-command")
         self.assertEqual(argv[upstream_index + 1], "npx chrome-devtools-mcp@1.1.1")
@@ -252,9 +255,10 @@ class ProcessLauncherHarness(LauncherTestSupport):
         self.assertIn("--", argv)
         separator_index = argv.index("--")
         self.assertEqual(argv[separator_index + 1], expected_python)
-        self.assertIn("tools/launcher/env_tool_mcp_server.py", str(argv[separator_index + 2]))
-        self.assertIn("--repo-root", argv)
-        self.assertIn(str(ROOT), argv)
+        self.assertEqual(
+            argv[separator_index + 2 : separator_index + 4],
+            ["-m", "buddyswitch.application.entrypoints.env_mcp"],
+        )
         self.assertIn("--actor-id", argv)
         self.assertIn(actor_id, argv)
         self.assertIn("--role", argv)

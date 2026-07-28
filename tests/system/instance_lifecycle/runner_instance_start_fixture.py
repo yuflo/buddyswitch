@@ -6,11 +6,11 @@ from pathlib import Path
 import subprocess
 import time
 
-import app_server
-import central_daemon_core
-import daemon_core
-import daemon_mailbox
-from runtime_kernel import lifecycle, process_identity
+from buddyswitch.launcher import app_server
+from buddyswitch.launcher import central_daemon_core
+from buddyswitch.launcher import daemon_core
+from buddyswitch.launcher import daemon_mailbox
+from buddyswitch.runtime_kernel import lifecycle, process_identity
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger
 from tests.support.fake_codex import write_fake_codex

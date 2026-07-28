@@ -12,11 +12,10 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.services import messages as message_service  # noqa: E402
-from env.repos import identities as identity_repo  # noqa: E402
-from env.repos import messages as message_repo  # noqa: E402
+from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+from buddyswitch.env.repos import messages as message_repo  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 

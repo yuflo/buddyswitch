@@ -13,9 +13,8 @@ from unittest import mock
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.domain import task_read, track_read  # noqa: E402
+from buddyswitch.env.domain import task_read, track_read  # noqa: E402
 
 
 def _source(relative: str) -> str:
@@ -91,32 +90,34 @@ CANONICAL_LAUNCHER_STATEMENTS = (
     "#!/usr/bin/env bash",
     "set -euo pipefail",
     'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-    'REPO_ROOT="${SCRIPT_DIR}"',
-    'ENV_HELPER="${REPO_ROOT}/tools/launcher/env.sh"',
+    'RUNTIME_DIR="${BUDDYSWITCH_RUNTIME_DIR:-${SCRIPT_DIR}/.buddyswitch-runtime}"',
     "emit_runtime_unavailable() {",
     'local message="$1"',
     "printf '{\"ok\":false,\"error\":{\"code\":\"RUNTIME_UNAVAILABLE\",\"message\":\"%s\",\"details\":{}}}\\n' \"${message}\"",
     "exit 5",
     "}",
-    'if [[ ! -f "${ENV_HELPER}" ]]; then',
-    'emit_runtime_unavailable "Launcher env helper is missing under tools/launcher."',
+    'if [[ "${RUNTIME_DIR}" != /* ]]; then',
+    'emit_runtime_unavailable "BUDDYSWITCH_RUNTIME_DIR must be an absolute path."',
     "fi",
-    'if ! source "${ENV_HELPER}" >/dev/null 2>/dev/null; then',
-    'emit_runtime_unavailable "Launcher environment initialization failed."',
+    'if [[ ! -f "${RUNTIME_DIR}/activation.json" ]]; then',
+    'emit_runtime_unavailable "Runtime activation.json is missing."',
     "fi",
-    "if ! declare -F buddyswitch_env_init >/dev/null; then",
-    'emit_runtime_unavailable "Launcher environment initialization failed."',
+    'if [[ ! -x "${RUNTIME_DIR}/venv/bin/python" ]]; then',
+    'emit_runtime_unavailable "Runtime venv/bin/python is missing or not executable."',
     "fi",
-    "if ! buddyswitch_env_init >/dev/null 2>/dev/null; then",
-    'emit_runtime_unavailable "BUDDYSWITCH_PYTHON is not initialized."',
-    "fi",
-    'exec "${BUDDYSWITCH_PYTHON}" "${REPO_ROOT}/tools/launcher/cli.py" "$@"',
+    'export BUDDYSWITCH_RUNTIME_DIR="${RUNTIME_DIR}"',
+    "unset BUDDYSWITCH_RUNTIME_IDENTITY",
+    "unset BUDDYSWITCH_PACKAGE_ROOT",
+    "unset BUDDYSWITCH_PROJECT_SOURCE",
+    "unset BUDDYSWITCH_PYTHON",
+    "unset BUDDYSWITCH_SOURCE_ROOT",
+    'exec "${RUNTIME_DIR}/venv/bin/python" -I -m buddyswitch.application.entrypoints.cli "$@"',
 )
 
 
 class ExternalControlArchitectureTests(unittest.TestCase):
     def test_web_uses_private_owners_and_terminal_handoff_without_cli_execution(self) -> None:
-        source = _source("tools/launcher/web_management.py")
+        source = _source("src/buddyswitch/launcher/web_management.py")
         forbidden = (
             "Launcher" + "CommandRunner",
             "--" + "json",
@@ -134,7 +135,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         self.assertIn("build_attach_cli_command", source)
 
     def test_actor_session_has_no_task_runtime_or_standalone_cli_entrypoint(self) -> None:
-        source = _source("tools/launcher/actor_session.py")
+        source = _source("src/buddyswitch/launcher/actor_session.py")
         forbidden = (
             "task_" + "sys",
             "task_" + "id",
@@ -153,11 +154,11 @@ class ExternalControlArchitectureTests(unittest.TestCase):
                 self.assertNotIn(token, source)
 
     def test_actor_environment_build_is_private_to_host_control(self) -> None:
-        cli_source = _source("tools/launcher/cli.py")
-        web_source = _source("tools/launcher/web_management.py")
-        host_source = _source("tools/launcher/host_control.sh")
-        env_source = _source("tools/launcher/env.sh")
-        browser_source = _source("tools/launcher/browser_cockpit.sh")
+        cli_source = _source("src/buddyswitch/launcher/cli.py")
+        web_source = _source("src/buddyswitch/launcher/web_management.py")
+        host_source = _source("src/buddyswitch/launcher/shell/host_control.sh")
+        env_source = _source("src/buddyswitch/launcher/shell/env.sh")
+        browser_source = _source("src/buddyswitch/launcher/shell/browser_cockpit.sh")
         start_block = host_source.split("start_locked_bootstrap() {", 1)[1].split(
             "instance_set_inactive_locked() {",
             1,
@@ -171,8 +172,14 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         self.assertIn("host_control_module.HostControl", web_source)
         self.assertNotIn("actor_environment", cli_source)
         self.assertNotIn("actor_environment", web_source)
-        self.assertEqual(start_block.count("actor_environment.py"), 1)
-        self.assertEqual(host_source.count("actor_environment.py"), 1)
+        self.assertEqual(
+            start_block.count("buddyswitch.application.entrypoints.actor_build"),
+            1,
+        )
+        self.assertEqual(
+            host_source.count("buddyswitch.application.entrypoints.actor_build"),
+            1,
+        )
         for forbidden in (
             "actor_environment.py",
             "--validate-existing",
@@ -197,7 +204,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             source.replace(canonical_exec, 'case "$1" in start) exit 0 ;; esac\n' + canonical_exec),
             source.replace(canonical_exec, 'shift\n' + canonical_exec),
             source.replace(canonical_exec, 'getopts "x" option\n' + canonical_exec),
-            source.replace(canonical_exec, 'exec "${REPO_ROOT}/tools/launcher/host_control.sh" "$@"\n' + canonical_exec),
+            source.replace(canonical_exec, 'exec "${SCRIPT_DIR}/host_control.sh" "$@"\n' + canonical_exec),
         )
         for mutation in mutations:
             with self.subTest(mutation=_stripped_statements(mutation)[-2]):
@@ -205,11 +212,11 @@ class ExternalControlArchitectureTests(unittest.TestCase):
 
     def test_replaced_helper_entrypoints_and_dedicated_tests_are_absent(self) -> None:
         deleted = (
-            "tools/launcher/" + "instance.sh",
-            "tools/launcher/" + "workspace.sh",
-            "tools/launcher/" + "submit_turn.py",
-            "tools/launcher/" + "parent_thread_" + "submit.py",
-            "tools/launcher/" + "actor_capability_" + "cli.py",
+            "src/buddyswitch/launcher/" + "instance.sh",
+            "src/buddyswitch/launcher/" + "workspace.sh",
+            "src/buddyswitch/launcher/" + "submit_turn.py",
+            "src/buddyswitch/launcher/" + "parent_thread_" + "submit.py",
+            "src/buddyswitch/launcher/" + "actor_capability_" + "cli.py",
             "tests/test_" + "submit_turn.py",
             "tests/test_parent_thread_" + "submit.py",
             "tests/test_actor_capability_" + "cli.py",
@@ -218,7 +225,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         self.assertEqual([path for path in deleted if (ROOT / path).exists()], [])
 
     def test_public_cli_and_help_have_no_retired_command_families_or_output_tracks(self) -> None:
-        source = _source("tools/launcher/cli.py")
+        source = _source("src/buddyswitch/launcher/cli.py")
         tree = ast.parse(source)
         help_text = _constant_assignment(source, "HELP_TEXT")
         forbidden_source = (
@@ -458,21 +465,22 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             for private_key in ("secret", "repo_path"):
                 self.assertFalse(_contains_mapping_key(payload, private_key))
 
-        web_source = _source("tools/launcher/web_management.py")
+        web_source = _source("src/buddyswitch/launcher/web_management.py")
         self.assertIn("task_read.actor_external_task_projection", web_source)
         self.assertNotIn("task_" + "sys.actor_task_projection", web_source)
 
     def test_durable_architecture_names_the_final_single_track_boundaries(self) -> None:
         document = _source("docs/arch/web-interface-call-architecture.md")
         required = (
-            "public CLI is a peer adapter",
+            "Web and the public CLI are peer adapters",
             "private Host Control",
-            "Actor Session Input/Attach",
-            "Terminal handoff",
-            "Browser -> Web Open-TUI route -> Terminal handoff -> public CLI instance attach -> Actor Session",
-            "Web Message belongs to the IM API",
-            "external-safe Task/Track projections",
-            "Side/Goal mutations are not exposed",
+            "Actor Session owns direct parent-thread input and attach resolution.",
+            "Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session",
+            "`/api/im/*` is the single browser-facing Message contract.",
+            "Demand, Task, and Track reads to external-safe domain projections",
+            "Web to Actor runtime mutation tools for console reads",
+            "Web or CLI to native Goal mutation",
+            "Actor Session to Demand or Task mutation",
         )
         for token in required:
             with self.subTest(token=token):

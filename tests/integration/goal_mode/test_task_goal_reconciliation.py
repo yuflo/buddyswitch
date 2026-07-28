@@ -5,12 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import daemon_contracts
-import daemon_triggers
-import instance_daemon
-import task_goal_handler
-from env.domain import task_sys
-from env.tool_runtime import task_goal_runtime_protocol
+from buddyswitch.launcher import daemon_contracts
+from buddyswitch.launcher import daemon_triggers
+from buddyswitch.launcher import instance_daemon
+from buddyswitch.launcher import task_goal_handler
+from buddyswitch.env.domain import task_sys
+from buddyswitch.env.tool_runtime import task_goal_runtime_protocol
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

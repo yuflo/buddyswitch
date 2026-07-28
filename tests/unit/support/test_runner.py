@@ -73,7 +73,11 @@ def test_public_bootstrap_disables_runner_bytecode_residue() -> None:
 
     export = 'export PYTHONDONTWRITEBYTECODE="1"'
     assert export in source
-    assert source.index(export) < source.index('exec "${BUDDYSWITCH_PYTHON}"')
+    assert source.index(export) < source.index(
+        'exec "${RUNTIME_DIR}/venv/bin/python" -m tests.runner'
+    )
+    assert "PYTHONPATH" in source
+    assert "src/buddyswitch" not in source
 
 
 def test_pytest_command_isolates_duplicate_test_module_basenames() -> None:

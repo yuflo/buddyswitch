@@ -19,7 +19,7 @@ ROOT = REPO_ROOT
 class PrepareRuntimeContextRunlessTests(unittest.TestCase):
     def _invoke_turn_runtime(self, *args: str) -> subprocess.CompletedProcess[str]:
         return run_process(
-            [PYTHON, str(ROOT / "scripts" / "turn_runtime.py"), *args],
+            [PYTHON, "-m", "buddyswitch.application.entrypoints.diagnostics", *args],
             cwd=ROOT,
             text=True,
             capture_output=True,

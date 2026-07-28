@@ -1,4 +1,3 @@
-import shlex
 
 from tests.integration.web.management_harness import *  # noqa: F401,F403
 
@@ -127,7 +126,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner.block("start", ("market", "act-market-demo"), release_start)
         runner.set_response("start", ("market", "act-market-demo"), {"actor_id": "act-market-demo"})
         runner.set_response("status", ("act-market-demo",), active_status("act-market-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
         result: dict[str, object] = {}
 
         def call_start() -> None:
@@ -167,7 +166,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner.set_response("start", ("pm", "act-pm-demo"), {"actor_id": "act-pm-demo"})
         runner.set_response("status", ("act-market-demo",), active_status("act-market-demo", "thread-market", "idle"))
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-pm", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         first_status, first_payload = service.handle_api("POST", "/api/instances", b'{"role":"market"}')
         first_operation_id = first_payload["operation"]["id"]
@@ -204,7 +203,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         runner.set_response("start", ("pm", "act-pm-demo"), {"actor_id": "act-pm-demo"})
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -233,7 +232,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             ("pm", "act-pm-demo"),
             host_control_error("COMMAND_FAILED", "Thread bootstrap failed for thread-1."),
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -272,7 +271,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             active_status(replacement_actor_id, "thread-replacement", "idle"),
         )
         runner.block("retry", (failed_actor_id, replacement_actor_id), release_retry)
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api(
             "POST",
@@ -321,7 +320,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 returncode=3,
             ),
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("POST", "/api/instances/act-pm-stopped/retry", b"")
@@ -349,7 +348,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             (failed_actor_id, replacement_actor_id),
             host_control_error("COMMAND_FAILED", "Replacement start failed."),
         )
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", f"/api/instances/{failed_actor_id}/retry", b"")
 
@@ -372,7 +371,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             },
         )
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-new", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
@@ -389,7 +388,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_clear_route_returns_command_failure_when_host_control_clear_fails(self) -> None:
         runner = RecordingHostControl()
         runner.set_error("clear", ("act-pm-demo",), host_control_error("COMMAND_FAILED", "Daemon start failed for act-pm-demo."))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
@@ -400,7 +399,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(runner.calls, [("clear", ("act-pm-demo",))])
 
     def test_unknown_lifecycle_operation_returns_404(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=RecordingHostControl())
+        service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/operations/op-missing", b"")
@@ -410,7 +409,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
     def test_initialize_route_is_removed(self) -> None:
         runner = RecordingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("POST", "/api/instances/act-pm-demo/" + "initialize", b"")
@@ -423,7 +422,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         runner.set_response("resume", ("act-pm-demo",), {"actor_id": "act-pm-demo", "thread_id": "thread-1", "status": "active"})
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
 
@@ -437,7 +436,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_resume_operation_records_command_failure_after_acceptance(self) -> None:
         runner = RecordingHostControl()
         runner.set_error("resume", ("act-pm-demo",), host_control_error("COMMAND_FAILED", "thread/resume failed for thread-1"))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
 
@@ -452,7 +451,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner.block("stop", ("act-pm-demo",), release_stop)
         runner.set_response("stop", ("act-pm-demo",), {"actor_id": "act-pm-demo", "status": "inactive"})
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=runner)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/stop", b"")
         self.assertEqual(status, 202)
@@ -475,7 +474,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 runner = RecordingHostControl()
                 opener = FakeTerminalOpener()
                 service = WEB_MANAGEMENT.WebManagementService(
-                    repo_root=ROOT,
                     host_control=runner,
                     terminal_opener=opener.open,
                     platform_name="darwin",
@@ -493,7 +491,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -511,10 +508,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             {
                 "ok": True,
                 "actor_id": "act-pm-demo",
-                "command": (
-                    f"cd {shlex.quote(str(ROOT))} "
-                    "&& ./buddyswitch-codex instance attach act-pm-demo"
-                ),
+                "command": WEB_MANAGEMENT.build_attach_cli_command("act-pm-demo"),
             },
         )
         self.assertEqual(runner.calls, [])
@@ -524,7 +518,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -549,7 +542,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 runner = RecordingHostControl()
                 opener = FakeTerminalOpener()
                 service = WEB_MANAGEMENT.WebManagementService(
-                    repo_root=ROOT,
                     host_control=runner,
                     terminal_opener=opener.open,
                     platform_name="darwin",
@@ -567,7 +559,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -590,7 +581,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -608,7 +598,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
         service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="linux",
@@ -649,7 +638,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         )
         self.assertEqual(
             opener.commands,
-            [f"cd {shlex.quote(str(ROOT))} && ./buddyswitch-codex instance attach act-pm-demo"],
+            [WEB_MANAGEMENT.build_attach_cli_command("act-pm-demo")],
         )
         self.assertEqual(runner.calls, [])
 
@@ -657,7 +646,6 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         opener = FakeTerminalOpener(WEB_MANAGEMENT.TerminalOpenError("automation denied"))
         service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -672,7 +660,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertIsNone(raised.exception.details)
         self.assertEqual(
             opener.commands,
-            [f"cd {shlex.quote(str(ROOT))} && ./buddyswitch-codex instance attach act-pm-demo"],
+            [WEB_MANAGEMENT.build_attach_cli_command("act-pm-demo")],
         )
         self.assertEqual(runner.calls, [])
 
@@ -693,7 +681,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
 
         for forbidden in (
-            "env.repos.messages",
+            "buddyswitch.env.repos.messages",
             "create_message",
             "save_message",
             "delete_message",
@@ -709,15 +697,15 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
 
         for forbidden in (
-            "env.tools.track" + "._impl",
-            "env.services" + ".tracks",
+            "buddyswitch.env.tools.track" + "._impl",
+            "buddyswitch.env.services" + ".tracks",
             "dispatch_env_tool_request",
             "dispatch_runtime_request",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
-        self.assertFalse((ROOT / "scripts/env/services/tracks.py").exists())
+        self.assertFalse((ROOT / "src/buddyswitch/env/services/tracks.py").exists())
 
     def test_web_management_has_no_public_side_runtime_surface(self) -> None:
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
@@ -743,7 +731,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_web_lifecycle_routes_call_injected_host_control_not_shell_commands(self) -> None:
         host_control = RecordingHostControl()
         host_control.status_response = active_status("act-pm-demo", "thread-main", "stopped")
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/stop", b"")
 
@@ -769,7 +757,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
         host_control = RecordingHostControl()
         router = RecordingImRouter()
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
         service._im_router = router
 
         status, payload = service.handle_api(
@@ -786,7 +774,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
     def test_create_route_delegates_role_validation_to_injected_host_control(self) -> None:
         host_control = RecordingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -814,7 +802,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 )
 
         host_control = RejectingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/instances/not-an-actor/status", b"")
@@ -832,7 +820,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertNotIn('subprocess.Popen(["./buddyswitch-codex"', source)
 
     def test_web_management_product_api_does_not_split_first_cut_subpanel_routes(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=RecordingHostControl())
+        service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
 
         for path in (
             "/api/actors/act-pm-demo/tasks",
@@ -845,7 +833,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_has_no_task_or_track_mutation_routes(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=RecordingHostControl())
+        service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
 
         for method, path in (
             ("POST", "/api/tasks"),

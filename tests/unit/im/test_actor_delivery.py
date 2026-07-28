@@ -13,14 +13,20 @@ from tests.support.paths import REPO_ROOT
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
-IM_DELIVERY_PATH = SCRIPTS / "env" / "tool_runtime" / "im_actor_delivery.py"
+IM_DELIVERY_PATH = (
+    ROOT
+    / "src"
+    / "buddyswitch"
+    / "env"
+    / "tool_runtime"
+    / "im_actor_delivery.py"
+)
 
 
 def _load_module() -> Any:
     if not IM_DELIVERY_PATH.exists():
         raise AssertionError(f"expected module to exist: {IM_DELIVERY_PATH}")
-    return importlib.reload(importlib.import_module("env.tool_runtime.im_actor_delivery"))
+    return importlib.reload(importlib.import_module("buddyswitch.env.tool_runtime.im_actor_delivery"))
 
 
 class ImActorDeliveryTests(RuntimeWorkspaceTestCase):

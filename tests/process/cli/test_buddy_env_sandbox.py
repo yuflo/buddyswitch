@@ -7,6 +7,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -18,7 +19,7 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
+CODEX_CONFIG = ROOT / "src" / "buddyswitch" / "launcher" / "codex_config.py"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
 
@@ -71,13 +72,15 @@ def _assert_codex_filesystem_profile_is_flat(
             test.assertTrue(Path(key).is_absolute(), msg=key)
 
 
-def _assert_runtime_scripts_are_readable_but_not_writable(
+def _assert_installed_runtime_is_readable_but_not_writable(
     test: unittest.TestCase,
     filesystem: dict[str, object],
-    workspace_dir: Path,
 ) -> None:
-    scripts_path = str((workspace_dir / "scripts").resolve(strict=False))
-    test.assertEqual(filesystem.get(scripts_path, filesystem.get("/")), "read")
+    runtime_root_path = Path(os.environ["BUDDYSWITCH_RUNTIME_DIR"]).resolve(strict=False)
+    runtime_root = str(runtime_root_path)
+    test.assertEqual(filesystem.get(runtime_root), "read")
+    test.assertNotEqual(filesystem.get(runtime_root), "write")
+    test.assertTrue(Path(sys.prefix).resolve(strict=False).is_relative_to(runtime_root_path))
 
 
 class BuddyEnvSandboxTests(unittest.TestCase):
@@ -97,10 +100,12 @@ class BuddyEnvSandboxTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         args = [
             PYTHON,
-            str(CODEX_CONFIG),
+            "-m",
+            "buddyswitch.application.entrypoints.actor_build",
+            "patch-config",
             "--config",
             str(config_path),
-            "--repo-root",
+            "--source-root",
             str(ROOT),
             "--shared-root",
             str(shared_root),
@@ -172,7 +177,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 str((workspace_dir / "buddyswitch" / "local" / "private" / "pm").resolve(strict=False)),
                 filesystem,
             )
-            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
+            _assert_installed_runtime_is_readable_but_not_writable(self, filesystem)
             self.assertEqual(filesystem[str(product_source_root.resolve(strict=False))], "read")
             self.assertEqual(filesystem[str(ROOT.resolve(strict=False))], "none")
             self.assertIn(str((instance_root / "home").resolve(strict=False)), writable_paths)
@@ -279,7 +284,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 str((workspace_dir / "buddyswitch" / "local" / "private" / "dev").resolve(strict=False)),
                 filesystem,
             )
-            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
+            _assert_installed_runtime_is_readable_but_not_writable(self, filesystem)
             self.assertIn(str(product_source_root.resolve(strict=False)), writable_paths)
             self.assertIn(str((workspace_dir / "private").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
@@ -319,7 +324,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
             self.assertEqual(filesystem[str(workspace_dir.resolve(strict=False))], "read")
             self.assertEqual(filesystem[str((shared_root / "state").resolve(strict=False))], "none")
             self.assertNotIn(str((workspace_dir / "buddyswitch" / "objects").resolve(strict=False)), filesystem)
-            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
+            _assert_installed_runtime_is_readable_but_not_writable(self, filesystem)
             self.assertNotIn(str(workspace_dir.resolve(strict=False)), writable_paths)
             self.assertNotIn(
                 str((workspace_dir / "buddyswitch/local/private/pm").resolve(strict=False)),
@@ -367,7 +372,7 @@ class BuddyEnvSandboxTests(unittest.TestCase):
                 str((workspace_dir / "buddyswitch" / "local" / "private" / "pm").resolve(strict=False)),
                 filesystem,
             )
-            _assert_runtime_scripts_are_readable_but_not_writable(self, filesystem, workspace_dir)
+            _assert_installed_runtime_is_readable_but_not_writable(self, filesystem)
             self.assertIn(str((workspace_dir / "private").resolve(strict=False)), writable_paths)
             self.assertIn(str((instance_root / "tmp").resolve(strict=False)), writable_paths)
 
@@ -499,9 +504,7 @@ web_search = "cached"
             workspace_dir = instance_root / "workspace"
             project_workspace_dir = shared_root / "project" / "workspace"
             config_path = instance_root / "codex-home" / "config.toml"
-            client_path = workspace_dir / "scripts" / "env" / "client.py"
-            client_path.parent.mkdir(parents=True)
-            client_path.write_text("print('runtime-script-readable')\n", encoding="utf-8")
+            workspace_dir.mkdir(parents=True)
             project_workspace_dir.mkdir(parents=True)
 
             completed = self._run_patch(
@@ -528,7 +531,9 @@ web_search = "cached"
                     "-C",
                     str(workspace_dir),
                     PYTHON,
-                    "scripts/env/client.py",
+                    "-m",
+                    "buddyswitch.application.entrypoints.diagnostics",
+                    "status",
                 ],
                 text=True,
                 capture_output=True,
@@ -536,7 +541,7 @@ web_search = "cached"
                 env=sandbox_env,
             )
             self.assertEqual(sandboxed.returncode, 0, msg=sandboxed.stderr)
-            self.assertIn("runtime-script-readable", sandboxed.stdout)
+            self.assertIn('"runtime_mode": "runless"', sandboxed.stdout)
 
     def test_codex_macos_sandbox_enforces_source_root_write_boundary(self) -> None:
         if platform.system() != "Darwin":

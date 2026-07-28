@@ -14,14 +14,14 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-REGISTRY_PATH = ROOT / "tools" / "launcher" / "side_thread_registry.py"
+REGISTRY_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "side_thread_registry.py"
 MODULE_COUNTER = count()
 
 
 def load_registry() -> Any:
     if not REGISTRY_PATH.exists():
         raise AssertionError(f"expected module to exist: {REGISTRY_PATH}")
-    return importlib.reload(importlib.import_module("side_thread_registry"))
+    return importlib.reload(importlib.import_module("buddyswitch.launcher.side_thread_registry"))
 
 
 class SideThreadRegistryTests(unittest.TestCase):

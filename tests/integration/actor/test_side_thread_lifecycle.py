@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import sys
 import tempfile
 import types
 import unittest
@@ -17,7 +16,7 @@ from typing import Any, Callable
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-LAUNCHER_ROOT = ROOT / "tools" / "launcher"
+LAUNCHER_ROOT = ROOT / "src" / "buddyswitch" / "launcher"
 LIFECYCLE_PATH = LAUNCHER_ROOT / "side_thread_lifecycle.py"
 REGISTRY_PATH = LAUNCHER_ROOT / "side_thread_registry.py"
 MODULE_COUNTER = count()
@@ -25,7 +24,7 @@ MODULE_COUNTER = count()
 
 def _load_module(path: Path, module_name: str) -> Any:
     del module_name
-    return importlib.reload(importlib.import_module(path.stem))
+    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
 
 
 def load_registry() -> Any:
@@ -34,20 +33,10 @@ def load_registry() -> Any:
 
 def load_lifecycle(app_server: types.ModuleType, registry: Any) -> Any:
     module_name = f"buddyswitch_side_thread_lifecycle_{next(MODULE_COUNTER)}"
-    original_modules = {
-        "app_server": sys.modules.get("app_server"),
-        "side_thread_registry": sys.modules.get("side_thread_registry"),
-    }
-    sys.modules["app_server"] = app_server
-    sys.modules["side_thread_registry"] = registry
-    try:
-        return _load_module(LIFECYCLE_PATH, module_name)
-    finally:
-        for name, original in original_modules.items():
-            if original is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = original
+    lifecycle = _load_module(LIFECYCLE_PATH, module_name)
+    lifecycle.app_server = app_server
+    lifecycle.side_thread_registry = registry
+    return lifecycle
 
 
 class FakeAppServer(types.ModuleType):

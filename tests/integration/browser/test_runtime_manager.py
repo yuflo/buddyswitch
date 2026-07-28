@@ -24,8 +24,8 @@ from tests.support.processes import ResourceLedger
 
 ROOT = REPO_ROOT
 
-from tools.launcher import browser_runtime_manager as manager  # noqa: E402
-from tools.launcher import daemon_state  # noqa: E402
+from buddyswitch.launcher import browser_runtime_manager as manager  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
 
 
 def port_accepts(port: int) -> bool:

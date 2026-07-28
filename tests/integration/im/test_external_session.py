@@ -10,12 +10,11 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.repos import identities as identity_repo  # noqa: E402
-from env.services import messages as message_service  # noqa: E402
+from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+from buddyswitch.env.services import messages as message_service  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
-from tools.launcher import external_im_session  # noqa: E402
+from buddyswitch.launcher import external_im_session  # noqa: E402
 
 
 class ExternalImSessionTests(RuntimeWorkspaceTestCase):

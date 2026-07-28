@@ -13,20 +13,20 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-DAEMON_CONTRACTS_PATH = ROOT / "tools" / "launcher" / "daemon_contracts.py"
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
+DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_contracts.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 HANDLER_PATHS = (
-    ROOT / "tools" / "launcher" / "im_wake_handler.py",
-    ROOT / "tools" / "launcher" / "track_comment_added_handler.py",
-    ROOT / "tools" / "launcher" / "browser_page_expired_handler.py",
-    ROOT / "tools" / "launcher" / "browser_release_handler.py",
+    ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
+    ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py",
+    ROOT / "src" / "buddyswitch" / "launcher" / "browser_page_expired_handler.py",
+    ROOT / "src" / "buddyswitch" / "launcher" / "browser_release_handler.py",
 )
 
 
 def _load_contracts() -> Any:
     if not DAEMON_CONTRACTS_PATH.exists():
         raise AssertionError(f"expected module to exist: {DAEMON_CONTRACTS_PATH}")
-    return importlib.reload(importlib.import_module("daemon_contracts"))
+    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_contracts"))
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -110,13 +110,13 @@ class DaemonContractsTests(unittest.TestCase):
         self.assertTrue(DAEMON_CONTRACTS_PATH.exists(), DAEMON_CONTRACTS_PATH)
         imports = _imported_modules(DAEMON_CONTRACTS_PATH)
         forbidden_tokens = (
-            "daemon_core",
+            "buddyswitch.launcher.daemon_core",
             "task_sys",
             "im_",
             "track_",
             "browser_",
             "web_management",
-            "env.repos",
+            "buddyswitch.env.repos",
         )
 
         self.assertFalse(
@@ -145,5 +145,5 @@ class DaemonContractsTests(unittest.TestCase):
         for path in HANDLER_PATHS:
             imports = _imported_modules(path)
             with self.subTest(path=path.name):
-                self.assertIn("daemon_contracts", imports)
-                self.assertNotIn("daemon_core", imports)
+                self.assertIn("buddyswitch.launcher.daemon_contracts", imports)
+                self.assertNotIn("buddyswitch.launcher.daemon_core", imports)

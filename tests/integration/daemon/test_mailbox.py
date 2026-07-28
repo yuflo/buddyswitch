@@ -16,21 +16,25 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_state  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
 
-MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
-CENTRAL_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
-DAEMON_CLIENT_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py"
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
+MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
+CENTRAL_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py"
+DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    module_name = "env.tool_runtime.daemon_client" if path == DAEMON_CLIENT_PATH else path.stem
+    module_name = (
+        "buddyswitch.env.tool_runtime.daemon_client"
+        if path == DAEMON_CLIENT_PATH
+        else f"buddyswitch.launcher.{path.stem}"
+    )
     return importlib.reload(importlib.import_module(module_name))
 
 
@@ -149,6 +153,32 @@ class DaemonMailboxTests(unittest.TestCase):
             self.assertEqual(dispatcher.triggers[0].type, "example.ready")
             self.assertEqual(dispatcher.triggers[0].payload, {"message_id": "msg-daemon-mailbox"})
             self.assertFalse(thread.is_alive())
+
+    def test_close_removes_bound_socket_before_daemon_thread_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            socket_path = Path(temp_root) / "mailbox.sock"
+            server = self.mailbox.DaemonMailboxServer(
+                socket_path=socket_path,
+                local_identity_id="act-dev-daemon",
+                local_role_id="dev",
+                handlers=[],
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(server.close)
+            for _attempt in range(100):
+                if socket_path.exists():
+                    break
+                threading.Event().wait(0.01)
+            self.assertTrue(socket_path.exists())
+
+            server.close()
+
+            self.assertFalse(
+                socket_path.exists(),
+                "mailbox close must synchronously remove its external socket",
+            )
+            thread.join(timeout=2)
 
     def test_signal_deliver_reports_delivery_failed_for_unreachable_mailbox(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

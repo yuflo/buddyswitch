@@ -11,7 +11,7 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-import env_cleanup  # noqa: E402
+from buddyswitch.runtime_support import env_cleanup  # noqa: E402
 
 
 class CleanupRepositoryTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.repo_root.mkdir(parents=True, exist_ok=True)
         self.manifest_path = self.repo_root / "buddyswitch" / "manifest.toml"
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / "buddyswitch" / "manifest.toml", self.manifest_path)
+        shutil.copy2(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml", self.manifest_path)
 
         self._write_json(
             "buddyswitch/objects/tracks/track-demo.json",

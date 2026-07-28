@@ -24,13 +24,12 @@ from tests.support.cli import pid_alive, wait_until
 from tests.support.fake_cdp import FakeCdpServer, write_fake_chrome
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-import runtime_kernel.client as runtime_client  # noqa: E402
-from runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+import buddyswitch.runtime_kernel.client as runtime_client  # noqa: E402
+from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
@@ -56,7 +55,7 @@ def _require_module(name: str):
 
 class RuntimeBrokerProtocolTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.protocol = _require_module("runtime_kernel.protocol")
+        self.protocol = _require_module("buddyswitch.runtime_kernel.protocol")
 
     def _framed(self, payload: dict[str, object]) -> bytes:
         body = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
@@ -149,7 +148,7 @@ class RuntimeBrokerProtocolTests(unittest.TestCase):
 
 class RuntimeBrokerCoordinatorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.coordinator = _require_module("runtime_kernel.coordinator")
+        self.coordinator = _require_module("buddyswitch.runtime_kernel.coordinator")
 
     def test_lock_mode_for_prepare_and_persist_is_write(self) -> None:
         self.assertEqual(self.coordinator.lock_mode_for_request("prepare", {"text": "x"}), self.coordinator.LockMode.WRITE)
@@ -196,7 +195,10 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
             return {"ok": True, "method": request["method"]}
 
         session = {"instance_json": Path("instance.json"), "manifest_path": MANIFEST}
-        with patch("turn_runtime._hold_product_runtime_lock", side_effect=fake_lock):
+        with patch(
+            "buddyswitch.runtime_support.turn_runtime._hold_product_runtime_lock",
+            side_effect=fake_lock,
+        ):
             for method in ("ping", "status"):
                 response = self.coordinator.dispatch_with_coordination(
                     {
@@ -229,7 +231,10 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
             "deadline_ms": 35000,
         }
         session = {"instance_json": Path("instance.json"), "manifest_path": MANIFEST}
-        with patch("turn_runtime._hold_product_runtime_lock", side_effect=timeout_lock):
+        with patch(
+            "buddyswitch.runtime_support.turn_runtime._hold_product_runtime_lock",
+            side_effect=timeout_lock,
+        ):
             response = self.coordinator.dispatch_with_coordination(request, session, dispatch_fn)
         self.assertFalse(response["ok"], msg=response)
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_DEADLINE_EXCEEDED")

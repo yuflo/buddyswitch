@@ -16,16 +16,20 @@ from unittest.mock import patch
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-CENTRAL_CORE_PATH = ROOT / "tools" / "launcher" / "central_daemon_core.py"
-CENTRAL_CLI_PATH = ROOT / "tools" / "launcher" / "central_daemon.py"
-DAEMON_CLIENT_PATH = ROOT / "scripts" / "env" / "tool_runtime" / "daemon_client.py"
+CENTRAL_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py"
+CENTRAL_CLI_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py"
+DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    module_name = "env.tool_runtime.daemon_client" if path == DAEMON_CLIENT_PATH else path.stem
+    module_name = (
+        "buddyswitch.env.tool_runtime.daemon_client"
+        if path == DAEMON_CLIENT_PATH
+        else f"buddyswitch.launcher.{path.stem}"
+    )
     return importlib.reload(importlib.import_module(module_name))
 
 
@@ -106,9 +110,17 @@ class CentralDaemonServiceTests(unittest.TestCase):
             self.assertEqual(payload["pid"], 4321)
             self.assertEqual(payload["socket_path"], str(paths.socket_path))
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][0], "/configured/runtime/python")
-            self.assertEqual(Path(commands[0][1]).resolve(), CENTRAL_CLI_PATH.resolve())
-            self.assertEqual(commands[0][2:], ["serve", "--shared-root", str(paths.shared_root)])
+            self.assertEqual(commands[0][0], cli.sys.executable)
+            self.assertEqual(
+                commands[0][1:],
+                [
+                    "-m",
+                    "buddyswitch.application.entrypoints.central_daemon",
+                    "serve",
+                    "--shared-root",
+                    str(paths.shared_root),
+                ],
+            )
 
     def test_ping_uses_identity_reachability_protocol(self) -> None:
         cli = load_module(CENTRAL_CLI_PATH)

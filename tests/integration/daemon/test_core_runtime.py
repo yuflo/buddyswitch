@@ -17,16 +17,15 @@ from unittest.mock import patch
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_contracts  # noqa: E402
-import daemon_state  # noqa: E402
-from env.repos import identities as identity_repo  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
+from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
-INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
 MODULE_COUNTER = count()
 RUNTIME_ENV_KEYS = (
     "BUDDYSWITCH_SHARED_ROOT",
@@ -42,7 +41,7 @@ RUNTIME_ENV_KEYS = (
 def load_daemon_core() -> Any:
     if not DAEMON_CORE_PATH.exists():
         raise AssertionError(f"expected daemon core module to exist: {DAEMON_CORE_PATH}")
-    return importlib.reload(importlib.import_module("daemon_core"))
+    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_core"))
 
 
 class StopDaemonLoop(RuntimeError):
@@ -205,9 +204,17 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertTrue(first["ready"])
             self.assertTrue(second["ready"])
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][0], "/configured/runtime/python")
-            self.assertEqual(Path(commands[0][1]).resolve(), INSTANCE_DAEMON_PATH.resolve())
-            self.assertEqual(commands[0][2:], ["run", "--instance-json", str(instance["instance_json"])])
+            self.assertEqual(commands[0][0], self.core.sys.executable)
+            self.assertEqual(
+                commands[0][1:],
+                [
+                    "-m",
+                    "buddyswitch.application.entrypoints.instance_daemon",
+                    "run",
+                    "--instance-json",
+                    str(instance["instance_json"]),
+                ],
+            )
             self.assertTrue(self.core.daemon_pid_file(instance["instance_root"]).exists())
             self.assertTrue(self.core.daemon_log_file(instance["instance_root"]).exists())
             self.assertTrue(daemon_state.daemon_state_file(instance["instance_root"]).exists())

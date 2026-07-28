@@ -10,15 +10,14 @@ from unittest import mock
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.domain.identity import ActorIdentityProfile  # noqa: E402
-from env.domain.identity import ExternalIdentityProfile  # noqa: E402
-from env.domain.identity import IdentityRef  # noqa: E402
-from env.domain.identity import actor_identity  # noqa: E402
-from env.domain.identity import external_identity  # noqa: E402
-from env.tool_runtime import context as context_module  # noqa: E402
-from env.tool_runtime.context import ToolContext  # noqa: E402
+from buddyswitch.env.domain.identity import ActorIdentityProfile  # noqa: E402
+from buddyswitch.env.domain.identity import ExternalIdentityProfile  # noqa: E402
+from buddyswitch.env.domain.identity import IdentityRef  # noqa: E402
+from buddyswitch.env.domain.identity import actor_identity  # noqa: E402
+from buddyswitch.env.domain.identity import external_identity  # noqa: E402
+from buddyswitch.env.tool_runtime import context as context_module  # noqa: E402
+from buddyswitch.env.tool_runtime.context import ToolContext  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 

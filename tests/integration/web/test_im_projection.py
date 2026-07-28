@@ -9,9 +9,8 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from tools.launcher import web_management  # noqa: E402
+from buddyswitch.launcher import web_management  # noqa: E402
 
 
 class _FakeExternalImSession:
@@ -94,7 +93,7 @@ class _FakeWebIdentityProvider:
 class ImWebManagementProjectionTests(unittest.TestCase):
     def test_web_management_exposes_external_im_routes_for_bridge(self) -> None:
         session = _FakeExternalImSession()
-        service = web_management.WebManagementService(repo_root=ROOT, im_session=session)  # type: ignore[arg-type]
+        service = web_management.WebManagementService(im_session=session)  # type: ignore[arg-type]
 
         status, created = service.handle_api("POST", "/api/im/external-sessions", b'{"display_name":"Bridge"}', {})
         self.assertEqual(status, 200)
@@ -128,7 +127,6 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         session = _FakeExternalImSession()
         provider = _FakeWebIdentityProvider()
         service = web_management.WebManagementService(
-            repo_root=ROOT,
             im_session=session,  # type: ignore[arg-type]
             web_im_identity_provider=provider,  # type: ignore[arg-type]
         )
@@ -174,7 +172,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         )
 
     def test_web_management_does_not_expose_retired_web_im_route_family(self) -> None:
-        service = web_management.WebManagementService(repo_root=ROOT)
+        service = web_management.WebManagementService()
         retired_prefix = "/api/web/" + "im"
 
         for method, path, body in (
@@ -189,7 +187,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
                 self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_removes_old_message_send_route(self) -> None:
-        service = web_management.WebManagementService(repo_root=ROOT)
+        service = web_management.WebManagementService()
 
         with self.assertRaises(web_management.HttpError) as raised:
             old_route = "/api/messages" + "/send"
@@ -197,7 +195,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_no_longer_imports_fake_web_user_actor(self) -> None:
-        source = (ROOT / "tools" / "launcher" / "web_management.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py").read_text(encoding="utf-8")
 
         self.assertNotIn("import web_user_actor", source)
         self.assertNotIn("WebUser" + "ActorRuntime", source)
@@ -205,9 +203,9 @@ class ImWebManagementProjectionTests(unittest.TestCase):
 
     def test_http_and_web_projections_do_not_own_external_im_session_semantics(self) -> None:
         surfaces = (
-            ROOT / "tools" / "launcher" / "im_http_router.py",
-            ROOT / "tools" / "launcher" / "web_management.py",
-            ROOT / "tools" / "launcher" / "web_im_identity.py",
+            ROOT / "src" / "buddyswitch" / "launcher" / "im_http_router.py",
+            ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py",
+            ROOT / "src" / "buddyswitch" / "launcher" / "web_im_identity.py",
         )
         forbidden_fragments = (
             "from env.services import messages",

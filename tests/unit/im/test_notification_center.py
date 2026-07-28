@@ -15,17 +15,19 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-NC_PATH = ROOT / "tools" / "launcher" / "notification_center.py"
-MESSAGE_INBOUND_PATH = ROOT / "tools" / "launcher" / "message_inbound.py"
-TRACK_COMMENT_INBOUND_PATH = ROOT / "tools" / "launcher" / "track_comment_inbound.py"
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
+NC_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py"
+MESSAGE_INBOUND_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "message_inbound.py"
+TRACK_COMMENT_INBOUND_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_inbound.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    return importlib.reload(importlib.import_module(path.stem))
+    return importlib.reload(
+        importlib.import_module(f"buddyswitch.launcher.{path.stem}")
+    )
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -196,8 +198,8 @@ class NotificationCenterTests(unittest.TestCase):
             "notification.mark",
             "notification.archive",
             "nc.notification",
-            "env.repos.messages",
-            "env.repos.track_comments",
+            "buddyswitch.env.repos.messages",
+            "buddyswitch.env.repos.track_comments",
         ]
 
         for token in forbidden_tokens:
@@ -207,9 +209,9 @@ class NotificationCenterTests(unittest.TestCase):
         imports = imported_modules(NC_PATH)
         self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
-        self.assertNotIn("env.domain.messages", imports)
-        self.assertNotIn("env.repos.messages", imports)
-        self.assertNotIn("env.repos.track_comments", imports)
+        self.assertNotIn("buddyswitch.env.domain.messages", imports)
+        self.assertNotIn("buddyswitch.env.repos.messages", imports)
+        self.assertNotIn("buddyswitch.env.repos.track_comments", imports)
 
     def test_message_inbound_registers_im_message_created_as_source_owned_handler(self) -> None:
         nc = load_module(NC_PATH)

@@ -1,0 +1,1372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>历史草图：BuddySwitch 显式模块化单体架构</title>
+  <style>
+    :root {
+      --paper: #fffdf8;
+      --canvas: #efede6;
+      --ink: #18201d;
+      --muted: #626d68;
+      --line: #d2d0c6;
+      --soft: #e9e7df;
+      --accent: #2f756a;
+      --accent-soft: #e1efeb;
+      --warn: #96651f;
+      --warn-soft: #f5ead5;
+      --danger: #9d423a;
+      --danger-soft: #f5e2de;
+      --blue: #436a91;
+      --blue-soft: #e5edf5;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --radius: 6px;
+      --shadow: 0 12px 28px rgba(30, 38, 34, .07);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: var(--sans);
+      line-height: 1.55;
+    }
+    a { color: inherit; }
+    button { font: inherit; }
+    .superseded {
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border: 2px solid var(--danger);
+      color: #642b26;
+      background: var(--danger-soft);
+      font-size: 14px;
+    }
+    .superseded strong {
+      display: block;
+      margin-bottom: 4px;
+      font: 800 12px/1.2 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    code, pre, .mono { font-family: var(--mono); }
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--soft);
+      font-size: .92em;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      line-height: 1.58;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 900px;
+      margin-bottom: 15px;
+      font-size: clamp(35px, 5vw, 64px);
+      line-height: 1.02;
+      letter-spacing: -.045em;
+    }
+    h2 {
+      margin-bottom: 10px;
+      font-size: clamp(25px, 3vw, 38px);
+      line-height: 1.12;
+      letter-spacing: -.03em;
+    }
+    h3 {
+      margin-bottom: 7px;
+      font-size: 17px;
+      line-height: 1.25;
+    }
+
+    .shell {
+      width: min(1380px, 100%);
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .topbar {
+      position: sticky;
+      z-index: 20;
+      top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+      padding: 10px 12px;
+      border: 1px solid rgba(210, 208, 198, .92);
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, .95);
+      box-shadow: 0 5px 18px rgba(30, 38, 34, .06);
+      backdrop-filter: blur(10px);
+    }
+    .topbar strong {
+      font: 800 12px/1.2 var(--mono);
+      letter-spacing: .03em;
+    }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .nav a {
+      padding: 6px 8px;
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .nav a:hover, .nav a:focus-visible {
+      color: var(--ink);
+      background: var(--soft);
+      outline: none;
+    }
+
+    .hero, section {
+      margin-bottom: 20px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(320px, .85fr);
+      gap: 26px;
+      min-height: 590px;
+      padding: clamp(30px, 5vw, 64px);
+    }
+    .hero > div {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .eyebrow {
+      margin-bottom: 9px;
+      color: var(--accent);
+      font: 800 11px/1.2 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .lede {
+      max-width: 850px;
+      margin-bottom: 19px;
+      color: #46514c;
+      font-size: clamp(17px, 2vw, 21px);
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      background: #fff;
+      font: 700 11px/1.2 var(--mono);
+    }
+    .chip.good { color: var(--accent); border-color: #9bc5bc; background: var(--accent-soft); }
+    .chip.warn { color: var(--warn); border-color: #d7ba82; background: var(--warn-soft); }
+    .chip.bad { color: var(--danger); border-color: #d3a09a; background: var(--danger-soft); }
+    .decision {
+      margin-top: 22px;
+      padding: 18px;
+      border-left: 5px solid var(--accent);
+      background: var(--accent-soft);
+    }
+    .decision strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 18px;
+    }
+    .decision span { color: #385d55; }
+    .hero-side {
+      display: grid;
+      align-content: center;
+      gap: 10px;
+    }
+    .hero-stat {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      column-gap: 12px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .hero-stat .value {
+      grid-row: 1 / span 2;
+      color: var(--accent);
+      font: 800 27px/1 var(--mono);
+      letter-spacing: -.04em;
+    }
+    .hero-stat strong { line-height: 1.2; }
+    .hero-stat p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    section { padding: clamp(24px, 4vw, 43px); }
+    .section-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .section-head > p {
+      max-width: 620px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .diagram-viewport {
+      max-width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      background: #f8f6ef;
+    }
+    .arch-svg {
+      display: block;
+      width: 100%;
+      min-width: 960px;
+      height: auto;
+    }
+    .connector {
+      fill: none;
+      stroke: #69746f;
+      stroke-width: 2;
+    }
+    .connector.dashed { stroke-dasharray: 7 6; }
+    .box-title {
+      fill: var(--ink);
+      font: 800 17px/1 var(--sans);
+    }
+    .box-copy {
+      fill: #55615c;
+      font: 12px/1 var(--sans);
+    }
+    .mono-label {
+      font: 800 11px/1 var(--mono);
+      letter-spacing: .09em;
+    }
+    .module-title {
+      fill: #fff;
+      font: 800 17px/1 var(--sans);
+    }
+    .module-label {
+      fill: var(--ink);
+      font: 800 11px/1 var(--mono);
+    }
+    .module-copy {
+      fill: #59645f;
+      font: 12px/1 var(--sans);
+    }
+    .diagram-notes {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 11px;
+    }
+    .diagram-note {
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .diagram-note strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+    }
+
+    .compare-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 10px;
+    }
+    .control {
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--ink);
+      background: #fff;
+      cursor: pointer;
+    }
+    .control:hover, .control:focus-visible,
+    .control[aria-pressed="true"] {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-soft);
+      outline: none;
+    }
+    .compare {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .compare-card {
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .compare-card.hidden { display: none; }
+    .compare-card.full { grid-column: 1 / -1; }
+    .flow-stack {
+      display: grid;
+      gap: 8px;
+      margin-top: 13px;
+    }
+    .flow-node {
+      position: relative;
+      padding: 11px 13px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .flow-node strong { display: block; }
+    .flow-node span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .flow-node.hot { border-left: 4px solid var(--danger); background: var(--danger-soft); }
+    .flow-node.clean { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+    .flow-node.explicit { border-left: 4px solid var(--blue); background: var(--blue-soft); }
+
+    .evidence-grid, .rule-grid, .accept-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 11px;
+    }
+    .evidence, .rule, .accept-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .metric {
+      display: block;
+      margin-bottom: 9px;
+      color: var(--accent);
+      font: 800 22px/1 var(--mono);
+    }
+    .evidence p, .rule p, .accept-card p {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .path {
+      display: block;
+      padding-top: 9px;
+      border-top: 1px solid var(--line);
+      color: #59635f;
+      font: 11px/1.5 var(--mono);
+      overflow-wrap: anywhere;
+    }
+
+    .module-lane {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .module-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .module-card.foundation { border-top: 4px solid var(--blue); }
+    .module-card.product { border-top: 4px solid var(--accent); }
+    .module-card.role { border-top: 4px solid var(--warn); }
+    .module-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .code-grid {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .code-card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: #19211e;
+      color: #dce4df;
+    }
+    .code-card header {
+      padding: 10px 13px;
+      border-bottom: 1px solid #3c4742;
+      color: #a8d2c8;
+      font: 800 11px/1.2 var(--mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .code-card pre { padding: 14px; }
+
+    .anatomy {
+      display: grid;
+      grid-template-columns: 190px 1fr;
+      margin: 14px 0 0;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .anatomy dt, .anatomy dd {
+      margin: 0;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .anatomy dt {
+      color: var(--accent);
+      font: 800 12px/1.4 var(--mono);
+      background: #f8f6ef;
+    }
+    .anatomy dd {
+      border-left: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .anatomy dt:last-of-type, .anatomy dd:last-of-type { border-bottom: 0; }
+
+    .boundary-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      font-size: 13px;
+    }
+    .boundary-table th, .boundary-table td {
+      padding: 11px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    .boundary-table th {
+      color: #3f4b46;
+      background: #f2f0e8;
+      font: 800 11px/1.3 var(--mono);
+      text-transform: uppercase;
+    }
+    .boundary-table td:first-child { font-weight: 750; }
+
+    .timeline {
+      display: grid;
+      gap: 9px;
+    }
+    .phase {
+      display: grid;
+      grid-template-columns: 130px 1fr 285px;
+      gap: 15px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .phase-label {
+      color: var(--accent);
+      font: 800 12px/1.5 var(--mono);
+      text-transform: uppercase;
+    }
+    .phase h3 { margin-bottom: 4px; }
+    .phase p { margin: 0; color: var(--muted); font-size: 13px; }
+    .phase .gate {
+      align-self: center;
+      padding: 10px;
+      border-left: 3px solid var(--warn);
+      color: #725324;
+      background: var(--warn-soft);
+      font-size: 12px;
+    }
+
+    .lanes {
+      display: grid;
+      grid-template-columns: 150px repeat(4, minmax(150px, 1fr));
+      margin-top: 16px;
+      overflow-x: auto;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+    .lane-cell {
+      min-width: 0;
+      padding: 10px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      font-size: 12px;
+    }
+    .lane-name {
+      background: #f2f0e8;
+      font-weight: 800;
+    }
+    .parallel { color: var(--accent); background: var(--accent-soft); }
+    .serial { color: var(--warn); background: var(--warn-soft); }
+
+    .non-goals {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .non-goal {
+      padding: 7px 9px;
+      border: 1px solid #d2a6a0;
+      color: var(--danger);
+      background: var(--danger-soft);
+      font: 700 11px/1.2 var(--mono);
+    }
+    .checklist { margin: 0; padding-left: 22px; }
+    .checklist li {
+      margin: 7px 0;
+      padding-left: 4px;
+      color: #46514c;
+      font-size: 13px;
+    }
+    .copy-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 14px;
+    }
+    .copy-status {
+      align-self: center;
+      margin-right: 10px;
+      color: var(--accent);
+      font-size: 12px;
+    }
+    .open-decision {
+      margin-top: 16px;
+      padding: 18px;
+      border: 2px solid var(--warn);
+      background: var(--warn-soft);
+    }
+    .open-decision p { margin-bottom: 0; color: #705125; }
+
+    .final-call {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 27px;
+      border: 2px solid var(--accent);
+      background: var(--accent-soft);
+    }
+    .final-call p { margin: 0; color: #385c55; }
+    .stamp {
+      padding: 10px 12px;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font: 800 12px/1 var(--mono);
+      text-transform: uppercase;
+    }
+    footer {
+      padding: 24px 4px 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1020px) {
+      .hero { grid-template-columns: 1fr; min-height: auto; }
+      .evidence-grid, .rule-grid, .accept-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .module-lane { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .phase { grid-template-columns: 110px 1fr; }
+      .phase .gate { grid-column: 2; }
+      .diagram-notes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .shell { padding: 12px; }
+      .topbar { position: static; align-items: flex-start; flex-direction: column; }
+      .hero { padding: 25px; }
+      section { padding: 21px; }
+      .section-head { align-items: flex-start; flex-direction: column; }
+      .compare, .evidence-grid, .rule-grid, .accept-grid,
+      .module-lane, .code-grid, .diagram-notes { grid-template-columns: 1fr; }
+      .hero-stat { grid-template-columns: 72px 1fr; }
+      .anatomy { grid-template-columns: 1fr; }
+      .anatomy dd { border-left: 0; }
+      .phase { grid-template-columns: 1fr; }
+      .phase .gate { grid-column: 1; }
+      .final-call { grid-template-columns: 1fr; }
+      .boundary-table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <aside class="superseded" role="status">
+      <strong>Historical concept artifact · not implementation authority</strong>
+      本页保留“显式组件组合 + 业务无关 Host + 窄 RoleHost”的概念演进，
+      但它没有覆盖单一 package/runtime provenance、无实现代码的 Actor
+      workspace、完整生命周期和修订后的 S0–S7 顺序。当前目标与实施边界以
+      <code>2026-07-28-buddyswitch-explicit-modular-monolith-design.md</code>、
+      <code>2026-07-28-buddyswitch-modular-monolith-readiness-audit/04-target-repository-and-runtime-topology.md</code>
+      和新 roadmap 为准。
+    </aside>
+    <nav class="topbar" aria-label="页面导航">
+      <strong>BuddySwitch · Historical Architecture Concept</strong>
+      <div class="nav">
+        <a href="#diagram">拓扑</a>
+        <a href="#evidence">证据</a>
+        <a href="#target">模块</a>
+        <a href="#composition">装配</a>
+        <a href="#roles">Role</a>
+        <a href="#migration">迁移</a>
+        <a href="#acceptance">验收</a>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div>
+        <p class="eyebrow">System / Flow Explainer</p>
+        <h1>显式模块化单体，而不是万能插件 Kernel</h1>
+        <p class="lede">这份 HTML 帮助 BuddySwitch 开发者审阅一个 Forward 目标：高频 Private 变化收进一个物理产品模块；应用只显式选择完整模块；基础宿主保持业务无关；只有 Role 使用自己窄而真实的扩展宿主。</p>
+        <div class="chip-row">
+          <span class="chip good">一个物理 owner</span>
+          <span class="chip good">模块级显式组合</span>
+          <span class="chip good">Private 独立迭代</span>
+          <span class="chip warn">Role 专用发现</span>
+          <span class="chip bad">拒绝万能插件平台</span>
+        </div>
+        <div class="decision">
+          <strong>核心判断：显式组合没有错，错的是组合粒度。</strong>
+          <span>应用根可以知道 Demand、Task、Track；它不应知道 DemandTriageHandler、具体 Tool、route 或 Skill。新增一个完整产品模块只改一次应用根，模块内部变化不再穿透边界。</span>
+        </div>
+      </div>
+      <aside class="hero-side" aria-label="目标变更局部性">
+        <article class="hero-stat">
+          <span class="value">1 root</span>
+          <strong>Private product change</strong>
+          <p>Domain、state、Tool、Daemon、Web、Skill 和本模块测试留在一个目录。</p>
+        </article>
+        <article class="hero-stat">
+          <span class="value">1 edit</span>
+          <strong>Whole product module</strong>
+          <p>新增或删除完整产品模块，需要应用 composition root 一次显式变更。</p>
+        </article>
+        <article class="hero-stat">
+          <span class="value">0</span>
+          <strong>Private central lists</strong>
+          <p>应用根不再枚举单个 handler、Tool、route、Skill 或私有 adapter。</p>
+        </article>
+        <article class="hero-stat">
+          <span class="value">1 host</span>
+          <strong>Role extension surface</strong>
+          <p>RoleHost 只发现经过评审的本地 RolePackage；不发现产品模块。</p>
+        </article>
+      </aside>
+    </header>
+
+    <section id="diagram">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Target topology</p>
+          <h2>一条显式产品装配路径，一条独立 Role 扩展路径</h2>
+        </div>
+        <p>产品模块不是插件。应用根显式决定产品集合；基础宿主只接收自己拥有的类型。Role 是不同的高频扩展面，由专用 Host 按窄 schema 发现。</p>
+      </div>
+
+      <div class="diagram-viewport" aria-label="BuddySwitch 显式模块化单体目标架构图；窄屏可横向滚动">
+        <svg class="arch-svg" viewBox="0 0 1200 800" role="img" aria-labelledby="arch-title arch-desc">
+          <title id="arch-title">BuddySwitch 显式模块化单体目标架构</title>
+          <desc id="arch-desc">顶部应用组合根显式选择完整产品模块；产品模块向业务无关宿主提供类型化贡献；RoleHost 独立发现本地 Role 包。</desc>
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#69746f"></path>
+            </marker>
+          </defs>
+
+          <rect x="70" y="28" width="760" height="100" rx="6" fill="#18201d"></rect>
+          <text x="94" y="58" class="mono-label" fill="#a8d2c8" style="fill:#a8d2c8">APPLICATION COMPOSITION ROOT</text>
+          <text x="94" y="88" class="box-title" fill="#fff" style="fill:#fff">PRODUCT_MODULES = (DEMAND, TASK, TRACK, ...)</text>
+          <text x="94" y="111" class="box-copy" fill="#d8dedb" style="fill:#d8dedb">显式、可审阅、低频 · 只 import module.py · 不扫描目录</text>
+
+          <rect x="885" y="28" width="245" height="100" rx="6" fill="#96651f"></rect>
+          <text x="908" y="58" class="mono-label" fill="#fff2d8" style="fill:#fff2d8">ROLE HOST</text>
+          <text x="908" y="86" class="box-title" fill="#fff" style="fill:#fff">Narrow package catalog</text>
+          <text x="908" y="108" class="box-copy" fill="#fff2d8" style="fill:#fff2d8">固定本地目录 · typed · fail closed</text>
+
+          <path d="M450 128 L450 174" class="connector" marker-end="url(#arrow)"></path>
+          <text x="470" y="155" class="module-copy">select complete modules</text>
+          <path d="M1007 128 L1007 174" class="connector" marker-end="url(#arrow)"></path>
+          <text x="1025" y="154" class="module-copy">discover roles only</text>
+
+          <rect x="40" y="182" width="810" height="320" rx="6" fill="#fff" stroke="#2f756a" stroke-width="2"></rect>
+          <text x="65" y="211" class="mono-label" fill="#2f756a" style="fill:#2f756a">EXPLICIT PRODUCT MODULES</text>
+
+          <g aria-label="Demand module">
+            <rect x="68" y="232" width="230" height="230" rx="5" fill="#fff" stroke="#2f756a"></rect>
+            <rect x="68" y="232" width="230" height="45" rx="4" fill="#2f756a"></rect>
+            <text x="86" y="260" class="module-title">DEMAND</text>
+            <rect x="85" y="294" width="196" height="47" rx="4" fill="#e1efeb" stroke="#8ebdb3"></rect>
+            <text x="99" y="314" class="module-label" fill="#2f756a" style="fill:#2f756a">public/</text>
+            <text x="99" y="331" class="module-copy">commands · queries · types</text>
+            <rect x="85" y="352" width="196" height="88" rx="4" fill="#f8f6ef" stroke="#d2d0c6"></rect>
+            <text x="99" y="374" class="module-label">private/</text>
+            <text x="99" y="396" class="module-copy">domain · state · adapters</text>
+            <text x="99" y="416" class="module-copy">tools · daemon · web · skills</text>
+            <text x="99" y="437" class="module-copy">assets · co-located tests</text>
+          </g>
+
+          <g aria-label="Task module">
+            <rect x="331" y="232" width="230" height="230" rx="5" fill="#fff" stroke="#2f756a"></rect>
+            <rect x="331" y="232" width="230" height="45" rx="4" fill="#2f756a"></rect>
+            <text x="349" y="260" class="module-title">TASK</text>
+            <rect x="348" y="294" width="196" height="47" rx="4" fill="#e1efeb" stroke="#8ebdb3"></rect>
+            <text x="362" y="314" class="module-label" fill="#2f756a" style="fill:#2f756a">public/</text>
+            <text x="362" y="331" class="module-copy">commands · queries · types</text>
+            <rect x="348" y="352" width="196" height="88" rx="4" fill="#f8f6ef" stroke="#d2d0c6"></rect>
+            <text x="362" y="374" class="module-label">private/</text>
+            <text x="362" y="396" class="module-copy">task state · goal convergence</text>
+            <text x="362" y="416" class="module-copy">tools · daemon · projections</text>
+            <text x="362" y="437" class="module-copy">assets · co-located tests</text>
+          </g>
+
+          <g aria-label="Other product modules">
+            <rect x="594" y="232" width="230" height="230" rx="5" fill="#fff" stroke="#2f756a"></rect>
+            <rect x="594" y="232" width="230" height="45" rx="4" fill="#2f756a"></rect>
+            <text x="612" y="260" class="module-title">TRACK · ARTIFACT · …</text>
+            <rect x="611" y="294" width="196" height="47" rx="4" fill="#e1efeb" stroke="#8ebdb3"></rect>
+            <text x="625" y="314" class="module-label" fill="#2f756a" style="fill:#2f756a">public/</text>
+            <text x="625" y="331" class="module-copy">only real consumers</text>
+            <rect x="611" y="352" width="196" height="88" rx="4" fill="#f8f6ef" stroke="#d2d0c6"></rect>
+            <text x="625" y="374" class="module-label">private/</text>
+            <text x="625" y="396" class="module-copy">one physical change boundary</text>
+            <text x="625" y="416" class="module-copy">module-owned assembly</text>
+            <text x="625" y="437" class="module-copy">module-owned tests</text>
+          </g>
+
+          <path d="M299 317 L328 317" class="connector dashed" marker-end="url(#arrow)"></path>
+          <text x="313" y="305" text-anchor="middle" class="module-label" fill="#2f756a" style="fill:#2f756a">PUBLIC</text>
+
+          <rect x="885" y="182" width="245" height="320" rx="6" fill="#fff" stroke="#96651f" stroke-width="2"></rect>
+          <text x="907" y="211" class="mono-label" fill="#96651f" style="fill:#96651f">REVIEWED LOCAL ROLE PACKAGE</text>
+          <rect x="906" y="232" width="202" height="45" rx="4" fill="#96651f"></rect>
+          <text x="923" y="260" class="module-title">INVESTOR ROLE</text>
+          <text x="923" y="307" class="module-label" fill="#96651f" style="fill:#96651f">role.py descriptor</text>
+          <text x="923" y="331" class="module-copy">explicit id · bootstrap</text>
+          <text x="923" y="355" class="module-copy">capabilities · owned skills</text>
+          <rect x="906" y="375" width="202" height="99" rx="4" fill="#f8f6ef" stroke="#d2d0c6"></rect>
+          <text x="923" y="399" class="module-label">private/</text>
+          <text x="923" y="421" class="module-copy">AGENTS · skills · scripts</text>
+          <text x="923" y="442" class="module-copy">templates · executable code</text>
+          <text x="923" y="463" class="module-copy">assets · tests</text>
+
+          <path d="M445 502 L445 548" class="connector" marker-end="url(#arrow)"></path>
+          <text x="465" y="530" class="module-copy">typed host-owned contributions</text>
+
+          <rect x="40" y="558" width="1090" height="173" rx="6" fill="#fff" stroke="#436a91" stroke-width="2"></rect>
+          <text x="65" y="588" class="mono-label" fill="#436a91" style="fill:#436a91">BUSINESS-NEUTRAL FOUNDATION HOSTS</text>
+
+          <rect x="67" y="609" width="237" height="91" rx="4" fill="#e5edf5" stroke="#b8cadb"></rect>
+          <text x="85" y="637" class="box-title">DaemonHost</text>
+          <text x="85" y="661" class="box-copy">trigger · schedule · dispatch</text>
+          <text x="85" y="682" class="box-copy">不发现、不解释产品</text>
+
+          <rect x="329" y="609" width="237" height="91" rx="4" fill="#e5edf5" stroke="#b8cadb"></rect>
+          <text x="347" y="637" class="box-title">ToolHost</text>
+          <text x="347" y="661" class="box-copy">schema · authority · invoke</text>
+          <text x="347" y="682" class="box-copy">无全局产品 Tool 扫描</text>
+
+          <rect x="591" y="609" width="237" height="91" rx="4" fill="#e5edf5" stroke="#b8cadb"></rect>
+          <text x="609" y="637" class="box-title">Web / CLI Host</text>
+          <text x="609" y="661" class="box-copy">transport · lifecycle · errors</text>
+          <text x="609" y="682" class="box-copy">不拥有产品 projection</text>
+
+          <rect x="853" y="609" width="250" height="91" rx="4" fill="#e5edf5" stroke="#b8cadb"></rect>
+          <text x="871" y="637" class="box-title">Actor / State Primitives</text>
+          <text x="871" y="661" class="box-copy">input · lock · atomic storage</text>
+          <text x="871" y="682" class="box-copy">不拥有产品 schema / namespace</text>
+
+          <rect x="40" y="752" width="1090" height="28" rx="4" fill="#e1efeb" stroke="#8ebdb3"></rect>
+          <text x="585" y="771" text-anchor="middle" class="module-label" fill="#2f756a" style="fill:#2f756a">高频 Private 聚合 · 低频模块集合显式 · Role 扩展独立 · Kernel 不发现业务</text>
+        </svg>
+      </div>
+
+      <div class="diagram-notes">
+        <div class="diagram-note"><strong>纵向装配</strong><code>module.py</code> 返回命名、静态类型化的 assembly；Host contract 由接收方拥有。</div>
+        <div class="diagram-note"><strong>横向协作</strong>模块之间直接调用对方 <code>public/</code>；不绕进 Kernel、Bus 或 service locator。</div>
+        <div class="diagram-note"><strong>显式中心</strong>应用根保留一个低频产品模块列表；这是可审阅的产品真相，不是耦合缺陷。</div>
+        <div class="diagram-note"><strong>Role 例外</strong>RoleHost 只扫描一个受信本地 Role 根，descriptor 错误或 ID 冲突在启动前失败。</div>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Repository evidence</p>
+          <h2>语义 owner 已经出现，物理 owner 仍未形成</h2>
+        </div>
+        <p>当前 Daemon 边界说明“宿主业务无关”是正确的；代码热点说明“产品细节由中央入口逐项装配”仍让 Private 变化跨越仓库。</p>
+      </div>
+
+      <div class="compare-controls" aria-label="对比视图控制">
+        <button class="control" type="button" data-compare="both" aria-pressed="true">并排</button>
+        <button class="control" type="button" data-compare="current" aria-pressed="false">只看当前</button>
+        <button class="control" type="button" data-compare="target" aria-pressed="false">只看目标</button>
+      </div>
+      <div class="compare">
+        <article class="compare-card" data-state="current">
+          <div class="chip-row"><span class="chip bad">Current</span><span class="chip">显式到私有细节</span></div>
+          <h3 style="margin-top:12px">Demand 改动仍穿过技术层</h3>
+          <div class="flow-stack">
+            <div class="flow-node"><strong>Domain / Read / Repo</strong><span>scripts/env/domain + scripts/env/repos</span></div>
+            <div class="flow-node"><strong>Tool / Context / Registry</strong><span>scripts/env/tools + shared Tool Runtime</span></div>
+            <div class="flow-node hot"><strong>Daemon / Web / CLI</strong><span>launcher 逐个 import 私有产品 pieces</span></div>
+            <div class="flow-node hot"><strong>Skills / Roles / Tests</strong><span>共享目录、中央 manifest、root-only tests</span></div>
+          </div>
+        </article>
+        <article class="compare-card" data-state="target">
+          <div class="chip-row"><span class="chip good">Target</span><span class="chip">显式到完整模块</span></div>
+          <h3 style="margin-top:12px">Demand Private 留在一个根</h3>
+          <div class="flow-stack">
+            <div class="flow-node clean"><strong>modules/demand/public</strong><span>只有真实跨模块 Commands / Queries / Types</span></div>
+            <div class="flow-node clean"><strong>modules/demand/private</strong><span>Domain、State、Tool、Daemon、Web、Skill 自由重组</span></div>
+            <div class="flow-node clean"><strong>modules/demand/tests</strong><span>Unit、Contract、Integration 与 owner 同目录</span></div>
+            <div class="flow-node explicit"><strong>composition -> DEMAND</strong><span>应用只选择一次模块，不感知内部 handler/tool/route</span></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="evidence-grid" style="margin-top:14px">
+        <article class="evidence">
+          <span class="metric">6 product imports</span>
+          <h3>Daemon 私有粒度</h3>
+          <p>应用入口显式 import Demand、Task 与 inbound 实现，并在列表中逐个实例化。</p>
+          <span class="path">tools/launcher/instance_daemon.py:18–52</span>
+        </article>
+        <article class="evidence">
+          <span class="metric">643 lines</span>
+          <h3>共享 ToolContext</h3>
+          <p>多个 Domain、Repo、Browser、Task 与消息能力在一个运行时 Context 汇合。</p>
+          <span class="path">scripts/env/tool_runtime/context.py</span>
+        </article>
+        <article class="evidence">
+          <span class="metric">1,211 lines</span>
+          <h3>Web 聚合热点</h3>
+          <p>通用接口承载与多个产品 projection 处在同一中央文件。</p>
+          <span class="path">tools/launcher/web_management.py</span>
+        </article>
+        <article class="evidence">
+          <span class="metric">274 lines</span>
+          <h3>Role / Skill 中央 truth</h3>
+          <p>Role 与 Skill 包内容集中枚举，频繁私有变化需要编辑全局 manifest。</p>
+          <span class="path">buddyswitch/manifest.toml</span>
+        </article>
+        <article class="evidence">
+          <span class="metric">313 lines</span>
+          <h3>概念边界而非物理边界</h3>
+          <p>Demand 架构测试需要枚举分散的 Domain、Repo、Tool、Daemon、Skill 与 role surface。</p>
+          <span class="path">tests/unit/architecture/test_demand_sys_boundaries.py</span>
+        </article>
+        <article class="evidence">
+          <span class="metric">92 + 65</span>
+          <h3>行为基线已具备</h3>
+          <p>Demand Forward 最终 focused run 与 D2/M2/G1 真实 Actor 证据可约束纯结构替换。</p>
+          <span class="path">docs/memo/2026-07-27-demand-forward-cutover-real-actor-acceptance-implementation-plan.md:593–608</span>
+        </article>
+      </div>
+    </section>
+
+    <section id="target">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Module anatomy</p>
+          <h2>一个产品模块 = 小 Public + 大 Private + 本地装配 + 本地测试</h2>
+        </div>
+        <p>物理聚合服务于高频 Private 迭代。架构只约束跨边界依赖和装配契约，不规定模块内部每一个文件夹。</p>
+      </div>
+
+      <div class="module-lane">
+        <article class="module-card foundation">
+          <div class="chip-row"><span class="chip">Foundation</span></div>
+          <h3 style="margin-top:10px">Daemon / Tool / Web / State</h3>
+          <p>业务无关宿主能力；接受类型化注册，不选择产品集合。</p>
+        </article>
+        <article class="module-card product">
+          <div class="chip-row"><span class="chip good">Product module</span></div>
+          <h3 style="margin-top:10px">Demand / Task / Track / Artifact</h3>
+          <p>拥有状态、规则、适配器、Skill、资产和模块测试；由应用根显式选择。</p>
+        </article>
+        <article class="module-card role">
+          <div class="chip-row"><span class="chip warn">Role package</span></div>
+          <h3 style="margin-top:10px">market / dev / investor</h3>
+          <p>拥有 AGENTS、Skills、脚本、模板和测试；由 RoleHost 校验发现。</p>
+        </article>
+        <article class="module-card">
+          <div class="chip-row"><span class="chip bad">Not a layer</span></div>
+          <h3 style="margin-top:10px">Kernel / Bus / Container</h3>
+          <p>不建立通用业务发现、语义事件总线、DI 容器或远程插件市场。</p>
+        </article>
+      </div>
+
+      <div class="code-grid">
+        <article class="code-card">
+          <header>推荐的最终物理结构</header>
+          <pre>src/buddyswitch/
+  composition.py
+
+  foundation/
+    daemon/
+    tool_runtime/
+    web_runtime/
+    actor_runtime/
+    state/
+    role_host/
+
+  modules/
+    demand/
+      module.py
+      public/
+      private/
+        domain/
+        state/
+        adapters/
+        skills/
+      assets/
+      tests/
+        unit/
+        contract/
+        integration/
+    task/
+    track/
+    artifact/
+
+  roles/
+    secondary_market_investor/
+      role.py
+      private/
+      assets/
+      tests/</pre>
+        </article>
+        <article class="code-card">
+          <header>typed module assembly · 不是 Any bag</header>
+          <pre>from buddyswitch.foundation.composition import ModuleAssembly
+from .private.adapters.daemon import HANDLERS
+from .private.adapters.tool import TOOLS
+from .private.adapters.web import ROUTES
+
+DEMAND = ModuleAssembly(
+    name="demand",
+    daemon_handlers=HANDLERS,
+    tools=TOOLS,
+    web_routes=ROUTES,
+)</pre>
+        </article>
+      </div>
+
+      <dl class="anatomy">
+        <dt>public/</dt>
+        <dd>只放真实跨模块消费者需要的 Commands、Queries、Types 与明确错误；没有消费者就不制造接口。</dd>
+        <dt>private/</dt>
+        <dd>Domain、State、Tool、Daemon handler、Web/CLI、Skill 执行代码和内部组织都属于高频自由区。</dd>
+        <dt>module.py</dt>
+        <dd>无副作用地组装命名、静态类型化的 host contributions；不扫描目录、不提供 lifecycle、不暴露 service locator。</dd>
+        <dt>state owner</dt>
+        <dd>模块显式声明 owner、schema version、storage identity 和唯一写路径；禁止从目录名推导持久化 namespace。</dd>
+        <dt>tests/</dt>
+        <dd>模块 Unit、Contract、Integration 与源码聚合；跨模块、Process、System 和全局 Architecture 仍留在 root tests。</dd>
+      </dl>
+
+      <div class="rule-grid" style="margin-top:14px">
+        <article class="rule"><h3>One physical owner</h3><p>删除模块目录时，其实现、assets 和模块测试一起退出，不留下散落副本。</p></article>
+        <article class="rule"><h3>Public only</h3><p>跨模块只能 import 对方 <code>public/</code>；Public 依赖图不得循环。</p></article>
+        <article class="rule"><h3>Host-owned types</h3><p>DaemonHandler、ToolRegistration、WebRoute 等类型由接收宿主拥有，模块只构造它们。</p></article>
+        <article class="rule"><h3>One explicit set</h3><p>应用根拥有完整产品模块集合；这份低频真相明确存在，不用目录扫描隐藏。</p></article>
+        <article class="rule"><h3>Fail at startup</h3><p>重复 Tool、route、command、模块 ID 或无效 assembly 必须阻止部分应用启动。</p></article>
+        <article class="rule"><h3>Local freedom</h3><p>架构测试约束方向、owner 和 residue，不硬编码每个 Private 文件的内部布局。</p></article>
+      </div>
+    </section>
+
+    <section id="composition">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Composition flow</p>
+          <h2>显式选择模块，模块局部组装，宿主类型化接收</h2>
+        </div>
+        <p>没有通用 loader。应用根可以认识模块名，但不能穿透模块 Private；宿主可以认识自己的 contract，但不能认识产品名。</p>
+      </div>
+
+      <div class="flow-stack">
+        <div class="flow-node clean"><strong>1 · Module private implementation</strong><span>本模块实现 Domain、State、Tool、Daemon、Web/CLI 与 Skills。</span></div>
+        <div class="flow-node clean"><strong>2 · module.py assembly</strong><span>把本模块内部 pieces 组装成 host-owned、静态类型化字段；无 <code>Any</code>、无字符串 kind dispatch。</span></div>
+        <div class="flow-node explicit"><strong>3 · Application composition root</strong><span>显式列出 <code>(DEMAND, TASK, TRACK, ...)</code>，校验重复并把 typed fields 交给宿主。</span></div>
+        <div class="flow-node"><strong>4 · Foundation hosts</strong><span>Daemon、Tool、Web/CLI 分别只处理自己拥有的 registration；不扫描或分支产品语义。</span></div>
+        <div class="flow-node"><strong>5 · Current observable behavior</strong><span>Tool schema/effects、Daemon recovery、Web/CLI 结果、Actor lifecycle 与 canonical state 保持。</span></div>
+      </div>
+
+      <div class="code-grid">
+        <article class="code-card">
+          <header>唯一显式应用集合</header>
+          <pre>from buddyswitch.modules.demand.module import DEMAND
+from buddyswitch.modules.task.module import TASK
+from buddyswitch.modules.track.module import TRACK
+
+PRODUCT_MODULES = (
+    DEMAND,
+    TASK,
+    TRACK,
+)
+
+APPLICATION = build_application(PRODUCT_MODULES)</pre>
+        </article>
+        <article class="code-card">
+          <header>明确禁止</header>
+          <pre># no pkgutil scan for product modules
+# no module private imports in composition
+# no tuple[object, ...] contributions()
+# no event bus / DI / requires-provides
+# no silent skip on bad application module
+# no directory-derived state namespace</pre>
+        </article>
+      </div>
+
+      <table class="boundary-table" style="margin-top:16px">
+        <thead>
+          <tr><th>区域</th><th>保留的 owner</th><th>Forward 替换</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Daemon</td>
+            <td>process、trigger、schedule、dispatch、telemetry、opaque checkpoint。</td>
+            <td>应用根不再逐项 import 私有产品 handlers；Daemon 不发现产品模块。</td>
+          </tr>
+          <tr>
+            <td>Tool Runtime</td>
+            <td>Tool/Action schema、authority、invoke、result semantics。</td>
+            <td>产品 Tool 由模块 assembly 提供；无效 Tool 不再从 catalog 静默消失。</td>
+          </tr>
+          <tr>
+            <td>State</td>
+            <td>lock、atomic file、path safety、generic serialization。</td>
+            <td>产品 schema、namespace 和 writer 回到 owning module；目录名不成为 durable identity。</td>
+          </tr>
+          <tr>
+            <td>Web / CLI</td>
+            <td>transport、lifecycle、generic parsing/error conversion。</td>
+            <td>产品 read model、route/command 规则和 console section 回到模块 Private。</td>
+          </tr>
+          <tr>
+            <td>Tests</td>
+            <td>唯一 <code>./buddyswitch-test</code> 入口和统一证据规则。</td>
+            <td>Runner 支持模块自有 unit/contract/integration；不新增第二套 runner。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="roles">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Earned extension host</p>
+          <h2>Role 是专用扩展面，不是产品模块，也不是万能 Plugin</h2>
+        </div>
+        <p>Role 的 Private 内容与执行代码变化频繁，公开 package schema 变化不频繁。这种真实压力允许一个窄 Host；不允许借机抽象 <code>PluginHost[Any]</code>。</p>
+      </div>
+
+      <div class="compare">
+        <article class="compare-card">
+          <div class="chip-row"><span class="chip warn">RoleHost may</span></div>
+          <div class="flow-stack">
+            <div class="flow-node"><strong>扫描一个固定、受信本地 Role 根</strong><span>只加载精确的 <code>role.py</code> entrypoint。</span></div>
+            <div class="flow-node"><strong>校验 exact RolePackage schema</strong><span>explicit ID、bootstrap、Skills、执行入口、权限、assets。</span></div>
+            <div class="flow-node"><strong>fail closed</strong><span>重复 ID、缺失 asset、无效 descriptor 在 Actor 启动前失败。</span></div>
+          </div>
+        </article>
+        <article class="compare-card">
+          <div class="chip-row"><span class="chip bad">RoleHost may not</span></div>
+          <div class="flow-stack">
+            <div class="flow-node hot"><strong>发现或激活产品模块</strong><span>产品集合只属于 Application Composition Root。</span></div>
+            <div class="flow-node hot"><strong>远程安装 / 热插拔 / 版本协商</strong><span>当前信任边界仍是仓库代码评审与发布。</span></div>
+            <div class="flow-node hot"><strong>修改应用 composition</strong><span>Role 可以使用批准能力，不能向系统注入任意新 Host。</span></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="code-grid">
+        <article class="code-card">
+          <header>Role package</header>
+          <pre>roles/secondary_market_investor/
+  role.py
+  AGENTS.md
+  private/
+    skills/
+    scripts/
+    templates/
+  assets/
+  tests/</pre>
+        </article>
+        <article class="code-card">
+          <header>Exact descriptor</header>
+          <pre>ROLE = RolePackage(
+    id="secondary-market-investor",
+    bootstrap="AGENTS.md",
+    skills=(...),
+    executables=(...),
+    capabilities=(...),
+)</pre>
+        </article>
+      </div>
+    </section>
+
+    <section id="migration">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Forward migration</p>
+          <h2>逐模块直接替换，不做全仓大爆炸，也不留双轨</h2>
+        </div>
+        <p>原子性属于单个产品模块：一次切走 Demand 的全部 owner surface，并删除旧 Demand 路径。边界证明后，其他独立模块才获得真正并行。</p>
+      </div>
+
+      <div class="timeline">
+        <article class="phase">
+          <div class="phase-label">S0<br>Program ready</div>
+          <div><h3>确认唯一 source root，建立执行治理</h3><p>冻结行为基线、阶段章程、决策/残留台账和 executor handoff；S0 不修改 runtime。</p></div>
+          <div class="gate"><strong>Gate：</strong>最终 root、主路线图和 S1 charter 获得确认。</div>
+        </article>
+        <article class="phase">
+          <div class="phase-label">S1<br>Demand pilot</div>
+          <div><h3>用 Demand 建立最小真实 assembly</h3><p>移动 Domain、State、Tool、Daemon、Skill、assets 和 owning tests；更新全部消费者；同 slice 删除旧路径。</p></div>
+          <div class="gate"><strong>Gate：</strong>一个 Demand live path；D2 recovery 与影响到的 Actor/Goal 路径通过。</div>
+        </article>
+        <article class="phase">
+          <div class="phase-label">S2<br>Task + Goal</div>
+          <div><h3>冻结 Demand–Task–Goal Public 边界</h3><p>Task 拥有最小 Task 与 Goal convergence；Demand 只经 Public operation 协作，不建设共享 orchestration bus。</p></div>
+          <div class="gate"><strong>Gate：</strong>Public 图无循环；canonical state 与 restart recovery 一致。</div>
+        </article>
+        <article class="phase">
+          <div class="phase-label">S3–S4<br>Waves + converge</div>
+          <div><h3>Track / Artifact / Message / Browser 独立迁移</h3><p>每个 workstream 只拥有一个模块；composition root 是小型协调点；最后删除细粒度 central lists 和 broad context。</p></div>
+          <div class="gate"><strong>Gate：</strong>foundation 无产品 imports；应用根只列完整模块。</div>
+        </article>
+        <article class="phase">
+          <div class="phase-label">S5<br>RoleHost</div>
+          <div><h3>单独切换 Role catalog</h3><p>实现 exact RolePackage schema，迁移全部当前 Roles，更新权限/Skills/launcher consumers，删除 manifest 中第二份 Role truth。</p></div>
+          <div class="gate"><strong>Gate：</strong>有效 Role 仅增加目录；无效或重复 Role 阻止 Actor 启动。</div>
+        </article>
+        <article class="phase">
+          <div class="phase-label">S6<br>Final accept</div>
+          <div><h3>冻结候选并提升最终 current truth</h3><p>五类证据一致后更新最终 <code>docs/arch</code> 与稳定路径，关闭全部 residue；发现 runtime 缺陷则重开 owning stage。</p></div>
+          <div class="gate"><strong>Gate：</strong>代码、当前文档与消费者只剩一套最终架构。</div>
+        </article>
+      </div>
+
+      <div class="lanes" aria-label="模块化重构并行工作流">
+        <div class="lane-cell lane-name">Workstream</div>
+        <div class="lane-cell lane-name">First proof</div>
+        <div class="lane-cell lane-name">Direct cutover</div>
+        <div class="lane-cell lane-name">Residue removal</div>
+        <div class="lane-cell lane-name">Steady state</div>
+
+        <div class="lane-cell lane-name">Demand</div>
+        <div class="lane-cell serial">定义最小 assembly / runner contract</div>
+        <div class="lane-cell serial">第一块完整模块</div>
+        <div class="lane-cell serial">删除所有旧 Demand paths</div>
+        <div class="lane-cell parallel">Private 独立迭代</div>
+
+        <div class="lane-cell lane-name">Task</div>
+        <div class="lane-cell serial">验证 Demand Public edge</div>
+        <div class="lane-cell serial">Task + Goal convergence</div>
+        <div class="lane-cell serial">删除旧 Task paths</div>
+        <div class="lane-cell parallel">与 Demand 分离迭代</div>
+
+        <div class="lane-cell lane-name">Other products</div>
+        <div class="lane-cell parallel">识别各自真实 Public</div>
+        <div class="lane-cell parallel">可分模块并行</div>
+        <div class="lane-cell parallel">每模块独立清零</div>
+        <div class="lane-cell parallel">并行产品开发</div>
+
+        <div class="lane-cell lane-name">RoleHost</div>
+        <div class="lane-cell parallel">独立 schema / fail-closed RED</div>
+        <div class="lane-cell parallel">与产品模块迁移分开</div>
+        <div class="lane-cell serial">一次删除旧 Role truth</div>
+        <div class="lane-cell parallel">新增 Role 只加 package</div>
+      </div>
+
+      <div style="margin-top:18px">
+        <p class="eyebrow">Simplicity fence</p>
+        <div class="non-goals">
+          <span class="non-goal">没有 Product Module Scanner</span>
+          <span class="non-goal">没有 Event Bus</span>
+          <span class="non-goal">没有 DI Container</span>
+          <span class="non-goal">没有 requires/provides DSL</span>
+          <span class="non-goal">没有热插拔</span>
+          <span class="non-goal">没有兼容 alias / fallback</span>
+          <span class="non-goal">没有第二 Test Runner</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="acceptance">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Acceptance</p>
+          <h2>验收变更局部性、显式性和真实产品效果</h2>
+        </div>
+        <p>目录外观不是结果。必须同时证明 owner、依赖方向、组合语义、Role 失败行为、旧路径删除和现有消费者闭环。</p>
+      </div>
+
+      <div class="accept-grid">
+        <article class="accept-card">
+          <strong>Change locality</strong>
+          <h3>Private 只动一个根</h3>
+          <p>新增或删除模块内 Tool、handler、route、Skill、test 只改 owning module，不改 app root。</p>
+        </article>
+        <article class="accept-card">
+          <strong>Explicit product set</strong>
+          <h3>完整模块一次选择</h3>
+          <p>新增产品模块只增加其目录并修改一次 composition root；没有目录自动激活。</p>
+        </article>
+        <article class="accept-card">
+          <strong>Architecture</strong>
+          <h3>Host 业务无关</h3>
+          <p>Foundation 无产品 import/token；composition 不 import module private；跨模块只走 Public。</p>
+        </article>
+        <article class="accept-card">
+          <strong>Role extension</strong>
+          <h3>窄发现、失败关闭</h3>
+          <p>有效 Role 不改中央列表；重复 ID、无效 schema 或缺失资产在 Actor 启动前失败。</p>
+        </article>
+        <article class="accept-card">
+          <strong>Replacement</strong>
+          <h3>迁移模块只有一条路</h3>
+          <p>没有 alias、fallback、双 Tool、双 handler、双 schema、双写或旧测试保护。</p>
+        </article>
+        <article class="accept-card">
+          <strong>Product / Operations</strong>
+          <h3>消费者观察一致</h3>
+          <p>Demand/Task/Goal、Tool、Daemon recovery、Web/CLI、Actor lifecycle 与 cleanup 仍精确。</p>
+        </article>
+      </div>
+
+      <div style="margin-top:18px; padding:18px; border:1px solid var(--line); background:#fff">
+        <div class="section-head" style="margin-bottom:12px; padding-bottom:10px">
+          <div><h3 style="margin:0">机器验收清单</h3></div>
+          <div class="chip-row"><span class="chip good">One test entry</span><span class="chip">./buddyswitch-test</span></div>
+        </div>
+        <ol class="checklist" id="acceptance-checklist">
+          <li>Private-only 产品变更的实现、资产和 owning tests 位于一个模块根。</li>
+          <li>新增/删除模块内 handler、Tool、route 或 Skill 不修改 Application Composition Root。</li>
+          <li>新增完整产品模块需要一个新模块目录和一次显式 app-root 变更。</li>
+          <li>Foundation 不 import 产品模块；composition 只 import <code>modules.&lt;name&gt;.module</code>。</li>
+          <li>跨模块 import 只进入 <code>public/</code>，Public dependency graph 无循环。</li>
+          <li>不存在扫描产品模块目录的 universal loader 或 Probe Module 自动激活行为。</li>
+          <li>State owner、schema、storage identity 和 write path 显式且唯一，不从目录名推导。</li>
+          <li>有效 Role package 无需中央 Role list；无效/重复 Role fail closed。</li>
+          <li>Co-located module tests 通过现有 <code>./buddyswitch-test focused</code> 运行；无第二 runner。</li>
+          <li>迁移模块旧路径、旧注册、alias、fallback、双读写和兼容 tests 扫描为零。</li>
+          <li>受影响真实 Web/Actor/Daemon/Tool 消费者闭环通过；仅 catalog/registration 测试不足。</li>
+        </ol>
+        <div class="copy-row">
+          <span class="copy-status" id="copy-status" aria-live="polite"></span>
+          <button class="control" type="button" id="copy-checklist">复制验收清单</button>
+        </div>
+      </div>
+
+      <div class="open-decision">
+        <h3>实施前唯一需要确认的结构决策</h3>
+        <p>推荐把最终单一源码根定为 <code>src/buddyswitch/**</code>，避免把 Forward 架构重新嵌进 <code>scripts/env</code> 与 <code>tools/launcher</code> 的旧技术层切分。若不采用它，也必须选择另一个唯一干净 root；不接受永久两套产品路径。</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Source map</p>
+          <h2>当前事实与详细设计入口</h2>
+        </div>
+        <p>这些路径支持本 memo 的判断。当前代码和 <code>docs/arch</code> 是现状证据；新 memo 是尚未实施的目标，不提前伪装成 current truth。</p>
+      </div>
+      <table class="boundary-table">
+        <thead><tr><th>主张</th><th>证据 / 设计</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td>Daemon 语义边界正确</td><td><code>docs/arch/daemon-service-architecture.md</code></td><td>保留 host-neutral 原则，替换私有粒度 composition。</td></tr>
+          <tr><td>Daemon 组合过细</td><td><code>tools/launcher/instance_daemon.py:18–52</code></td><td>应用根改为选择完整 ModuleAssembly。</td></tr>
+          <tr><td>Demand 物理散布</td><td><code>tests/unit/architecture/test_demand_sys_boundaries.py:11–29</code></td><td>Demand 成为第一个直接 cutover 模块。</td></tr>
+          <tr><td>Tool 扫描不可外推</td><td><code>scripts/env/tool_runtime/registry.py:29–85</code></td><td>保留 exact Tool contracts；删除 universal-discovery 推论。</td></tr>
+          <tr><td>详细架构决策</td><td><code>docs/memo/2026-07-28-buddyswitch-explicit-modular-monolith-design.md</code></td><td>定义拓扑、契约、依赖、RoleHost、失败语义与验收。</td></tr>
+          <tr><td>实施准备</td><td><code>docs/memo/2026-07-28-buddyswitch-modular-monolith-refactor-preparation.md</code></td><td>审计后的准备索引；原 Demand-first 顺序已撤销。</td></tr>
+          <tr><td>主迁移路线图</td><td><code>docs/memo/2026-07-28-buddyswitch-modular-monolith-migration-roadmap.md</code></td><td>定义修订后的 S0–S7、阶段门、executor handoff 和 follow 规则。</td></tr>
+          <tr><td>执行文档包</td><td><code>docs/memo/2026-07-28-buddyswitch-modular-monolith-migration/README.md</code></td><td>索引阶段章程、治理、状态、决策、residue 与验收模板。</td></tr>
+          <tr><td>行为基线</td><td><code>docs/memo/2026-07-27-demand-forward-cutover-real-actor-acceptance-implementation-plan.md</code></td><td>约束结构替换不得改变已验收产品效果。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="final-call">
+      <div>
+        <h2 style="margin-bottom:8px">最终设计判断</h2>
+        <p>BuddySwitch 的乐高化不来自“所有东西都自动发现”，而来自正确的物理 owner 和正确的组合粒度：Private 在模块内自由，产品集合在应用根显式，基础宿主业务无关，只有已经证明高频扩展压力的 Role 拥有专用发现机制。</p>
+      </div>
+      <div class="stamp">Proposed Forward target</div>
+    </section>
+
+    <footer>
+      <strong>Artifact job：</strong>通过目标拓扑、当前代码证据、模块解剖、显式组合、Role 例外、逐模块迁移与机器验收，帮助团队审阅一套不复杂化、可直接 Forward 实施的 BuddySwitch 模块化单体架构。
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      const compareButtons = [...document.querySelectorAll("[data-compare]")];
+      const cards = [...document.querySelectorAll(".compare-card[data-state]")];
+
+      function setCompare(mode) {
+        compareButtons.forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.compare === mode));
+        });
+        cards.forEach((card) => {
+          const visible = mode === "both" || card.dataset.state === mode;
+          card.classList.toggle("hidden", !visible);
+          card.classList.toggle("full", mode !== "both" && visible);
+        });
+      }
+
+      compareButtons.forEach((button) => {
+        button.addEventListener("click", () => setCompare(button.dataset.compare));
+      });
+
+      const copyButton = document.getElementById("copy-checklist");
+      const checklist = document.getElementById("acceptance-checklist");
+      const copyStatus = document.getElementById("copy-status");
+
+      copyButton.addEventListener("click", async () => {
+        const rows = [...checklist.querySelectorAll("li")]
+          .map((item, index) => `${index + 1}. ${item.textContent.trim()}`)
+          .join("\n");
+        try {
+          await navigator.clipboard.writeText(rows);
+          copyStatus.textContent = "已复制";
+        } catch {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(checklist);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          copyStatus.textContent = "已选中，请手动复制";
+        }
+        window.setTimeout(() => { copyStatus.textContent = ""; }, 1800);
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -10,7 +10,6 @@ import tempfile
 import unittest
 import contextlib
 import importlib
-import shutil
 import socket
 import subprocess
 import threading
@@ -25,13 +24,12 @@ from tests.support.fake_cdp import FakeCdpServer, write_fake_chrome
 from tests.support.processes import ResourceLedger, run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-import runtime_kernel.client as runtime_client  # noqa: E402
-from runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+import buddyswitch.runtime_kernel.client as runtime_client  # noqa: E402
+from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
@@ -57,7 +55,7 @@ def _require_module(name: str):
 
 class RuntimeBrokerLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.lifecycle = _require_module("runtime_kernel.lifecycle")
+        self.lifecycle = _require_module("buddyswitch.runtime_kernel.lifecycle")
 
     def _paths(self, root: Path):
         return self.lifecycle.BrokerPaths(
@@ -95,34 +93,16 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
 
             self.assertEqual(result["pid"], 5432)
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][0], "/configured/runtime/python")
-            self.assertEqual(Path(commands[0][1]).resolve(), (SCRIPTS / "runtime_kernel" / "broker.py").resolve())
-            self.assertEqual(commands[0][2], "serve")
+            self.assertEqual(
+                commands[0][:4],
+                [
+                    sys.executable,
+                    "-m",
+                    "buddyswitch.application.entrypoints.runtime_broker",
+                    "serve",
+                ],
+            )
             self.assertEqual(len(popen_kwargs), 1)
-
-    @staticmethod
-    def _copy_runtime_fixture(workspace_dir: Path) -> None:
-        runtime_surface = (
-            "scripts/turn_runtime.py",
-            "scripts/env_store.py",
-            "scripts/env_legacy_store.py",
-            "scripts/env",
-            "scripts/env_profiles.py",
-            "scripts/env_manifest.py",
-            "scripts/browser_evidence.py",
-            "scripts/runtime_kernel",
-            "buddyswitch/manifest.toml",
-            "buddyswitch/env-profiles",
-            "framework/contracts",
-        )
-        for relative in runtime_surface:
-            source = ROOT / relative
-            target = workspace_dir / relative
-            if source.is_dir():
-                shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
 
     @staticmethod
     def _write_instance_json(path: Path, *, workspace_dir: Path, actor_id: str = "act-pm-root", role: str = "pm") -> None:
@@ -154,12 +134,11 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
         paths,
         instance_json: Path,
         manifest_path: Path,
-        repo_root_path: Path | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
-        broker_script = workspace_dir / "scripts" / "runtime_kernel" / "broker.py"
         broker_command = [
-            os.environ["BUDDYSWITCH_PYTHON"],
-            str(broker_script),
+            sys.executable,
+            "-m",
+            "buddyswitch.application.entrypoints.runtime_broker",
             command,
             "--socket",
             str(paths.socket_path),
@@ -174,8 +153,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             "--manifest",
             str(manifest_path),
         ]
-        if repo_root_path is not None:
-            broker_command.extend(["--repo-root", str(repo_root_path)])
         if command == "ensure":
             ResourceLedger.from_environment().register_process_descriptor(
                 pid_file=paths.pid_file,
@@ -216,13 +193,12 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 "# BuddySwitch Runtime Workspace\n",
                 encoding="utf-8",
             )
-            self._copy_runtime_fixture(workspace_dir)
             runtime_dir = workspace_dir / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
             paths = self._paths(runtime_dir)
             instance_json = workspace_dir / "instance.json"
             self._write_instance_json(instance_json, workspace_dir=workspace_dir)
-            manifest_path = workspace_dir / "buddyswitch" / "manifest.toml"
+            manifest_path = MANIFEST
 
             ensure_completed, ensure_payload = self._run_broker_cli(
                 workspace_dir=workspace_dir,
@@ -290,7 +266,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 )
 
     def test_live_broker_rejects_removed_message_action_without_parent_submit(self) -> None:
-        protocol = _require_module("runtime_kernel.protocol")
+        protocol = _require_module("buddyswitch.runtime_kernel.protocol")
         with tempfile.TemporaryDirectory() as temp:
             workspace_dir = Path(temp) / "workspace"
             workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -298,12 +274,11 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 "# BuddySwitch Runtime Workspace\n",
                 encoding="utf-8",
             )
-            self._copy_runtime_fixture(workspace_dir)
             self.assertFalse((workspace_dir / "tools").exists())
             runtime_dir = workspace_dir / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
             paths = self._paths(runtime_dir)
-            manifest_path = workspace_dir / "buddyswitch" / "manifest.toml"
+            manifest_path = MANIFEST
             instance_json = workspace_dir / "instance.json"
             instance_json.write_text(
                 json.dumps(
@@ -339,7 +314,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 paths=paths,
                 instance_json=instance_json,
                 manifest_path=manifest_path,
-                repo_root_path=fake_source_root,
             )
             self.assertEqual(ensure_completed.returncode, 0, msg=ensure_completed.stderr)
             self.assertTrue(ensure_payload.get("ok"), msg=ensure_payload)
@@ -374,7 +348,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     paths=paths,
                     instance_json=instance_json,
                     manifest_path=manifest_path,
-                    repo_root_path=fake_source_root,
                 )
 
     def test_status_reports_unhealthy_when_pid_live_but_socket_missing(self) -> None:

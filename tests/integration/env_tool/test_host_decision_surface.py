@@ -10,12 +10,15 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-import env_legacy_store as env_store  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 
@@ -24,7 +27,7 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         self.workspace = RuntimeTestWorkspace()
         self.addCleanup(self.workspace.close)
         self.runtime_root = self.workspace.root
-        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
+        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.actor_id = self.workspace.actor_id(role="market", label="act-market-decision-surface")
         self.instance_root = self.workspace.path(f"instances/{self.actor_id}")
@@ -83,7 +86,7 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         )
 
     def test_context_summarize_projects_runless_decision_surface(self) -> None:
-        track = env_store.create_track(
+        track = object_builders.create_track(
             "track-market-decision",
             "Market Decision",
             owner_actor={"actor_id": "act-pm-decision", "role_id": "pm"},
@@ -121,14 +124,14 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         self.assertEqual(persistent.get("workspace_relative_root"), "private")
 
     def test_context_summarize_includes_compact_artifacts_comments_and_updates(self) -> None:
-        track = env_store.create_track(
+        track = object_builders.create_track(
             "track-context-entry-surface",
             "Entry Surface",
             owner_actor={"actor_id": "act-pm-entry", "role_id": "pm"},
             outcome="Validate compact entry surface.",
             now={"next": "Seed artifacts", "blocker": None},
         )
-        artifact = env_store.create_artifact_revision(
+        artifact = object_builders.create_artifact_revision(
             artifact_id="art-context-entry-r1",
             title="Entry Artifact",
             summary="Entry summary",
@@ -139,14 +142,14 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
             authors=["pm"],
             source_refs=[{"type": "note", "label": "seed"}],
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id=str(track["id"]),
             artifact_id=str(artifact["id"]),
             label="Entry",
             from_role="pm",
             summary="Entry summary",
         )
-        proof = env_store.create_artifact_revision(
+        proof = object_builders.create_artifact_revision(
             artifact_id="art-context-proof-r1",
             title="Entry Proof",
             summary="Proof summary",
@@ -157,7 +160,7 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
             authors=["pm"],
             source_refs=[{"type": "note", "label": "proof-seed"}],
         )
-        env_store.publish_track_proof(
+        object_builders.publish_track_proof(
             track_id=str(track["id"]),
             artifact_id=str(proof["id"]),
             label="Proof",
@@ -223,21 +226,21 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         self.assertNotIn("request", affordances)
 
     def test_context_summarize_track_filter_narrows_artifacts_comments_and_updates(self) -> None:
-        track_a = env_store.create_track(
+        track_a = object_builders.create_track(
             "track-context-filter-a",
             "Filter A",
             owner_actor={"actor_id": "act-pm-filter", "role_id": "pm"},
             outcome="A",
             now={"next": "A", "blocker": None},
         )
-        track_b = env_store.create_track(
+        track_b = object_builders.create_track(
             "track-context-filter-b",
             "Filter B",
             owner_actor={"actor_id": "act-pm-filter", "role_id": "pm"},
             outcome="B",
             now={"next": "B", "blocker": None},
         )
-        art_a = env_store.create_artifact_revision(
+        art_a = object_builders.create_artifact_revision(
             artifact_id="art-context-filter-a-r1",
             title="Artifact A",
             summary="A",
@@ -248,7 +251,7 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
             authors=["pm"],
             source_refs=[{"type": "note", "label": "A"}],
         )
-        art_b = env_store.create_artifact_revision(
+        art_b = object_builders.create_artifact_revision(
             artifact_id="art-context-filter-b-r1",
             title="Artifact B",
             summary="B",
@@ -259,14 +262,14 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
             authors=["pm"],
             source_refs=[{"type": "note", "label": "B"}],
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id=str(track_a["id"]),
             artifact_id=str(art_a["id"]),
             label="A",
             from_role="pm",
             summary="A",
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id=str(track_b["id"]),
             artifact_id=str(art_b["id"]),
             label="B",
@@ -391,7 +394,7 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         self.assertEqual(response.get("active_role"), "design")
 
     def test_pm_page_prototype_decision_surface_prefers_direct_private_actor_private_directory_without_phrase_rule(self) -> None:
-        pm_agents = (ROOT / "tools" / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md").read_text(
+        pm_agents = (ROOT / "src" / "buddyswitch" / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("project.access=", pm_agents)

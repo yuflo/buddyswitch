@@ -9,9 +9,8 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import artifact_selection  # noqa: E402
+from buddyswitch.runtime_support import artifact_selection  # noqa: E402
 
 
 class ArtifactSelectionTests(unittest.TestCase):

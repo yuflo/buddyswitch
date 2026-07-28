@@ -2,8 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${SCRIPT_DIR}"
-ENV_HELPER="${REPO_ROOT}/tools/launcher/env.sh"
+RUNTIME_DIR="${BUDDYSWITCH_RUNTIME_DIR:-${SCRIPT_DIR}/.buddyswitch-runtime}"
 
 emit_runtime_unavailable() {
   local message="$1"
@@ -11,20 +10,22 @@ emit_runtime_unavailable() {
   exit 5
 }
 
-if [[ ! -f "${ENV_HELPER}" ]]; then
-  emit_runtime_unavailable "Launcher env helper is missing under tools/launcher."
+if [[ "${RUNTIME_DIR}" != /* ]]; then
+  emit_runtime_unavailable "BUDDYSWITCH_RUNTIME_DIR must be an absolute path."
 fi
 
-if ! source "${ENV_HELPER}" >/dev/null 2>/dev/null; then
-  emit_runtime_unavailable "Launcher environment initialization failed."
+if [[ ! -f "${RUNTIME_DIR}/activation.json" ]]; then
+  emit_runtime_unavailable "Runtime activation.json is missing."
 fi
 
-if ! declare -F buddyswitch_env_init >/dev/null; then
-  emit_runtime_unavailable "Launcher environment initialization failed."
+if [[ ! -x "${RUNTIME_DIR}/venv/bin/python" ]]; then
+  emit_runtime_unavailable "Runtime venv/bin/python is missing or not executable."
 fi
 
-if ! buddyswitch_env_init >/dev/null 2>/dev/null; then
-  emit_runtime_unavailable "BUDDYSWITCH_PYTHON is not initialized."
-fi
-
-exec "${BUDDYSWITCH_PYTHON}" "${REPO_ROOT}/tools/launcher/cli.py" "$@"
+export BUDDYSWITCH_RUNTIME_DIR="${RUNTIME_DIR}"
+unset BUDDYSWITCH_RUNTIME_IDENTITY
+unset BUDDYSWITCH_PACKAGE_ROOT
+unset BUDDYSWITCH_PROJECT_SOURCE
+unset BUDDYSWITCH_PYTHON
+unset BUDDYSWITCH_SOURCE_ROOT
+exec "${RUNTIME_DIR}/venv/bin/python" -I -m buddyswitch.application.entrypoints.cli "$@"

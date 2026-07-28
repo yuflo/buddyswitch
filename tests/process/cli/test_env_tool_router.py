@@ -13,20 +13,19 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-from env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 
 
 class EnvToolRouterTests(RuntimeWorkspaceTestCase):
     _CHEAP_ACTION_CASES = (
-        ("task_sys", "close", {"task_id": "missing-task"}, "dev"),
+        ("task_sys", "list", {}, "dev"),
         ("demand_sys", "list", {}, "dev"),
         ("track", "list", {}, "dev"),
         ("artifact", "get", {"artifact_id": "missing-artifact"}, "dev"),
@@ -125,14 +124,14 @@ from pathlib import Path
 
 class BlockMessageImpl(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "env.tools.message._impl":
+        if fullname == "buddyswitch.env.tools.message._impl":
             raise RuntimeError("blocked message _impl import")
         return None
 
 sys.meta_path.insert(0, BlockMessageImpl())
 
-import env_manifest
-from env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.runtime_support import env_manifest
+from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
@@ -179,8 +178,8 @@ class BlockSelectedImpl(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BlockSelectedImpl())
 
-import env_manifest
-from env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.runtime_support import env_manifest
+from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
@@ -194,7 +193,7 @@ response = dispatch_env_tool_request(
     manifest=env_manifest.load_manifest(manifest_path),
     manifest_path=manifest_path,
 )
-loaded = sorted(name for name in sys.modules if name.startswith("env.tools.") and name.endswith("._impl"))
+loaded = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.tools.") and name.endswith("._impl"))
 print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
 """
         return run_process(
@@ -277,7 +276,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
                     "now": {"next": "seed", "blocker": None},
                 },
             },
-            blocked_module="env.tools.track._impl",
+            blocked_module="buddyswitch.env.tools.track._impl",
             role="dev",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -301,7 +300,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
                     "now": {"next": "seed", "blocker": None},
                 },
             },
-            blocked_module="env.tools.track._impl",
+            blocked_module="buddyswitch.env.tools.track._impl",
             role="pm",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -331,8 +330,8 @@ import json
 import sys
 from pathlib import Path
 
-import env_manifest
-from env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.runtime_support import env_manifest
+from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
@@ -346,7 +345,7 @@ response = dispatch_env_tool_request(
     manifest=env_manifest.load_manifest(manifest_path),
     manifest_path=manifest_path,
 )
-loaded = sorted(name for name in sys.modules if name.startswith("env.tools.") and name.endswith("._impl"))
+loaded = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.tools.") and name.endswith("._impl"))
 print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
 """
             completed = run_process(
@@ -361,7 +360,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
             loaded = payload["loaded"]
             response = payload["response"]
             with self.subTest(tool=tool, action=action):
-                expected = f"env.tools.{tool}._impl"
+                expected = f"buddyswitch.env.tools.{tool}._impl"
                 self.assertIn(expected, loaded, msg=payload)
                 self.assertEqual(loaded, [expected], msg=payload)
                 if response.get("ok") is not True:

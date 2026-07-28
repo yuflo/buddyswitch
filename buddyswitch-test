@@ -2,8 +2,28 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${ROOT}/tools/launcher/env.sh"
-buddyswitch_env_init
-export PYTHONPATH="${ROOT}:${ROOT}/scripts:${ROOT}/tools/launcher"
+RUNTIME_DIR="${BUDDYSWITCH_RUNTIME_DIR:-${ROOT}/.buddyswitch-runtime}"
+
+if [[ "${RUNTIME_DIR}" != /* ]]; then
+  printf '%s\n' "buddyswitch-test: BUDDYSWITCH_RUNTIME_DIR must be an absolute path" >&2
+  exit 5
+fi
+if [[ ! -f "${RUNTIME_DIR}/activation.json" ]]; then
+  printf '%s\n' "buddyswitch-test: runtime activation.json is missing" >&2
+  exit 5
+fi
+if [[ ! -x "${RUNTIME_DIR}/venv/bin/python" ]]; then
+  printf '%s\n' "buddyswitch-test: runtime venv/bin/python is missing or not executable" >&2
+  exit 5
+fi
+
+export BUDDYSWITCH_RUNTIME_DIR="${RUNTIME_DIR}"
+unset BUDDYSWITCH_RUNTIME_IDENTITY
+unset BUDDYSWITCH_PACKAGE_ROOT
+unset BUDDYSWITCH_PROJECT_SOURCE
+unset BUDDYSWITCH_PYTHON
+unset BUDDYSWITCH_SOURCE_ROOT
+unset PYTHONPATH
 export PYTHONDONTWRITEBYTECODE="1"
-exec "${BUDDYSWITCH_PYTHON}" "${ROOT}/tests/runner.py" "$@"
+cd "${ROOT}"
+exec "${RUNTIME_DIR}/venv/bin/python" -m tests.runner "$@"

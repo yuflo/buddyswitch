@@ -2,6 +2,9 @@
 /output/
 test-results/
 playwright-report/
+/.buddyswitch-runtime/
+/build/
+/src/*.egg-info/
 
 # Temporary and local noise
 .codex/

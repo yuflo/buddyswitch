@@ -8,15 +8,15 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import demand_sys_daemon_adapter
-import demand_triage_handler
-import demand_triage_runtime
-import env_tool_mcp_server
-import side_thread_registry
-from env.domain import demand_sys
-from env.repos import demands
-from env.services import messages as message_service
-import daemon_state
+from buddyswitch.launcher import demand_sys_daemon_adapter
+from buddyswitch.launcher import demand_triage_handler
+from buddyswitch.launcher import demand_triage_runtime
+from buddyswitch.launcher import env_tool_mcp_server
+from buddyswitch.launcher import side_thread_registry
+from buddyswitch.env.domain import demand_sys
+from buddyswitch.env.repos import demands
+from buddyswitch.env.services import messages as message_service
+from buddyswitch.launcher import daemon_state
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

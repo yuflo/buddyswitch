@@ -8,11 +8,11 @@ import tempfile
 import time
 from pathlib import Path
 
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 from tests.support.processes import ResourceLedger
 
 
-APP_SERVER = importlib.import_module("app_server")
+APP_SERVER = importlib.import_module("buddyswitch.launcher.app_server")
 
 
 def test_stop_app_server_terminates_launch_group() -> None:

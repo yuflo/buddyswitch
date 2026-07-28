@@ -11,10 +11,9 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from tools.launcher import im_http_router  # noqa: E402
-from tools.launcher import web_management  # noqa: E402
+from buddyswitch.launcher import im_http_router  # noqa: E402
+from buddyswitch.launcher import web_management  # noqa: E402
 
 
 class _FakeExternalImSession:
@@ -302,7 +301,6 @@ class ExternalImProjectionContractTests(unittest.TestCase):
             or {"ok": True, "conversation": {"id": "conv-direct"}, "messages": [], "count": 0}
         )
         service = web_management.WebManagementService(
-            repo_root=ROOT,
             web_im_identity_provider=_FakeWebIdentityProvider(session.external_session),
             im_session=session,
         )

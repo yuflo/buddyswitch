@@ -16,18 +16,18 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_contracts  # noqa: E402
-import daemon_runtime  # noqa: E402
-import daemon_state  # noqa: E402
+from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.launcher import daemon_runtime  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 MODULE_COUNTER = count()
 
 
 def load_daemon_core() -> Any:
-    return importlib.reload(importlib.import_module("daemon_core"))
+    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_core"))
 
 
 class FakeRuntimeClient:

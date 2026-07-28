@@ -6,9 +6,9 @@ from tests.support.paths import REPO_ROOT
 
 
 ROOT = REPO_ROOT
-SESSION_PATH = ROOT / "scripts" / "env" / ("cdp_browser_" + "session.py")
-LIFECYCLE_PATH = ROOT / "scripts" / "env" / "cdp_browser_lifecycle.py"
-LEGACY_BACKGROUND_TARGET_PATH = ROOT / "scripts" / "env" / ("cdp_background_" + "page.py")
+SESSION_PATH = ROOT / "src" / "buddyswitch" / "env" / ("cdp_browser_" + "session.py")
+LIFECYCLE_PATH = ROOT / "src" / "buddyswitch" / "env" / "cdp_browser_lifecycle.py"
+LEGACY_BACKGROUND_TARGET_PATH = ROOT / "src" / "buddyswitch" / "env" / ("cdp_background_" + "page.py")
 LEGACY_CURRENT_TARGET_FIELD = "current_" + "target_id"
 LEGACY_PAGE_TARGET_MAP_FIELD = "page_id_to_" + "target_id"
 
@@ -31,6 +31,6 @@ class TestCdpArchitecture(unittest.TestCase):
                 self.assertNotIn(token, lifecycle_source)
 
         self.assertFalse(LEGACY_BACKGROUND_TARGET_PATH.exists())
-        manager_source = (ROOT / "tools" / "launcher" / "browser_runtime_manager.py").read_text(encoding="utf-8")
+        manager_source = (ROOT / "src" / "buddyswitch" / "launcher" / "browser_runtime_manager.py").read_text(encoding="utf-8")
         self.assertIn("cdp_target", manager_source)
         self.assertNotIn("create_background_page_" + "target", manager_source)

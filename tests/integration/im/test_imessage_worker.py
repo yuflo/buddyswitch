@@ -10,7 +10,7 @@ from typing import Any
 from unittest import mock
 
 from tests.support.cli import wait_until
-from tools.launcher import imessage_channel
+from buddyswitch.launcher import imessage_channel
 
 from tests.integration.im._imessage_fakes import (
     _BlockingActorSendApi,

@@ -10,16 +10,15 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import output_schema  # noqa: E402
+from tests.support import output_schema  # noqa: E402
 
 ROLE_RESULT_SCHEMA_PATHS = {
-    "pm": ROOT / "framework" / "schemas" / "pm" / "pm-result.json",
-    "dev": ROOT / "framework" / "schemas" / "dev" / "dev-result.json",
-    "test": ROOT / "framework" / "schemas" / "test" / "test-result.json",
-    "market": ROOT / "framework" / "schemas" / "market" / "market-result.json",
-    "design": ROOT / "framework" / "schemas" / "design" / "design-result.json",
+    "pm": ROOT / "src" / "buddyswitch" / "contracts" / "schemas" / "pm" / "pm-result.json",
+    "dev": ROOT / "src" / "buddyswitch" / "contracts" / "schemas" / "dev" / "dev-result.json",
+    "test": ROOT / "src" / "buddyswitch" / "contracts" / "schemas" / "test" / "test-result.json",
+    "market": ROOT / "src" / "buddyswitch" / "contracts" / "schemas" / "market" / "market-result.json",
+    "design": ROOT / "src" / "buddyswitch" / "contracts" / "schemas" / "design" / "design-result.json",
 }
 
 COMMON_REQUIRED_COMMIT_KEYS = {"execution_summary"}

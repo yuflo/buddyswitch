@@ -5,17 +5,17 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from env.tool_runtime import registry as tool_registry
+from buddyswitch.env.tool_runtime import registry as tool_registry
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
-TRIAGE = ROOT / "buddyswitch/skills/shared/demand-triage/SKILL.md"
-ORCHESTRATION = ROOT / "buddyswitch/skills/shared/demand-orchestration/SKILL.md"
-RETIRED_TASK_SKILL = ROOT / "buddyswitch/skills/shared/task-management/SKILL.md"
-ROLE_AGENTS = tuple(sorted((ROOT / "tools/launcher/assets/roles").glob("*/AGENTS.md")))
-TRIAGE_HANDLER = ROOT / "tools/launcher/demand_triage_handler.py"
-ORCHESTRATION_HANDLER = ROOT / "tools/launcher/demand_orchestration_handler.py"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
+TRIAGE = ROOT / "src/buddyswitch/skills/shared/demand-triage/SKILL.md"
+ORCHESTRATION = ROOT / "src/buddyswitch/skills/shared/demand-orchestration/SKILL.md"
+RETIRED_TASK_SKILL = ROOT / "src/buddyswitch/skills/shared/task-management/SKILL.md"
+ROLE_AGENTS = tuple(sorted((ROOT / "src/buddyswitch/launcher/assets/roles").glob("*/AGENTS.md")))
+TRIAGE_HANDLER = ROOT / "src/buddyswitch/launcher/demand_triage_handler.py"
+ORCHESTRATION_HANDLER = ROOT / "src/buddyswitch/launcher/demand_orchestration_handler.py"
 
 
 def _manifest() -> dict:
@@ -27,7 +27,7 @@ def _active_skill_files(manifest: dict) -> list[Path]:
     for skill in manifest.get("skills", []):
         if not isinstance(skill, dict) or not isinstance(skill.get("path"), str):
             continue
-        rows.append(ROOT / skill["path"] / "SKILL.md")
+        rows.append(ROOT / "src" / "buddyswitch" / skill["path"] / "SKILL.md")
     return rows
 
 
@@ -203,8 +203,8 @@ def test_current_actor_surfaces_contain_no_retired_or_future_task_architecture()
         ORCHESTRATION,
         TRIAGE_HANDLER,
         ORCHESTRATION_HANDLER,
-        ROOT / "scripts/env/tools/demand_sys/tool.py",
-        ROOT / "scripts/env/tools/task_sys/tool.py",
+        ROOT / "src/buddyswitch/env/tools/demand_sys/tool.py",
+        ROOT / "src/buddyswitch/env/tools/task_sys/tool.py",
         *ROLE_AGENTS,
     )
     forbidden = (
@@ -227,7 +227,7 @@ def test_actor_task_tool_surface_is_exactly_minimal() -> None:
 
     assert set(tool_registry.supported_actions("task_sys")) == expected
     assert set(tool_registry.env_tools_description()["task_sys"]["operations"]) == expected
-    assert not hasattr(__import__("env.domain.task_sys", fromlist=["record_task_close"]), "record_task_close")
+    assert not hasattr(__import__("buddyswitch.env.domain.task_sys", fromlist=["record_task_close"]), "record_task_close")
 
 
 def test_retired_task_skill_is_not_treated_as_current_policy() -> None:

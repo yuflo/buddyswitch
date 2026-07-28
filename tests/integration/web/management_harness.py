@@ -26,13 +26,13 @@ from tests.support.runtime import RuntimeWorkspaceTestCase
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-WEB_MANAGEMENT_PATH = ROOT / "tools" / "launcher" / "web_management.py"
-WEB_MANAGEMENT = importlib.import_module("web_management")
+WEB_MANAGEMENT_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py"
+WEB_MANAGEMENT = importlib.import_module("buddyswitch.launcher.web_management")
 NO_PROXY_OPENER = build_opener(ProxyHandler({}))
 
-from env.services import messages as message_service  # noqa: E402
-from env.repos import identities as identity_repo  # noqa: E402
-import actor_capability  # noqa: E402
+from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+from buddyswitch.launcher import actor_capability  # noqa: E402
 
 
 def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:
@@ -331,14 +331,14 @@ class RecordingHostControl:
         return self._record(
             "capabilities_get",
             (actor_id,),
-            lambda: WEB_MANAGEMENT.host_control_module.HostControl(repo_root=ROOT).capabilities_get(actor_id),
+            lambda: WEB_MANAGEMENT.host_control_module.HostControl().capabilities_get(actor_id),
         )  # type: ignore[return-value]
 
     def capabilities_set(self, actor_id: str, parent: str, side: str) -> dict[str, object]:
         return self._record(
             "capabilities_set",
             (actor_id, parent, side),
-            lambda: WEB_MANAGEMENT.host_control_module.HostControl(repo_root=ROOT).capabilities_set(actor_id, parent, side),
+            lambda: WEB_MANAGEMENT.host_control_module.HostControl().capabilities_set(actor_id, parent, side),
         )  # type: ignore[return-value]
 
 
@@ -357,7 +357,6 @@ class WebManagementServerTestCase(unittest.TestCase):
         if platform_name is not None:
             service_kwargs["platform_name"] = platform_name
         service = WEB_MANAGEMENT.WebManagementService(
-            repo_root=ROOT,
             host_control=control,
             **service_kwargs,
         )

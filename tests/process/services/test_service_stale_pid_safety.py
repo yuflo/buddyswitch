@@ -7,10 +7,10 @@ import signal
 import subprocess
 import sys
 
-import app_server
-import browser_runtime_manager
-import daemon_core
-from runtime_kernel import lifecycle, process_identity
+from buddyswitch.launcher import app_server
+from buddyswitch.launcher import browser_runtime_manager
+from buddyswitch.launcher import daemon_core
+from buddyswitch.runtime_kernel import lifecycle, process_identity
 from tests.support.processes import ResourceLedger
 
 

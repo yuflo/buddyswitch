@@ -9,16 +9,15 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-from env.tool_runtime import registry as tool_registry  # noqa: E402
-from env.tool_runtime import role_auth  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.env.tool_runtime import role_auth  # noqa: E402
 
 
 class RoleActionAuthPolicyTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.manifest = env_manifest.load_manifest(ROOT / "buddyswitch" / "manifest.toml")
+        self.manifest = env_manifest.load_manifest(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml")
         self.roles = frozenset(
             role["id"] for role in self.manifest.get("roles", []) if isinstance(role, dict)
         )

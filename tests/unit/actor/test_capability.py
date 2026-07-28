@@ -13,9 +13,9 @@ from unittest import mock
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-HELPER_DIR = ROOT / "tools" / "launcher"
+HELPER_DIR = ROOT / "src" / "buddyswitch" / "launcher"
 
-import actor_capability  # noqa: E402
+from buddyswitch.launcher import actor_capability  # noqa: E402
 
 
 class ActorCapabilityTests(unittest.TestCase):

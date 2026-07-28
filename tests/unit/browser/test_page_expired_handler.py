@@ -45,8 +45,8 @@ class FakeRuntime:
 
 class TestBrowserPageExpiredHandler(unittest.TestCase):
     def setUp(self) -> None:
-        self.handler_module = importlib.reload(importlib.import_module("browser_page_expired_handler"))
-        self.inbound_module = importlib.reload(importlib.import_module("browser_inbound"))
+        self.handler_module = importlib.reload(importlib.import_module("buddyswitch.launcher.browser_page_expired_handler"))
+        self.inbound_module = importlib.reload(importlib.import_module("buddyswitch.launcher.browser_inbound"))
         original_get_target_info = self.handler_module.cdp_target.get_target_info
         original_close_target = self.handler_module.cdp_target.close_target
         original_schedule_release = self.handler_module.browser_lifecycle.schedule_browser_cockpit_release
@@ -290,7 +290,7 @@ class TestBrowserPageExpiredHandler(unittest.TestCase):
 
 class TestBrowserFailedOpenCleanup(unittest.TestCase):
     def setUp(self) -> None:
-        self.module = importlib.reload(importlib.import_module("browser_page_expired_handler"))
+        self.module = importlib.reload(importlib.import_module("buddyswitch.launcher.browser_page_expired_handler"))
         original_list_page_targets = self.module.cdp_target.list_page_targets
         original_close_target = self.module.cdp_target.close_target
         original_schedule_release = self.module.browser_lifecycle.schedule_browser_cockpit_release
@@ -365,7 +365,7 @@ class TestBrowserFailedOpenCleanup(unittest.TestCase):
 
 class TestBrowserReleaseHandler(unittest.TestCase):
     def setUp(self) -> None:
-        self.module = importlib.reload(importlib.import_module("browser_release_handler"))
+        self.module = importlib.reload(importlib.import_module("buddyswitch.launcher.browser_release_handler"))
         original_release = self.module.browser_runtime_manager.release
         original_list_page_targets = self.module.cdp_target.list_page_targets
         self.addCleanup(setattr, self.module.browser_runtime_manager, "release", original_release)
@@ -386,7 +386,7 @@ class TestBrowserReleaseHandler(unittest.TestCase):
     def test_release_skips_when_tracked_targets_remain(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "shared" / "instances" / "act-dev-browser"
-            lifecycle = importlib.import_module("env.cdp_browser_lifecycle")
+            lifecycle = importlib.import_module("buddyswitch.env.cdp_browser_lifecycle")
             lifecycle._write_page_idle_state(
                 instance_root,
                 {"targets": {"stable-tab-1": {"tab_target_id": "stable-tab-1"}}},
@@ -402,7 +402,7 @@ class TestBrowserReleaseHandler(unittest.TestCase):
     def test_release_skips_when_untracked_real_page_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "shared" / "instances" / "act-dev-browser"
-            lifecycle = importlib.import_module("env.cdp_browser_lifecycle")
+            lifecycle = importlib.import_module("buddyswitch.env.cdp_browser_lifecycle")
             lifecycle._write_page_idle_state(instance_root, {"targets": {}})
             self.module.cdp_target.list_page_targets = lambda *_args, **_kwargs: [
                 {"targetId": "real-user-tab", "type": "page", "url": "https://example.com"}
@@ -418,7 +418,7 @@ class TestBrowserReleaseHandler(unittest.TestCase):
     def test_release_calls_runtime_manager_only_when_state_and_browser_are_empty(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "shared" / "instances" / "act-dev-browser"
-            lifecycle = importlib.import_module("env.cdp_browser_lifecycle")
+            lifecycle = importlib.import_module("buddyswitch.env.cdp_browser_lifecycle")
             lifecycle._write_page_idle_state(instance_root, {"targets": {}})
             self.module.cdp_target.list_page_targets = lambda *_args, **_kwargs: []
 
@@ -435,7 +435,7 @@ class TestBrowserReleaseHandler(unittest.TestCase):
     def test_release_target_query_failure_is_retried_instead_of_killing_browser(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "shared" / "instances" / "act-dev-browser"
-            lifecycle = importlib.import_module("env.cdp_browser_lifecycle")
+            lifecycle = importlib.import_module("buddyswitch.env.cdp_browser_lifecycle")
             lifecycle._write_page_idle_state(instance_root, {"targets": {}})
 
             def fail_query(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:

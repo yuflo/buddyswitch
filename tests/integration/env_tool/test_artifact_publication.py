@@ -11,14 +11,17 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-from env.repos import artifacts as artifact_repo  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.integration.env_tool._artifact_env_tool_case import ArtifactEnvToolCase
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -56,7 +59,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertFalse(bool(rejected.get("state_changed")), msg=rejected)
         self.assertEqual(rejected.get("durability"), "none")
 
-        stored = env_store.get_artifact("art-pm-template-update")
+        stored = artifact_repo.get_artifact("art-pm-template-update")
         self.assertIsInstance(stored, dict, msg=rejected)
         assert isinstance(stored, dict)
         self.assertEqual(stored.get("template"), "note")
@@ -331,7 +334,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertEqual(r2_artifact.get("supersedes_artifact_id"), "art-revision-r1")
         self.assertEqual(r2_artifact.get("currentness"), "draft")
 
-        r1_store = env_store.get_artifact("art-revision-r1")
+        r1_store = artifact_repo.get_artifact("art-revision-r1")
         self.assertIsInstance(r1_store, dict)
         assert isinstance(r1_store, dict)
         self.assertNotIn("status", r1_store)
@@ -436,7 +439,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_SOURCE_REFS")
         self.assertEqual(rejected.get("permission_boundary"), "source_refs.required_fields")
-        self.assertFalse(env_store.artifact_file("art-source-invalid-r1").exists())
+        self.assertFalse(artifact_repo.artifact_file("art-source-invalid-r1").exists())
 
     def test_source_ref_rejects_private_actor_private_logical_name_refs_without_mutation(self) -> None:
         instance_json = self._instance_json(actor_id="act-pm-art-source-actor-private", role="pm")
@@ -458,7 +461,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertFalse(rejected_create.get("ok"), msg=rejected_create)
         self.assertEqual((rejected_create.get("error") or {}).get("code"), "E_SOURCE_REFS")
         self.assertEqual(rejected_create.get("permission_boundary"), "source_refs.required_fields")
-        self.assertFalse(env_store.artifact_file("art-source-actor-private-r1").exists())
+        self.assertFalse(artifact_repo.artifact_file("art-source-actor-private-r1").exists())
 
         created = self._dispatch(
             instance_json=instance_json,
@@ -492,7 +495,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertEqual((rejected_update.get("error") or {}).get("code"), "E_SOURCE_REFS")
         self.assertEqual(rejected_update.get("permission_boundary"), "source_refs.required_fields")
 
-        stored = env_store.get_artifact("art-source-update-target")
+        stored = artifact_repo.get_artifact("art-source-update-target")
         self.assertIsInstance(stored, dict, msg=rejected_update)
         assert isinstance(stored, dict)
         self.assertEqual(stored.get("source_refs"), [{"type": "note", "label": "seed"}])
@@ -562,7 +565,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertNotIn("status", artifact)
         self.assertIn({"type": "artifact", "id": "art-source-readable-r1"}, artifact.get("source_refs") or [])
 
-        persisted = env_store.get_artifact("art-source-derived-r1")
+        persisted = artifact_repo.get_artifact("art-source-derived-r1")
         self.assertIsInstance(persisted, dict)
         assert isinstance(persisted, dict)
         self.assertNotIn("source_run_id", persisted)
@@ -605,7 +608,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_SOURCE_REFS_READ_SCOPE")
         self.assertEqual(rejected.get("permission_boundary"), "source_refs.read_scope")
-        self.assertFalse(env_store.artifact_file("art-source-private-denied-r1").exists())
+        self.assertFalse(artifact_repo.artifact_file("art-source-private-denied-r1").exists())
 
     def test_superseded_published_artifact_remains_readable_and_traceable(self) -> None:
         instance_pm = self._instance_json(actor_id="act-pm-art", role="pm")
@@ -687,7 +690,7 @@ class ArtifactPublicationTests(ArtifactEnvToolCase):
         ]
         self.assertEqual([row.get("artifact_id") for row in current_materials], ["art-trace-r2"])
 
-        track_store = env_store.get_track("track-revision-trace")
+        track_store = track_repo.get_track("track-revision-trace")
         self.assertIsInstance(track_store, dict)
         assert isinstance(track_store, dict)
         refs = [row for row in track_store.get("artifact_relations", []) if isinstance(row, dict) and row.get("role") == "material"]

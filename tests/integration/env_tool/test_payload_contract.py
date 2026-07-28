@@ -11,16 +11,15 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.tool_runtime import registry as catalog  # noqa: E402
-from env.tool_runtime import role_auth  # noqa: E402
-from env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as catalog  # noqa: E402
+from buddyswitch.env.tool_runtime import role_auth  # noqa: E402
+from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 
 
 class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
@@ -117,7 +116,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
                     self.assertIn("__unexpected_payload_field__", json.dumps(response, ensure_ascii=True))
 
     def test_services_do_not_define_duplicate_payload_field_sets_and_legacy_message_domain_is_retired(self) -> None:
-        service_root = ROOT / "scripts" / "env" / "tools"
+        service_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
         violations: list[str] = []
         for path in sorted(service_root.glob("*/service.py")):
             if path.name != "service.py":
@@ -130,7 +129,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
                     if isinstance(target, ast.Name) and target.id.endswith("_FIELDS"):
                         violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: {target.id}")
 
-        message_domain = ROOT / "scripts" / "env" / "domain" / "messages.py"
+        message_domain = ROOT / "src" / "buddyswitch" / "env" / "domain" / "messages.py"
         if message_domain.exists():
             violations.append(f"{message_domain.relative_to(ROOT)}: legacy actor-address message domain must stay retired")
 
@@ -138,17 +137,16 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
 
     def test_current_im_surfaces_do_not_contain_retired_processing_model(self) -> None:
         current_surfaces = (
-            "scripts/env/repos/messages.py",
-            "scripts/env/services/messages.py",
-            "scripts/env_legacy_store.py",
-            "scripts/env/tools/message/tool.py",
-            "scripts/env/tools/message/_impl.py",
-            "scripts/env/tool_runtime/im_client.py",
-            "scripts/env/tool_runtime/role_auth.py",
-            "tools/launcher/external_im_session.py",
-            "tools/launcher/im_http_router.py",
-            "tools/launcher/task_goal_handler.py",
-            "buddyswitch/skills/shared/demand-orchestration/SKILL.md",
+            "src/buddyswitch/env/repos/messages.py",
+            "src/buddyswitch/env/services/messages.py",
+            "src/buddyswitch/env/tools/message/tool.py",
+            "src/buddyswitch/env/tools/message/_impl.py",
+            "src/buddyswitch/env/tool_runtime/im_client.py",
+            "src/buddyswitch/env/tool_runtime/role_auth.py",
+            "src/buddyswitch/launcher/external_im_session.py",
+            "src/buddyswitch/launcher/im_http_router.py",
+            "src/buddyswitch/launcher/task_goal_handler.py",
+            "src/buddyswitch/skills/shared/demand-orchestration/SKILL.md",
             "docs/arch/web-interface-call-architecture.md",
         )
         retired = (

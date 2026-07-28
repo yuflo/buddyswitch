@@ -17,16 +17,15 @@ from unittest.mock import patch
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_contracts  # noqa: E402
-import daemon_state  # noqa: E402
-from env.repos import identities as identity_repo  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
+from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
-INSTANCE_DAEMON_PATH = ROOT / "tools" / "launcher" / "instance_daemon.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
 MODULE_COUNTER = count()
 RUNTIME_ENV_KEYS = (
     "BUDDYSWITCH_SHARED_ROOT",
@@ -42,7 +41,7 @@ RUNTIME_ENV_KEYS = (
 def load_daemon_core() -> Any:
     if not DAEMON_CORE_PATH.exists():
         raise AssertionError(f"expected daemon core module to exist: {DAEMON_CORE_PATH}")
-    return importlib.reload(importlib.import_module("daemon_core"))
+    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_core"))
 
 
 class StopDaemonLoop(RuntimeError):

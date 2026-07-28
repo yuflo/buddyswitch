@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=58", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "buddyswitch"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["buddyswitch*"]
+exclude = [
+  "buddyswitch.tests*",
+  "buddyswitch.*.tests*",
+]
+namespaces = false
+
+[tool.setuptools.package-data]
+"buddyswitch.catalog" = ["**/*.toml", "**/*.json", "**/*.md"]
+"buddyswitch.config" = ["**/*.toml", "**/*.json", "**/*.md"]
+"buddyswitch.contracts" = ["**/*.toml", "**/*.json", "**/*.md"]
+"buddyswitch.launcher" = [
+  "assets/**/*.toml",
+  "assets/**/*.json",
+  "assets/**/*.md",
+  "assets/**/*.html",
+  "assets/**/*.css",
+  "assets/**/*.js",
+  "assets/**/LICENSE*",
+  "shell/*.sh",
+]
+"buddyswitch.skills" = ["**/*.toml", "**/*.json", "**/*.md", "**/*.sh"]

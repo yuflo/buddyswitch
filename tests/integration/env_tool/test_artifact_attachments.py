@@ -11,14 +11,17 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-from env.repos import artifacts as artifact_repo  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.integration.env_tool._artifact_env_tool_case import ArtifactEnvToolCase
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -245,7 +248,7 @@ class ArtifactAttachmentTests(ArtifactEnvToolCase):
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual(rejected.get("state_changed"), False, msg=rejected)
         self.assertEqual(rejected.get("durability"), "none")
-        stored = env_store.get_artifact("art-attach-inline-reject")
+        stored = artifact_repo.get_artifact("art-attach-inline-reject")
         self.assertIsInstance(stored, dict, msg=rejected)
         assert isinstance(stored, dict)
         self.assertEqual(stored.get("attachments"), [])
@@ -285,7 +288,7 @@ class ArtifactAttachmentTests(ArtifactEnvToolCase):
         self.assertEqual(rejected.get("state_changed"), False, msg=rejected)
         self.assertEqual(rejected.get("durability"), "none", msg=rejected)
         self.assertIn(retired_field, json.dumps(rejected, ensure_ascii=True))
-        stored = env_store.get_artifact("art-attach-retired-field")
+        stored = artifact_repo.get_artifact("art-attach-retired-field")
         self.assertIsInstance(stored, dict, msg=rejected)
         assert isinstance(stored, dict)
         self.assertEqual(stored.get("attachments"), [])
@@ -363,7 +366,7 @@ class ArtifactAttachmentTests(ArtifactEnvToolCase):
                 self.assertEqual(rejected.get("durability"), "none", msg=rejected)
                 self.assertIn("source_path", rejected.get("correctable_fields", []), msg=rejected)
 
-        stored = env_store.get_artifact("art-attach-invalid-source")
+        stored = artifact_repo.get_artifact("art-attach-invalid-source")
         self.assertIsInstance(stored, dict)
         assert isinstance(stored, dict)
         self.assertEqual(stored.get("attachments"), [])

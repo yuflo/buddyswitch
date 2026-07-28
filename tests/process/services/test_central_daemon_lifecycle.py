@@ -7,9 +7,9 @@ import subprocess
 import sys
 import time
 
-import central_daemon
-import central_daemon_core
-from runtime_kernel import process_identity
+from buddyswitch.launcher import central_daemon
+from buddyswitch.launcher import central_daemon_core
+from buddyswitch.runtime_kernel import process_identity
 from tests.support.processes import ResourceLedger
 
 

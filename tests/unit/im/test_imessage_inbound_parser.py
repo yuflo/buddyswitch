@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import unittest
 
-from tools.launcher import imessage_channel
+from buddyswitch.launcher import imessage_channel
 
 
 class ImessageInboundParserTests(unittest.TestCase):

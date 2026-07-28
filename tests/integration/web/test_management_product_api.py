@@ -3,7 +3,7 @@ from tests.integration.web.management_harness import *  # noqa: F401,F403
 
 class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
     def _use_capability_shared_root(self) -> Path:
-        from env.repos import runtime_files
+        from buddyswitch.env.repos import runtime_files
 
         shared_root = self.runtime_root / "shared-root"
         state_root = shared_root / "state"
@@ -22,7 +22,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         return shared_root
 
     def _service(self, host_control: RecordingHostControl | None = None) -> WEB_MANAGEMENT.WebManagementService:
-        return WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control or RecordingHostControl())
+        return WEB_MANAGEMENT.WebManagementService(host_control=host_control or RecordingHostControl())
 
     @staticmethod
     def _instance_list_payload() -> dict[str, object]:
@@ -69,8 +69,8 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         }
 
     def _seed_track_pages(self) -> None:
-        from env.repos import track_comments as track_comment_repo
-        from env.repos import tracks as track_repo
+        from buddyswitch.env.repos import track_comments as track_comment_repo
+        from buddyswitch.env.repos import tracks as track_repo
 
         actor = {"role_id": "pm", "actor_id": "act-pm-demo"}
         actor_id = actor["actor_id"]
@@ -331,7 +331,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         shared_root = self._use_capability_shared_root()
         write_web_capability_instance(shared_root)
 
-        host_payload = WEB_MANAGEMENT.host_control_module.HostControl(repo_root=ROOT).capabilities_set(
+        host_payload = WEB_MANAGEMENT.host_control_module.HostControl().capabilities_set(
             "act-pm-demo", parent="deep", side="maximum"
         )
         service = self._service()
@@ -354,7 +354,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
             "/api/actors/act-pm-demo/capabilities",
             b'{"parent":"deep","side":"maximum"}',
         )
-        host_payload = WEB_MANAGEMENT.host_control_module.HostControl(repo_root=ROOT).capabilities_get("act-pm-demo")
+        host_payload = WEB_MANAGEMENT.host_control_module.HostControl().capabilities_get("act-pm-demo")
 
         self.assertEqual(status, 200)
         self.assertTrue(host_payload["ok"])
@@ -474,7 +474,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("target_" + "role_id", deliver_im_actor.call_args.args[0])
 
     def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
-        from env.domain import task_sys
+        from buddyswitch.env.domain import task_sys
 
         shared_root = self._use_capability_shared_root()
         write_web_capability_instance(
@@ -624,7 +624,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                 )
 
         host_control = RejectingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(repo_root=ROOT, host_control=host_control)
+        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/actors/not-an-actor/console", b"")

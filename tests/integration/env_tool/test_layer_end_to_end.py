@@ -12,20 +12,23 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
-import env_legacy_store as env_store  # noqa: E402
-from env.repos import messages as message_repo  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
-from env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.repos import messages as message_repo  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
 class EnvLayerEndToEndTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
+        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instances: dict[str, dict[str, object]] = {}
         for role in ("pm", "design", "dev", "test", "market"):
@@ -284,7 +287,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestCase):
         )
         self.assertTrue(pm_update.get("ok"), msg=pm_update)
 
-        persisted_track = env_store.get_track(track_id)
+        persisted_track = track_repo.get_track(track_id)
         self.assertIsInstance(persisted_track, dict)
         assert isinstance(persisted_track, dict)
         persisted_rows = self._relations_for_role(persisted_track, "material")
@@ -407,7 +410,7 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestCase):
         self.assertEqual(fetched.get("content_base64"), "iVBORw0K")
 
     def test_cross_role_identity_scope_follows_service_permissions(self) -> None:
-        env_store.create_artifact_revision(
+        object_builders.create_artifact_revision(
             artifact_id="art-pm-private-r1",
             title="Private artifact",
             summary="private",
@@ -605,7 +608,7 @@ class EnvLayerProductRootSplitTests(unittest.TestCase):
                 try:
                     runtime_files.refresh_runtime_roots_from_env()
                     track_id = "track-e2e-product-state-root"
-                    created = env_store.create_track(
+                    created = object_builders.create_track(
                         track_id,
                         "State Root Split",
                         owner_actor={"actor_id": "act-pm-state-root", "role_id": "pm"},

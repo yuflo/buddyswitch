@@ -11,14 +11,17 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.repos import artifacts as artifact_repo  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -114,7 +117,7 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestCase):
                 source_refs=[{"type": "note", "label": "seed"}],
             )
             return artifact["id"]
-        artifact = env_store.create_artifact_revision(
+        artifact = object_builders.create_artifact_revision(
             artifact_id="art-market-evidence-r1",
             title="Market brief",
             summary="seed",
@@ -226,14 +229,14 @@ class EvidenceEnvToolTests(RuntimeWorkspaceTestCase):
 
     def test_readable_but_not_authored_target_is_rejected(self) -> None:
         artifact_id = self._seed_market_targets()
-        env_store.create_track(
+        object_builders.create_track(
             "track-market-readable",
             "Readable Market Track",
             owner_identity="act-market-readable",
             outcome="Readable market outcome",
             now={"next": "seed", "blocker": None},
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id="track-market-readable",
             artifact_id=artifact_id,
             label="Market published artifact",

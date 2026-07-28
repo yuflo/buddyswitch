@@ -13,15 +13,20 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-import runtime_kernel.lifecycle as runtime_lifecycle  # noqa: E402
-from env.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.domain import task_sys
+from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+import buddyswitch.runtime_kernel.lifecycle as runtime_lifecycle  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -46,7 +51,7 @@ class RunlessRuntimeContractTests(unittest.TestCase):
         return events
 
     def test_runtime_dispatcher_integration_surface_avoids_env_store_import(self) -> None:
-        dispatcher_source = (ROOT / "scripts" / "runtime_kernel" / "dispatcher.py").read_text(encoding="utf-8")
+        dispatcher_source = (ROOT / "src" / "buddyswitch" / "runtime_kernel" / "dispatcher.py").read_text(encoding="utf-8")
         self.assertNotIn("import env_store", dispatcher_source)
         self.assertNotIn("from env_store import", dispatcher_source)
 
@@ -158,7 +163,7 @@ class RunlessRuntimeContractTests(unittest.TestCase):
                 "BUDDYSWITCH_CODEX_BIN=/bin/sh "
                 "BUDDYSWITCH_CODEX_VERSION=codex-cli-test-runtime "
                 "bash -lc '"
-                "source tools/launcher/env.sh; "
+                "source \"$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh\"; "
                 "buddyswitch_env_init; "
                 "buddyswitch_env_bind_instance act-pm-runless; "
                 "buddyswitch_instance_activate act-pm-runless pm active >/dev/null; "
@@ -180,10 +185,17 @@ class RunlessRuntimeContractTests(unittest.TestCase):
                 "status",
                 "instance_root",
                 "workspace_dir",
+                "project_workspace_dir",
                 "browser_port",
+                "runtime_identity",
                 "codex_runtime",
                 "updated_at",
             },
+        )
+        self.assertEqual(payload["runtime_identity"], current_runtime_identity().to_record())
+        self.assertEqual(
+            payload["project_workspace_dir"],
+            str(Path(tmp) / "shared" / "project" / "workspace"),
         )
         self.assertEqual(
             payload["codex_runtime"],
@@ -318,7 +330,37 @@ class RunlessRuntimeContractTests(unittest.TestCase):
         catalog_row = payload.get("tool_catalog")
         self.assertIsInstance(catalog_row, dict, msg=payload)
         assert isinstance(catalog_row, dict)
-        self.assertEqual(catalog_row, tool_catalog.env_tools_description())
+        global_catalog = tool_catalog.env_tools_description()
+        global_demand = global_catalog["demand_sys"]
+        self.assertIn("resolve_inbound", global_demand["operations"])
+        for field in ("payload_fields", "input_schemas", "action_semantics"):
+            self.assertIn("resolve_inbound", global_demand[field])
+        self.assertEqual(
+            global_demand["native_mcp"]["actions"]["resolve_inbound"],
+            "demand_sys__resolve_inbound",
+        )
+        self.assertIn(
+            "demand_sys.resolve_inbound",
+            tool_catalog.operation_semantics(),
+        )
+
+        parent_demand = catalog_row["demand_sys"]
+        parent_actions = ["list", "get", "complete"]
+        self.assertEqual(parent_demand["operations"], parent_actions)
+        for field in ("payload_fields", "input_schemas", "action_semantics"):
+            self.assertEqual(list(parent_demand[field]), parent_actions)
+        self.assertEqual(
+            parent_demand["native_mcp"]["actions"],
+            {
+                action: f"demand_sys__{action}"
+                for action in parent_actions
+            },
+        )
+        operation_semantics = payload.get("operation_semantics")
+        self.assertIsInstance(operation_semantics, dict, msg=payload)
+        assert isinstance(operation_semantics, dict)
+        self.assertNotIn("demand_sys.resolve_inbound", operation_semantics)
+
         track_create = catalog_row["track"]["input_schemas"]["create"]
         self.assertEqual(track_create.get("type"), "object")
         now_schema = track_create["properties"]["now"]
@@ -328,7 +370,7 @@ class RunlessRuntimeContractTests(unittest.TestCase):
 
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):
-            env_store.validate_task(
+            task_sys._validate_task(
                 {
                     "id": "task-pm-runless",
                     "role": "pm",
@@ -345,7 +387,7 @@ class RunlessRuntimeContractTests(unittest.TestCase):
                 }
             )
         with self.assertRaises(ValueError):
-            env_store.validate_artifact(
+            artifact_repo.validate_artifact(
                 {
                     "id": "art-pm-runless-r1",
                     "task_id": "task-pm-runless",
@@ -362,7 +404,7 @@ class RunlessRuntimeContractTests(unittest.TestCase):
                     "updated_at": "2026-05-14T00:00:00Z",
                 }
             )
-        self.assertFalse(hasattr(env_store, "validate_handoff_record"))
+        self.assertFalse((ROOT / "scripts" / "env_store.py").exists())
 
     def test_artifact_create_revision_requires_v1_payload_without_source_run(self) -> None:
         instance_json = self._instance_json()

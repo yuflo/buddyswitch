@@ -10,14 +10,13 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_manifest  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 
 class EnvManifestV2Tests(unittest.TestCase):
     def setUp(self) -> None:
-        self.manifest_path = ROOT / "buddyswitch" / "manifest.toml"
+        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
         self.manifest = env_manifest.load_manifest(self.manifest_path)
 
     def test_manifest_has_no_run_tool_skill(self) -> None:
@@ -110,7 +109,9 @@ class EnvManifestV2Tests(unittest.TestCase):
                 self.assertTrue(templates)
 
     def test_manifest_loader_has_one_standard_toml_path(self) -> None:
-        source = (ROOT / "scripts" / "env_manifest.py").read_text(encoding="utf-8")
+        source = (
+            ROOT / "src" / "buddyswitch" / "runtime_support" / "env_manifest.py"
+        ).read_text(encoding="utf-8")
         compatibility_package = "tom" + "li"
         self.assertIn("import tomllib", source)
         self.assertNotRegex(source, rf"\b{compatibility_package}\b")

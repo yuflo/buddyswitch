@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.launcher import imessage_channel
+from buddyswitch.launcher import imessage_channel
 
 from tests.integration.im._imessage_fakes import (
     _QueueImsg,

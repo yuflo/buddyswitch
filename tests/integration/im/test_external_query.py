@@ -16,10 +16,9 @@ from tests.support.runtime import RuntimeWorkspaceTestCase
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
-from env.domain import track_read  # noqa: E402
+from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
+from buddyswitch.env.domain import track_read  # noqa: E402
 
 
 TASK_KEYS = (
@@ -51,9 +50,9 @@ TRACK_DETAIL_KEYS = TRACK_LIST_KEYS + ("materials", "proofs", "updates", "commen
 
 def _task_read_module() -> Any:
     try:
-        return importlib.import_module("env.domain.task_read")
+        return importlib.import_module("buddyswitch.env.domain.task_read")
     except ModuleNotFoundError as exc:
-        raise AssertionError("env.domain.task_read should provide external Task read projections") from exc
+        raise AssertionError("buddyswitch.env.domain.task_read should provide external Task read projections") from exc
 
 
 class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):

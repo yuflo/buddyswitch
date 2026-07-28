@@ -16,28 +16,27 @@ from tests.support.paths import REPO_ROOT
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_state  # noqa: E402
-import demand_sys_daemon_adapter  # noqa: E402
-from env.domain import demand_sys  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.repos import demands  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
-from env.repos import track_comments as comment_repo  # noqa: E402
-from env.repos import tracks as track_repo  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.launcher import demand_sys_daemon_adapter  # noqa: E402
+from buddyswitch.env.domain import demand_sys  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.repos import demands  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
+from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
 
-TRACK_COMMENT_DOMAIN_PATH = ROOT / "scripts" / "env" / "domain" / "track_comments.py"
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
-HANDLER_PATH = ROOT / "tools" / "launcher" / "track_comment_added_handler.py"
+TRACK_COMMENT_DOMAIN_PATH = ROOT / "src" / "buddyswitch" / "env" / "domain" / "track_comments.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+HANDLER_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    return importlib.reload(importlib.import_module(path.stem))
+    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
 
 
 def assert_contains_all(testcase: unittest.TestCase, text: str, expected: tuple[str, ...]) -> None:

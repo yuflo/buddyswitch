@@ -31,15 +31,14 @@ from tests.support.fake_cdp import (
 from tests.support.cli import write_executable
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
-LAUNCHER = ROOT / "tools" / "launcher"
+LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-import daemon_state  # noqa: E402
-from runtime_kernel import protocol  # noqa: E402
+from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.runtime_kernel import protocol  # noqa: E402
 
-PROXY = ROOT / "tools" / "launcher" / "chrome_devtools_cockpit_proxy.py"
-DAEMON_CORE_PATH = ROOT / "tools" / "launcher" / "daemon_core.py"
-DAEMON_MAILBOX_PATH = ROOT / "tools" / "launcher" / "daemon_mailbox.py"
+PROXY = ROOT / "src" / "buddyswitch" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
 MODULE_COUNTER = count()
 SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening many more."
 HARD_PAGE_BLOCK = (
@@ -141,7 +140,7 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
 
 
 def load_module(path: Path) -> Any:
-    return importlib.reload(importlib.import_module(path.stem))
+    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
 
 
 from tests.support.processes import ResourceLedger

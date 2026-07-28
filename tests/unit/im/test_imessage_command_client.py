@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from tools.launcher import imessage_channel  # noqa: E402
+from buddyswitch.launcher import imessage_channel  # noqa: E402
 
 
 def _create_chat_db(path: Path, *, chat_id: int) -> None:

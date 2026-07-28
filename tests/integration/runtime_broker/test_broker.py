@@ -25,14 +25,13 @@ from tests.support.fake_cdp import FakeCdpServer, write_fake_chrome
 from tests.support.processes import ResourceLedger
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-import runtime_kernel.client as runtime_client  # noqa: E402
-from runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+import buddyswitch.runtime_kernel.client as runtime_client  # noqa: E402
+from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
@@ -253,7 +252,7 @@ class RuntimeBrokerTests(unittest.TestCase):
         return calls
 
     def test_browser_open_url_method_is_removed(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)
         instance_json = self._instance_json()
 
@@ -297,12 +296,12 @@ class RuntimeBrokerTests(unittest.TestCase):
             "E_RUNTIME_BROKER_PROTOCOL",
         )
         dispatcher_source = (
-            ROOT / "scripts/runtime_kernel/dispatcher.py"
+            ROOT / "src/buddyswitch/runtime_kernel/dispatcher.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn('"demand.ingress.resolve"', dispatcher_source)
 
     def test_browser_acquire_method_has_structured_contract(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)
         instance_json = self._instance_json()
 
@@ -320,7 +319,7 @@ class RuntimeBrokerTests(unittest.TestCase):
         self.assertEqual([call["method"] for call in calls], ["acquire"])
 
     def test_browser_status_method_has_structured_contract(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)
         instance_json = self._instance_json()
 
@@ -335,7 +334,7 @@ class RuntimeBrokerTests(unittest.TestCase):
         self.assertEqual([call["method"] for call in calls], ["status"])
 
     def test_browser_release_method_has_structured_contract(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)
         instance_json = self._instance_json()
 
@@ -401,7 +400,7 @@ class RuntimeBrokerTests(unittest.TestCase):
         self.assertEqual(self._error_boundary(response), "active-instance")
 
     def test_browser_open_url_is_rejected_before_url_validation(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         calls = self._install_browser_contract_fakes(dispatcher)
         instance_json = self._instance_json()
 
@@ -562,7 +561,10 @@ class RuntimeBrokerTests(unittest.TestCase):
             lock_sessions.append(session)
             yield
 
-        with patch("turn_runtime._hold_product_runtime_lock", side_effect=fake_lock):
+        with patch(
+            "buddyswitch.runtime_support.turn_runtime._hold_product_runtime_lock",
+            side_effect=fake_lock,
+        ):
             summarized = self._dispatch(
                 method="env.tool",
                 params={"tool": "context", "action": "summarize", "args": {}},
@@ -584,8 +586,8 @@ class RuntimeBrokerTests(unittest.TestCase):
         self.assertEqual([session["actor_id"] for session in lock_sessions], [expected_actor_id, expected_actor_id])
         self.assertTrue(all(session["instance_json"] == instance_json for session in lock_sessions))
 
-    def test_env_tool_dispatch_exports_repo_root_from_manifest_path(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+    def test_env_tool_dispatch_does_not_publish_retired_repo_root(self) -> None:
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         instance_json = self._instance_json()
         active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
         session = dispatcher.RuntimeBrokerSession(instance_json_path=instance_json, manifest_path=MANIFEST)
@@ -609,33 +611,27 @@ class RuntimeBrokerTests(unittest.TestCase):
             "deadline_ms": 35000,
         }
 
-        with (
-            patch("runtime_kernel.dispatcher.dispatch_env_tool_request", side_effect=fake_dispatch_env_tool_request),
-            patch.dict(os.environ, {"BUDDYSWITCH_REPO_ROOT": ""}, clear=False),
+        os.environ.pop("BUDDYSWITCH_REPO_ROOT", None)
+        with patch(
+            "buddyswitch.runtime_kernel.dispatcher.dispatch_env_tool_request",
+            side_effect=fake_dispatch_env_tool_request,
         ):
             response = dispatcher.dispatch_runtime_request(request, session)
 
         self.assertTrue(response["ok"], msg=response)
-        self.assertEqual(seen_repo_roots, [str(ROOT.resolve(strict=False))])
+        self.assertEqual(seen_repo_roots, [None])
 
-    def test_env_tool_dispatch_uses_explicit_repo_root_with_projected_manifest(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+    def test_env_tool_dispatch_accepts_projected_manifest_without_source_locator(self) -> None:
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         instance_json = self._instance_json()
         active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
         projected_workspace = self.workspace.path("projected-runtime-workspace")
         projected_manifest = projected_workspace / "buddyswitch" / "manifest.toml"
         projected_manifest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(MANIFEST, projected_manifest)
-        fake_source_root = self.workspace.path("source-checkout")
-        fake_launcher_dir = fake_source_root / "tools" / "launcher"
-        fake_launcher_dir.mkdir(parents=True, exist_ok=True)
-        (fake_launcher_dir / "daemon_core.py").write_text("# fake daemon_core for repo-root routing\n", encoding="utf-8")
-        self.assertFalse((projected_workspace / "tools" / "launcher").exists())
-
         session = dispatcher.RuntimeBrokerSession(
             instance_json_path=instance_json,
             manifest_path=projected_manifest,
-            repo_root_path=fake_source_root,
         )
         seen_repo_roots: list[str | None] = []
 
@@ -657,14 +653,16 @@ class RuntimeBrokerTests(unittest.TestCase):
             "deadline_ms": 35000,
         }
 
-        with (
-            patch("runtime_kernel.dispatcher.dispatch_env_tool_request", side_effect=fake_dispatch_env_tool_request),
-            patch.dict(os.environ, {"BUDDYSWITCH_REPO_ROOT": ""}, clear=False),
+        os.environ.pop("BUDDYSWITCH_REPO_ROOT", None)
+        with patch(
+            "buddyswitch.runtime_kernel.dispatcher.dispatch_env_tool_request",
+            side_effect=fake_dispatch_env_tool_request,
         ):
             response = dispatcher.dispatch_runtime_request(request, session)
 
         self.assertTrue(response["ok"], msg=response)
-        self.assertEqual(seen_repo_roots, [str(fake_source_root.resolve(strict=False))])
+        self.assertEqual(seen_repo_roots, [None])
+        self.assertFalse(hasattr(session, "repo_root_path"))
 
     def test_rejects_wrong_actor_id(self) -> None:
         instance_json = self._instance_json()
@@ -796,8 +794,8 @@ class RuntimeBrokerTests(unittest.TestCase):
 
 class RuntimeBrokerServerIsolationTests(unittest.TestCase):
     def _start_server(self, dispatch_fn, *, max_workers: int = 1):
-        protocol = _require_module("runtime_kernel.protocol")
-        server_module = _require_module("runtime_kernel.server")
+        protocol = _require_module("buddyswitch.runtime_kernel.protocol")
+        server_module = _require_module("buddyswitch.runtime_kernel.server")
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
@@ -937,7 +935,7 @@ class RuntimeBrokerServerIsolationTests(unittest.TestCase):
 
 class RuntimeBrokerClientV2Tests(unittest.TestCase):
     def _serve_once(self, handler):
-        protocol = _require_module("runtime_kernel.protocol")
+        protocol = _require_module("buddyswitch.runtime_kernel.protocol")
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         socket_path = Path(temp.name) / "runtime-broker.sock"
@@ -964,7 +962,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         return protocol, socket_path, thread, captured
 
     def test_client_sends_v2_request_id_deadline_and_reads_result(self) -> None:
-        client = _require_module("runtime_kernel.client")
+        client = _require_module("buddyswitch.runtime_kernel.client")
 
         def handler(request):
             return self.protocol.success_response(request["request_id"], {"ok": True, "value": 1})
@@ -992,7 +990,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertNotIn("payload", outgoing)
 
     def test_client_preserves_structured_error_fields(self) -> None:
-        client = _require_module("runtime_kernel.client")
+        client = _require_module("buddyswitch.runtime_kernel.client")
 
         def handler(request):
             return self.protocol.error_response(
@@ -1024,8 +1022,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertRegex(raised.exception.details.get("request_id", ""), r"^req-[0-9a-f-]+")
 
     def test_client_retries_read_only_env_tool_once_after_transport_reset(self) -> None:
-        protocol = _require_module("runtime_kernel.protocol")
-        client = _require_module("runtime_kernel.client")
+        protocol = _require_module("buddyswitch.runtime_kernel.protocol")
+        client = _require_module("buddyswitch.runtime_kernel.client")
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         socket_path = Path(temp.name) / "runtime-broker.sock"
@@ -1069,7 +1067,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertNotEqual(captured[0]["request_id"], captured[1]["request_id"])
 
     def test_client_does_not_retry_persist_without_idempotency_key(self) -> None:
-        client = _require_module("runtime_kernel.client")
+        client = _require_module("buddyswitch.runtime_kernel.client")
         reset_error = client.RuntimeBrokerError(
             "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
             "transport reset",
@@ -1089,7 +1087,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertEqual(request_once.call_count, 1)
 
     def test_client_stale_socket_reports_launcher_reopen_without_self_ensure(self) -> None:
-        client = _require_module("runtime_kernel.client")
+        client = _require_module("buddyswitch.runtime_kernel.client")
         with patch.dict(
             os.environ,
             {
@@ -1111,7 +1109,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         )
 
     def test_client_retries_read_only_env_tool_once_without_ensure(self) -> None:
-        client = _require_module("runtime_kernel.client")
+        client = _require_module("buddyswitch.runtime_kernel.client")
         stale_error = client.RuntimeBrokerError(
             "E_RUNTIME_BROKER_STALE_SOCKET",
             "stale socket",
@@ -1146,8 +1144,8 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertEqual(request_once.call_count, 2)
 
     def test_client_does_not_retry_prepare_after_transport_reset(self) -> None:
-        protocol = _require_module("runtime_kernel.protocol")
-        client = _require_module("runtime_kernel.client")
+        protocol = _require_module("buddyswitch.runtime_kernel.protocol")
+        client = _require_module("buddyswitch.runtime_kernel.client")
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         socket_path = Path(temp.name) / "runtime-broker.sock"
@@ -1182,7 +1180,7 @@ class RuntimeBrokerClientV2Tests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
 
     def test_client_does_not_retry_mutating_env_tool_after_transport_reset(self) -> None:
-        client = _require_module("runtime_kernel.client")
+        client = _require_module("buddyswitch.runtime_kernel.client")
         reset_error = client.RuntimeBrokerError(
             "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
             "transport reset",
@@ -1230,7 +1228,7 @@ class RuntimeBrokerPersistIdempotencyTests(unittest.TestCase):
         return instance_json
 
     def test_persist_without_idempotency_key_is_rejected_before_commit(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         request = {
             "protocol": BROKER_V2_PROTOCOL,
             "request_id": "req-persist",
@@ -1285,7 +1283,7 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
             "state_changed": False,
             "correctable_fields": ["logical_name"],
         }
-        with patch("runtime_kernel.broker.coordinator.dispatch_with_coordination", return_value=dispatched_payload):
+        with patch("buddyswitch.runtime_kernel.broker.coordinator.dispatch_with_coordination", return_value=dispatched_payload):
             envelope = runtime_broker.dispatch_runtime_request(
                 request=request,
                 instance_json_path=instance_json,
@@ -1302,7 +1300,7 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
         self.assertEqual(envelope.get("correctable_fields"), ["logical_name"])
 
     def test_active_identity_mismatch_errors_are_structured_non_retriable(self) -> None:
-        dispatcher = _require_module("runtime_kernel.dispatcher")
+        dispatcher = _require_module("buddyswitch.runtime_kernel.dispatcher")
         instance_json = self.workspace.path("instance.json")
         instance_json.write_text(
             json.dumps(
@@ -1342,8 +1340,8 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
                 self.assertIn(boundary, {"active-instance", "active-role"})
 
     def test_runtime_broker_v2_stays_local_unix_socket_gateway(self) -> None:
-        server_module = _require_module("runtime_kernel.server")
-        source_root = ROOT / "scripts" / "runtime_kernel"
+        server_module = _require_module("buddyswitch.runtime_kernel.server")
+        source_root = ROOT / "src" / "buddyswitch" / "runtime_kernel"
         text = "\n".join(path.read_text(encoding="utf-8") for path in sorted(source_root.glob("*.py")))
         self.assertNotIn("grpc", text)
         self.assertNotIn("http.server", text)

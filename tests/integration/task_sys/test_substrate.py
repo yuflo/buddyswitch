@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from env.domain import task_read, task_sys
-from env.domain.identity import ActorIdentityProfile, IdentityRef
+from buddyswitch.env.domain import task_read, task_sys
+from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

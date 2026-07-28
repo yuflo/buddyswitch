@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from env.domain import task_sys
-from env.domain.identity import ActorIdentityProfile, IdentityRef
-from env.repos import runtime_files
-from env.tools.task_sys.tool import DEFINITION
+from buddyswitch.env.domain import task_sys
+from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.tools.task_sys.tool import DEFINITION
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 
@@ -353,7 +353,7 @@ class TaskGoalBindingContractTests(RuntimeWorkspaceTestCase):
         self.assertFalse(hasattr(task_sys, "record_task_close"))
         self.assertFalse(hasattr(task_sys, "record_side_need_parent"))
 
-        from env.tool_runtime import task_goal_runtime_protocol
+        from buddyswitch.env.tool_runtime import task_goal_runtime_protocol
 
         self.assertEqual(
             task_goal_runtime_protocol.COMMAND_KEYS,

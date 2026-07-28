@@ -15,16 +15,15 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-from env.tool_runtime import registry  # noqa: E402
+from buddyswitch.env.tool_runtime import registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
 
 class EnvNativeMcpProjectionTests(unittest.TestCase):
     def setUp(self) -> None:
         registry.clear_cache()
-        self.native_mcp = importlib.import_module("env.tool_runtime.native_mcp")
+        self.native_mcp = importlib.import_module("buddyswitch.env.tool_runtime.native_mcp")
 
     def tearDown(self) -> None:
         registry.clear_cache()
@@ -115,18 +114,18 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
         script = """
 import json
 import sys
-from env.tool_runtime import native_mcp
+from buddyswitch.env.tool_runtime import native_mcp
 
 native_mcp.list_native_tool_specs()
 loaded = sorted(sys.modules)
 print(json.dumps({
-    "private_impl": [name for name in loaded if name.startswith("env.tools.") and "._impl" in name],
-    "domain": [name for name in loaded if name.startswith("env.domain.")],
-    "repos": [name for name in loaded if name.startswith("env.repos.")],
+    "private_impl": [name for name in loaded if name.startswith("buddyswitch.env.tools.") and "._impl" in name],
+    "domain": [name for name in loaded if name.startswith("buddyswitch.env.domain.")],
+    "repos": [name for name in loaded if name.startswith("buddyswitch.env.repos.")],
     "runtime_services": [
         name for name in loaded
-        if name.startswith("runtime_kernel.server")
-        or name.startswith("runtime_kernel.broker")
+        if name.startswith("buddyswitch.runtime_kernel.server")
+        or name.startswith("buddyswitch.runtime_kernel.broker")
         or name.startswith("tools.launcher")
     ],
 }, ensure_ascii=True))
@@ -147,7 +146,7 @@ print(json.dumps({
         self.assertEqual(payload["runtime_services"], [])
 
     def test_projection_discovers_new_tool_package_without_central_manifest(self) -> None:
-        import env.tools  # noqa: WPS433
+        import buddyswitch.env.tools as env_tools  # noqa: WPS433
 
         with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
             temp_tools = Path(temp_dir) / "env" / "tools"
@@ -161,7 +160,7 @@ print(json.dumps({
 
                     from typing import Any
 
-                    from env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
+                    from buddyswitch.env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
 
                     DEFINITION = ToolDefinition(
                         id="probe",
@@ -218,19 +217,19 @@ print(json.dumps({
                 encoding="utf-8",
             )
 
-            original_path = list(env.tools.__path__)
+            original_path = list(env_tools.__path__)
             try:
-                env.tools.__path__.insert(0, str(temp_tools))
+                env_tools.__path__.insert(0, str(temp_tools))
                 registry.clear_cache()
                 names = {spec["name"] for spec in self.native_mcp.list_native_tool_specs()}
             finally:
-                env.tools.__path__[:] = original_path
+                env_tools.__path__[:] = original_path
                 registry.clear_cache()
 
         self.assertIn("probe__inspect", names)
 
-        projection_source = (ROOT / "scripts/env/tool_runtime/native_mcp.py").read_text(encoding="utf-8")
-        server_path = ROOT / "tools/launcher/env_tool_mcp_server.py"
+        projection_source = (ROOT / "src/buddyswitch/env/tool_runtime/native_mcp.py").read_text(encoding="utf-8")
+        server_path = ROOT / "src/buddyswitch/launcher/env_tool_mcp_server.py"
         server_source = server_path.read_text(encoding="utf-8") if server_path.exists() else ""
         combined = projection_source + "\n" + server_source
         for forbidden in ("SHIPPED_TOOLS", "task__current", "message__send", "native_manifest", "tool_pack"):

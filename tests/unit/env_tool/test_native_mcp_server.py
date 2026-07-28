@@ -15,12 +15,11 @@ from unittest.mock import patch
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SERVER = ROOT / "tools" / "launcher" / "env_tool_mcp_server.py"
-SCRIPTS = ROOT / "scripts"
+SERVER = ROOT / "src" / "buddyswitch" / "launcher" / "env_tool_mcp_server.py"
 
 
 def load_server_module():
-    return importlib.reload(importlib.import_module("env_tool_mcp_server"))
+    return importlib.reload(importlib.import_module("buddyswitch.launcher.env_tool_mcp_server"))
 
 
 class EnvNativeMcpServerTests(unittest.TestCase):

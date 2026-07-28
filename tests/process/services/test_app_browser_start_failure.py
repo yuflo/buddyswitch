@@ -5,10 +5,10 @@ import os
 from pathlib import Path
 import time
 
-import app_server
-import browser_runtime_manager
+from buddyswitch.launcher import app_server
+from buddyswitch.launcher import browser_runtime_manager
 import pytest
-from runtime_kernel import process_identity
+from buddyswitch.runtime_kernel import process_identity
 from tests.support.python import executable_python_source
 from tests.support.network import open_loopback_listener
 from tests.support.cli import write_executable

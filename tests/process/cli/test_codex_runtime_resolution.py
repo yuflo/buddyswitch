@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.support.processes import run_process
-from tools.launcher import codex_runtime
+from buddyswitch.launcher import codex_runtime
 
 
 class CodexRuntimeTests(unittest.TestCase):

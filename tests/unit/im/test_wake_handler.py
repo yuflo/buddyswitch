@@ -6,11 +6,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-import demand_sys_daemon_adapter
-import im_wake_handler
-from env.repos import identities as identity_repo
-from env.repos import runtime_files
-from env.services import messages as message_service
+from buddyswitch.launcher import demand_sys_daemon_adapter
+from buddyswitch.launcher import im_wake_handler
+from buddyswitch.env.repos import identities as identity_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.services import messages as message_service
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

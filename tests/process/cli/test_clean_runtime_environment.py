@@ -15,8 +15,7 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-ACTOR_ENVIRONMENT = ROOT / "tools" / "launcher" / "actor_environment.py"
-CODEX_CONFIG = ROOT / "tools" / "launcher" / "codex_config.py"
+ACTOR_BUILD_MODULE = "buddyswitch.application.entrypoints.actor_build"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
 
@@ -41,9 +40,10 @@ class CleanRuntimeEnvironmentTests(unittest.TestCase):
         completed = run_process(
             [
                 PYTHON,
-                str(ACTOR_ENVIRONMENT),
-                "--repo-root",
-                str(ROOT),
+                "-m",
+                ACTOR_BUILD_MODULE,
+                "--project-source",
+                str(ROOT / "projects" / "app"),
                 "--shared-root",
                 str(shared_root),
                 "--actor-id",
@@ -70,15 +70,12 @@ class CleanRuntimeEnvironmentTests(unittest.TestCase):
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "private" / "pm").exists())
         self.assertFalse((workspace_dir / "buddyswitch" / "local" / "private" / "pm").is_symlink())
 
-        required = (
-            "scripts/env/client.py",
-            "scripts/runtime_kernel/broker.py",
-            "scripts/turn_runtime.py",
-            "buddyswitch/manifest.toml",
-            "framework/contracts/pm.md",
+        self.assertEqual(
+            {path.name for path in workspace_dir.iterdir()},
+            {".agents", "AGENTS.md", "private", "projects"},
         )
-        for relative in required:
-            self.assertTrue((workspace_dir / relative).exists(), msg=relative)
+        for forbidden in ("scripts", "tools", "framework", "src", "tests", "buddyswitch"):
+            self.assertFalse((workspace_dir / forbidden).exists(), msg=forbidden)
 
         self.assertEqual(
             (workspace_dir / "projects" / "app").resolve(strict=True),
@@ -121,9 +118,8 @@ class CleanRuntimeEnvironmentTests(unittest.TestCase):
                 "rg",
                 "-n",
                 "do not run rg|exclude buddyswitch/objects|retry without sandbox|always use rg --glob|command blacklist|phrase-to-tool",
-                "tools/launcher/assets/roles",
-                "buddyswitch/skills",
-                "scripts",
+                "src/buddyswitch/launcher/assets/roles",
+                "src/buddyswitch/skills",
                 "-g",
                 "!tests/**",
             ],
@@ -148,10 +144,12 @@ class CleanRuntimeEnvironmentTests(unittest.TestCase):
         patch = run_process(
             [
                 PYTHON,
-                str(CODEX_CONFIG),
+                "-m",
+                ACTOR_BUILD_MODULE,
+                "patch-config",
                 "--config",
                 str(config_path),
-                "--repo-root",
+                "--source-root",
                 str(ROOT),
                 "--shared-root",
                 str(shared_root),

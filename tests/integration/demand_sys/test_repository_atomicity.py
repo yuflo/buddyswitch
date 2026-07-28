@@ -11,8 +11,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from env.repos import demands
-from tests.support.paths import REPO_ROOT, SCRIPTS_ROOT
+from buddyswitch.env.repos import demands
+from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
@@ -26,10 +26,7 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
 
     def _child_env(self) -> dict[str, str]:
         env = os.environ.copy()
-        python_paths = [str(SCRIPTS_ROOT), str(REPO_ROOT)]
-        if env.get("PYTHONPATH"):
-            python_paths.append(env["PYTHONPATH"])
-        env["PYTHONPATH"] = os.pathsep.join(python_paths)
+        env.pop("PYTHONPATH", None)
         return env
 
     def test_absent_actor_state_loads_one_empty_schema_v5_aggregate(self) -> None:
@@ -149,7 +146,7 @@ from pathlib import Path
 import sys
 import time
 
-from env.repos import demands
+from buddyswitch.env.repos import demands
 
 actor_target = {"actor_id": "act-pm-demand-repo", "role_id": "pm"}
 demand_id = sys.argv[1]

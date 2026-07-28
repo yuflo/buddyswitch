@@ -11,14 +11,17 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-from env.repos import artifacts as artifact_repo  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.integration.env_tool._artifact_env_tool_case import ArtifactEnvToolCase
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -242,7 +245,7 @@ class ArtifactRelationTests(ArtifactEnvToolCase):
         self.assertTrue(added_update.get("ok"), msg=added_update)
         update_id = str(added_update.get("update_id") or "")
         if not update_id:
-            track = env_store.get_track("track-art-rel-incoming")
+            track = track_repo.get_track("track-art-rel-incoming")
             self.assertIsInstance(track, dict, msg=added_update)
             assert isinstance(track, dict)
             updates = [row for row in track.get("updates", []) if isinstance(row, dict)]

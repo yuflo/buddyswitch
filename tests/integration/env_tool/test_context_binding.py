@@ -14,18 +14,21 @@ from unittest.mock import patch
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
-import env_legacy_store as env_store  # noqa: E402
-import runtime_kernel.broker as runtime_broker  # noqa: E402
-from env.domain import task_sys  # noqa: E402
-from env.repos import runtime_files  # noqa: E402
-from env.services import messages as message_service  # noqa: E402
-from env.tool_runtime import context as runtime_context  # noqa: E402
-from env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.env.repos import artifacts as artifact_repo
+from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.repos import track_comments as track_comment_repo
+from buddyswitch.env.repos import tracks as track_repo
+from tests.support import object_builders
+import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+from buddyswitch.env.domain import task_sys  # noqa: E402
+from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
+from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "buddyswitch" / "manifest.toml"
+MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 _EXPECTED_TOOLS = {"demand_sys", "task_sys", "track", "artifact", "context", "evidence", "search", "message"}
 
@@ -182,14 +185,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
 
     def _seed_context_state(self) -> None:
         actor_id = self._runtime_actor_id(role="dev", label="act-dev-context")
-        env_store.create_track(
+        object_builders.create_track(
             "track-context-active",
             "Context Track",
             owner_identity=actor_id,
             outcome="Context outcome",
             now={"next": "seed", "blocker": None},
         )
-        env_store.create_artifact_revision(
+        object_builders.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r1",
             title="Context Artifact v1",
             summary="artifact summary v1",
@@ -200,14 +203,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             authors=["dev"],
             source_refs=[{"type": "note", "label": "context"}],
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id="track-context-active",
             artifact_id="art-task-dev-context-note-r1",
             label="Context",
             from_role="dev",
             summary="artifact summary v1",
         )
-        env_store.create_artifact_revision(
+        object_builders.create_artifact_revision(
             artifact_id="art-task-dev-context-note-r2",
             title="Context Artifact v2",
             summary="artifact summary v2",
@@ -218,7 +221,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             authors=None,
             source_refs=[{"type": "note", "label": "context"}],
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id="track-context-active",
             artifact_id="art-task-dev-context-note-r2",
             label="Context",
@@ -226,7 +229,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             summary="artifact summary v2",
         )
 
-        env_store.create_track(
+        object_builders.create_track(
             "track-context-archived",
             "Archived Track",
             owner_identity=self._runtime_actor_id(role="pm", label="act-pm-context"),
@@ -261,7 +264,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             source_type="test.context.active",
             track_id="track-context-active",
         )
-        archived_artifact = env_store.create_artifact_revision(
+        archived_artifact = object_builders.create_artifact_revision(
             artifact_id="art-task-dev-archived-r1",
             title="Archived Artifact",
             summary="archived",
@@ -272,14 +275,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             authors=["dev"],
             source_refs=[{"type": "note", "label": "context"}],
         )
-        env_store.publish_track_material(
+        object_builders.publish_track_material(
             track_id="track-context-archived",
             artifact_id=str(archived_artifact["id"]),
             label="Archived",
             from_role="dev",
             summary="archived",
         )
-        env_store.update_track(
+        track_repo.update_track(
             "track-context-archived",
             {"archived_at": "2026-05-18T10:00:00+08:00"},
         )
@@ -498,7 +501,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
 
     def test_context_summarize_track_filter_excludes_unpublished_owner_drafts(self) -> None:
         self._seed_context_state()
-        draft = env_store.create_artifact_revision(
+        draft = object_builders.create_artifact_revision(
             artifact_id="art-context-owner-draft-untracked",
             title="Owner Draft",
             summary="private draft",
@@ -993,7 +996,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(source.get("access"), "write")
         self.assertIs(source.get("can_write_source"), True)
 
-        with patch("env.tools.context._impl.env_profiles.require_env_profile", side_effect=RuntimeError("boom")):
+        with patch("buddyswitch.env.tools.context._impl.env_profiles.require_env_profile", side_effect=RuntimeError("boom")):
             rejected = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_CONTEXT_SOURCE_WORKSPACE")

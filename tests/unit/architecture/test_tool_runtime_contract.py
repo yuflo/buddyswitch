@@ -13,19 +13,16 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-SCRIPTS = ROOT / "scripts"
 
 
 SHIPPED_TOOLS: dict[str, set[str]] = {
     "artifact": {"attach_file", "create_revision", "get", "get_attachment", "list", "list_attachments", "update_metadata"},
     "context": {"get", "list_sources", "summarize"},
     "demand_sys": {
-        "cancel",
         "complete",
-        "create",
         "get",
         "list",
-        "revise",
+        "resolve_inbound",
     },
     "evidence": {"approve_downgrade", "issue_browser"},
     "message": {"contacts", "conversation", "get", "list", "send"},
@@ -58,9 +55,9 @@ LEGACY_SHARED_RUNTIME_FILES = {
 }
 
 LEGACY_TOOL_PUBLIC_FILES = {"contract.py", "semantics.py", "handlers.py", "cli.py", "service.py"}
-FORBIDDEN_IMPORT_PREFIXES = ("env.repos", "env.domain", "env_manifest", "runtime_kernel")
+FORBIDDEN_IMPORT_PREFIXES = ("buddyswitch.env.repos", "buddyswitch.env.domain", "env_manifest", "runtime_kernel")
 FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS = {
-    f"env.tools.{name}"
+    f"buddyswitch.env.tools.{name}"
     for name in (
         "catalog",
         "dispatch",
@@ -77,7 +74,7 @@ FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS = {
 
 class ToolRuntimeArchitectureTests(unittest.TestCase):
     def _tool_dir(self, tool: str) -> Path:
-        return ROOT / "scripts" / "env" / "tools" / tool
+        return ROOT / "src" / "buddyswitch" / "env" / "tools" / tool
     def test_shipped_tools_expose_single_public_entrypoint(self) -> None:
         for tool, expected_actions in sorted(SHIPPED_TOOLS.items()):
             with self.subTest(tool=tool):
@@ -87,7 +84,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 for file_name in sorted(LEGACY_TOOL_PUBLIC_FILES):
                     self.assertFalse((package_dir / file_name).exists(), msg=f"legacy file still exists: {package_dir / file_name}")
 
-                module = importlib.import_module(f"env.tools.{tool}.tool")
+                module = importlib.import_module(f"buddyswitch.env.tools.{tool}.tool")
                 definition = getattr(module, "DEFINITION", None)
                 invoke = getattr(module, "invoke", None)
                 self.assertTrue(callable(invoke), msg=f"{tool}.tool.invoke must be callable")
@@ -125,7 +122,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                                 violations.append(f"{rel}:{node.lineno}: import {name}")
                             if name in FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS:
                                 violations.append(f"{rel}:{node.lineno}: import {name}")
-                            if name.startswith("env.tools."):
+                            if name.startswith("buddyswitch.env.tools."):
                                 parts = name.split(".")
                                 if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
                                     violations.append(f"{rel}:{node.lineno}: import sibling tool {name}")
@@ -135,11 +132,14 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                             violations.append(f"{rel}:{node.lineno}: from {module} import ...")
                         if module in FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS:
                             violations.append(f"{rel}:{node.lineno}: from {module} import ...")
-                        if module == "env.tools":
+                        if module == "buddyswitch.env.tools":
                             for alias in node.names:
                                 if alias.name in SHIPPED_TOOLS and alias.name != tool:
-                                    violations.append(f"{rel}:{node.lineno}: from env.tools import sibling {alias.name}")
-                        if module.startswith("env.tools."):
+                                    violations.append(
+                                        f"{rel}:{node.lineno}: "
+                                        f"from buddyswitch.env.tools import sibling {alias.name}"
+                                    )
+                        if module.startswith("buddyswitch.env.tools."):
                             parts = module.split(".")
                             if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
                                 violations.append(f"{rel}:{node.lineno}: from sibling tool module {module} import ...")
@@ -178,7 +178,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                             violations.append(f"{rel}: contains forbidden storage literal: {literal}")
         self.assertEqual(violations, [], msg="\n".join(violations))
     def test_registry_projects_catalog_semantics_payload_fields_and_cli_actions_from_definitions(self) -> None:
-        from env.tool_runtime import registry
+        from buddyswitch.env.tool_runtime import registry
 
         tools_desc = registry.env_tools_description()
         semantics = registry.operation_semantics()
@@ -196,11 +196,11 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 )
                 self.assertIn(f"{tool}.{action}", semantics)
     def test_definition_validation_rejects_incomplete_input_contracts(self) -> None:
-        from env.tool_runtime.definition import ActionDefinition
-        from env.tool_runtime.definition import MUTATES_NONE
-        from env.tool_runtime.definition import TASK_REQUIREMENT_FREE
-        from env.tool_runtime.definition import ToolDefinition
-        from env.tool_runtime.definition import validate_definition
+        from buddyswitch.env.tool_runtime.definition import ActionDefinition
+        from buddyswitch.env.tool_runtime.definition import MUTATES_NONE
+        from buddyswitch.env.tool_runtime.definition import TASK_REQUIREMENT_FREE
+        from buddyswitch.env.tool_runtime.definition import ToolDefinition
+        from buddyswitch.env.tool_runtime.definition import validate_definition
 
         def _definition_for(schema: dict[str, object]) -> ToolDefinition:
             return ToolDefinition(
@@ -317,7 +317,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 )
             )
     def test_legacy_env_tools_runtime_surfaces_are_removed(self) -> None:
-        tools_root = ROOT / "scripts" / "env" / "tools"
+        tools_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
         for file_name in sorted(LEGACY_SHARED_RUNTIME_FILES):
             self.assertFalse((tools_root / file_name).exists(), msg=f"legacy shared file still exists: {file_name}")
         for tool in sorted(SHIPPED_TOOLS):

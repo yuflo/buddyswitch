@@ -1,0 +1,274 @@
+schema_version = 1
+
+[env]
+id = "buddyswitch"
+label = "BuddySwitch Env"
+
+[[skills]]
+id = "market-source-seed-atlas"
+path = "skills/market/market-source-seed-atlas"
+
+[[skills]]
+id = "market-search-operator-builder"
+path = "skills/market/market-search-operator-builder"
+
+[[skills]]
+id = "source-quality-rater"
+path = "skills/market/source-quality-rater"
+
+[[skills]]
+id = "data-triangulator"
+path = "skills/market/data-triangulator"
+
+[[skills]]
+id = "hallucination-guard"
+path = "skills/market/hallucination-guard"
+
+[[skills]]
+id = "weak-signal-scout"
+path = "skills/market/weak-signal-scout"
+
+[[skills]]
+id = "workaround-miner"
+path = "skills/market/workaround-miner"
+
+[[skills]]
+id = "market-tension-finder"
+path = "skills/market/market-tension-finder"
+
+[[skills]]
+id = "customer-voice-mining"
+path = "skills/market/customer-voice-mining"
+
+[[skills]]
+id = "segment-map-builder"
+path = "skills/market/segment-map-builder"
+
+[[skills]]
+id = "icp-scorer"
+path = "skills/market/icp-scorer"
+
+[[skills]]
+id = "positioning-message-map"
+path = "skills/market/positioning-message-map"
+
+[[skills]]
+id = "growth-bottleneck-diagnoser"
+path = "skills/market/growth-bottleneck-diagnoser"
+
+[[skills]]
+id = "channel-strategy-mapper"
+path = "skills/market/channel-strategy-mapper"
+
+[[skills]]
+id = "experiment-design-reviewer"
+path = "skills/market/experiment-design-reviewer"
+
+[[skills]]
+id = "read-product-context"
+path = "skills/pm/read-product-context"
+
+[[skills]]
+id = "synthesize-cross-functional-inputs"
+path = "skills/pm/synthesize-cross-functional-inputs"
+
+[[skills]]
+id = "frame-product-direction"
+path = "skills/pm/frame-product-direction"
+
+[[skills]]
+id = "define-scope"
+path = "skills/pm/define-scope"
+
+[[skills]]
+id = "write-requirements"
+path = "skills/pm/write-requirements"
+
+[[skills]]
+id = "write-acceptance-criteria"
+path = "skills/pm/write-acceptance-criteria"
+
+[[skills]]
+id = "make-product-decision"
+path = "skills/pm/make-product-decision"
+
+[[skills]]
+id = "decide-from-proof"
+path = "skills/pm/decide-from-proof"
+
+[[skills]]
+id = "triage-track"
+path = "skills/pm/triage-track"
+
+[[skills]]
+id = "sequence-product-work"
+path = "skills/pm/sequence-product-work"
+
+[[skills]]
+id = "track-tool"
+path = "skills/shared/track-tool"
+
+[[skills]]
+id = "artifact-tool"
+path = "skills/shared/artifact-tool"
+
+[[skills]]
+id = "shape-prototype"
+path = "skills/design/shape-prototype"
+
+[[skills]]
+id = "enter-dev-workspace"
+path = "skills/dev/enter-dev-workspace"
+
+[[skills]]
+id = "read-implementation-context"
+path = "skills/dev/read-implementation-context"
+
+[[skills]]
+id = "handle-empty-source-root"
+path = "skills/dev/handle-empty-source-root"
+
+[[skills]]
+id = "plan-thin-slice-implementation"
+path = "skills/dev/plan-thin-slice-implementation"
+
+[[skills]]
+id = "implement-scoped-change"
+path = "skills/dev/implement-scoped-change"
+
+[[skills]]
+id = "debug-regression"
+path = "skills/dev/debug-regression"
+
+[[skills]]
+id = "select-local-verification"
+path = "skills/dev/select-local-verification"
+
+[[skills]]
+id = "request-dev-code-review"
+path = "skills/dev/request-dev-code-review"
+
+[[skills]]
+id = "handle-review-feedback"
+path = "skills/dev/handle-review-feedback"
+
+[[skills]]
+id = "finish-dev-change"
+path = "skills/dev/finish-dev-change"
+
+[[skills]]
+id = "pressure-test-dev-skill"
+path = "skills/dev/pressure-test-dev-skill"
+
+[[skills]]
+id = "parallelize-independent-dev-work"
+path = "skills/dev/parallelize-independent-dev-work"
+
+[[skills]]
+id = "write-implementation-report"
+path = "skills/dev/write-implementation-report"
+
+[[skills]]
+id = "prepare-review-readiness"
+path = "skills/dev/prepare-review-readiness"
+
+[[skills]]
+id = "smoke-test"
+path = "skills/test/smoke-test"
+
+[[skills]]
+id = "demand-triage"
+path = "skills/shared/demand-triage"
+
+[[skills]]
+id = "demand-orchestration"
+path = "skills/shared/demand-orchestration"
+
+[[roles]]
+id = "market"
+label = "Market"
+scope = "Research demand, users, and competition."
+skills = [
+  "market-source-seed-atlas",
+  "market-search-operator-builder",
+  "source-quality-rater",
+  "data-triangulator",
+  "hallucination-guard",
+  "weak-signal-scout",
+  "workaround-miner",
+  "market-tension-finder",
+  "customer-voice-mining",
+  "segment-map-builder",
+  "icp-scorer",
+  "positioning-message-map",
+  "growth-bottleneck-diagnoser",
+  "channel-strategy-mapper",
+  "experiment-design-reviewer",
+  "track-tool",
+  "artifact-tool",
+  "demand-triage",
+  "demand-orchestration",
+]
+artifact_templates = ["brief"]
+
+[[roles]]
+id = "pm"
+label = "PM"
+scope = "Own product iteration and track progression."
+skills = [
+  "read-product-context",
+  "synthesize-cross-functional-inputs",
+  "frame-product-direction",
+  "define-scope",
+  "write-requirements",
+  "write-acceptance-criteria",
+  "make-product-decision",
+  "decide-from-proof",
+  "triage-track",
+  "sequence-product-work",
+  "track-tool",
+  "artifact-tool",
+  "demand-triage",
+  "demand-orchestration",
+]
+artifact_templates = ["brief", "decision", "note"]
+
+[[roles]]
+id = "design"
+label = "Design"
+scope = "Shape UI/UX prototype direction and design artifact outcomes."
+skills = ["shape-prototype", "track-tool", "artifact-tool", "demand-triage", "demand-orchestration"]
+artifact_templates = ["design", "brief"]
+
+[[roles]]
+id = "dev"
+label = "Dev"
+scope = "Implement approved scope in project code."
+skills = [
+  "enter-dev-workspace",
+  "read-implementation-context",
+  "handle-empty-source-root",
+  "plan-thin-slice-implementation",
+  "implement-scoped-change",
+  "debug-regression",
+  "select-local-verification",
+  "request-dev-code-review",
+  "handle-review-feedback",
+  "finish-dev-change",
+  "pressure-test-dev-skill",
+  "parallelize-independent-dev-work",
+  "write-implementation-report",
+  "prepare-review-readiness",
+  "track-tool",
+  "artifact-tool",
+  "demand-triage",
+  "demand-orchestration",
+]
+artifact_templates = ["brief", "note"]
+
+[[roles]]
+id = "test"
+label = "Test"
+scope = "Validate behavior and report pass/fail/blocked outcomes."
+skills = ["smoke-test", "track-tool", "artifact-tool", "demand-triage", "demand-orchestration"]
+artifact_templates = ["proof"]
