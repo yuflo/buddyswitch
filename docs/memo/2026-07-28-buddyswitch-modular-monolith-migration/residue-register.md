@@ -37,7 +37,7 @@ Statuses:
 | ID | Current semantic surface after S1 | Owner | Closure proof |
 |---|---|---|---|
 | R-DEMAND-001 | CLOSED — Demand domain/state/adapters/assets/Skills/tests physically aggregated under one Demand root and selected once by application composition | S2 | `02-demand-component-pilot-plan/S2-ACCEPTANCE.md`; one owner/Public/state path and retired Demand paths absent |
-| R-TASK-001 | scattered Task/Goal domain/state/Tool/Daemon/Web/tests | S3 | one Task root and exact Demand Public edge |
+| R-TASK-001 | CONFIRMED — scattered Task/Goal domain/state/Tool/Daemon/Web/tests; exact move and consumer replacement map frozen | S3 | `03-task-goal-boundary-cutover-plan/**`; one Task root and exact acyclic Demand collaboration |
 | R-TRACK-001 | scattered Track/comment/repo/Tool/inbound/Skill/tests | S4 Track | one Track root/assembly |
 | R-ARTIFACT-001 | scattered Artifact/relation/visibility/config/Tool/Skill/tests | S4 Artifact | one Artifact root/assembly |
 | R-COMM-001 | scattered Message/IM/service/Tool/inbound/session/channel/worker/tests | S4 Communication | one Communication root and worker contribution |

@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S2 ACCEPTED; S3 PROPOSED — PREPARATION ONLY
-> Runtime authorization: none; every S1/S2 packet consumed
+> Current state: S0–S2 ACCEPTED; S3 READY
+> Runtime authorization: S3 only through `BS-MM-S3-20260729-01`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -21,7 +21,7 @@ Read:
 | S0 | `00-program-readiness.md` | ACCEPTED |
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
-| S3 | `03-task-goal-boundary-cutover.md` | PROPOSED |
+| S3 | `03-task-goal-boundary-cutover.md` | READY |
 | S4 | `04-independent-component-waves.md` | BLOCKED |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
@@ -72,7 +72,11 @@ activation-first Browser lifecycle prerequisite. The coordinating hub accepted
 the frozen candidate in
 `02-demand-component-pilot-plan/S2-ACCEPTANCE.md`; every S2 implementation and
 repair packet is consumed. S3 source refresh and READY preparation are now
-unlocked, but no S3 execution packet or runtime mutation is authorized.
+unlocked. The hub adopted the S2 quality ratchet, refreshed the current
+Task/Goal source and consumers, passed the affected preservation baseline,
+selected and preflighted the acyclic Task–Demand boundary, and issued the
+structured plan at `03-task-goal-boundary-cutover-plan/README.md`.
+`BS-MM-S3-20260729-01` is the sole current execution authority.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

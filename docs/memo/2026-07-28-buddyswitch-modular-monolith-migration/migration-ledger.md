@@ -4,14 +4,14 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | `28ca25d93b84c0165fa4cd6f92744744c1df5d67` |
+| Evidence baseline | `8db3a07c4cca6423a1e2c789281a813800bfa2a9` |
 | Active stage | S3 — Task and Goal Boundary Cutover |
-| State | PROPOSED — PREPARATION ONLY |
-| Runtime migration authorized | none; every S2 packet is consumed |
+| State | READY |
+| Runtime migration authorized | S3 only through `BS-MM-S3-20260729-01` |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | checkpoint S2, then refresh and READY-review S3; no S3 execution is yet authorized |
+| Next gate | independent executor runs the exact S3 Goal Packet and returns; hub accepts or replans |
 | Current executable truth | S1 one-package runtime plus one physically aggregated, explicitly composed Demand module |
 
 ## Stage ledger
@@ -21,7 +21,7 @@
 | S0 Audit/admission | ACCEPTED | none | migration lead + maintainer | closed |
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
-| S3 Task/Goal | PROPOSED — PREPARATION ONLY | S2 | coordinating hub prepares; executor unassigned | source refresh, consumer trace, preservation baseline and READY review |
+| S3 Task/Goal | READY | S2 | independent executor selected by user; hub retains acceptance | execute `BS-MM-S3-20260729-01` only |
 | S4 Component waves | BLOCKED | S3 | unassigned per lane | frozen host contracts and lane traces |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
@@ -194,6 +194,30 @@ reproduced exactly. `S2-FINAL-F003` and S2 are accepted in
 consumed. S3 preparation is unblocked, but no S3 execution or runtime mutation
 is authorized.
 
+The hub then adopted the S2 delivery ratchet into action-time Goal Packet,
+handoff and testing-skill surfaces at checkpoint
+`8db3a07c4cca6423a1e2c789281a813800bfa2a9`. S3 source refresh found the real
+boundary: Task create needs current Demand resolution while Demand
+orchestration and completion need Task reads. Direct Public imports in both
+directions would preserve a component cycle. D-045 selects a Task-owned input
+port injected by application composition, leaving the source/ownership graph
+acyclic. D-046–D-048 freeze the exact Daemon, Actor Console and Tool-host
+receiving contracts.
+
+The source-bound affected baseline passed as
+`4f91dbd4a7d540f2b4b0853d7e69d4b7` (101 tests, 18 subtests), and exact
+remaining direct consumer/fixture coverage passed as
+`ee6bf076007c400588c7aaccab9c5a12` (228 tests, 287 subtests). The
+non-overlapping combined affected set is 329 tests and 305 subtests. Exact
+clear/resume preservation passed as `1361ebd113804bf8826674b519ec352c`.
+Complete contrary history retains wrong-node run
+`d5c442f630834ac59a908ec3a82abf1a` as no-test exit 4, not evidence. Isolated
+preflight `S3P-b6123b04` proves resolver injection, the acyclic source graph,
+exact interleaved Daemon order, registration-owned command factory, narrow
+Actor Console section, contribution uniqueness and current package/test
+projection. The structured plan and READY review authorize
+`BS-MM-S3-20260729-01`.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -218,6 +242,7 @@ is authorized.
 | 2026-07-29 | S2 | READY — BROWSER LIFECYCLE PREREQUISITE | READY — R1 ACTIVATION-FIRST VERIFICATION | coordinating hub | predecessor produced valid RED and selected implementation but its GREEN-before-reprovision order deadlocked against the runtime guard; predecessor consumed, D-044 recorded and source-read-only R1 issued |
 | 2026-07-29 | S2 | READY — R1 ACTIVATION-FIRST VERIFICATION | ACCEPTED | coordinating hub | exact source/activation identity reproduced; R1 exact, owner, Integration, Process and single frozen FINAL evidence passed; F003 closed and every S2 packet consumed |
 | 2026-07-29 | S3 | BLOCKED | PROPOSED — PREPARATION ONLY | coordinating hub | S2 accepted; source-bound S3 preparation unlocked with no execution packet |
+| 2026-07-29 | S3 | PROPOSED — PREPARATION ONLY | READY | coordinating hub | complete source/consumer trace, affected baseline, final-boundary preflight, implementation plan and Goal Packet reviewed |
 
 ## Checkpoint record
 
@@ -266,10 +291,10 @@ Stop/replan condition:
 
 ```text
 Stage: S3
-Master state: PROPOSED — PREPARATION ONLY
-Goal Packet: none; every S2 packet consumed and no S3 packet exists
+Master state: READY
+Goal Packet: BS-MM-S3-20260729-01
 Execution session: none
-Last hub checkpoint: R1 evidence and current repository identity accepted; S2-FINAL-F003 and S2 closed
-Next action: checkpoint accepted S2, then perform S3 source refresh and READY preparation
+Last hub checkpoint: S3 source refresh, preflight, plan and READY review complete
+Next action: commit/push preparation checkpoint, then hand the exact packet to one independent executor
 No-polling state: NOT_APPLICABLE
 ```

@@ -1,8 +1,8 @@
 # S3 Task and Goal Boundary Cutover Charter
 
-> Current state: PROPOSED — PREPARATION ONLY
+> Current state: READY
 > Entry prerequisite: S2 ACCEPTED
-> Execution authority: none; source refresh and READY review required
+> Execution authority: `BS-MM-S3-20260729-01`
 > Merge unit: one complete Task/Goal owner cutover
 
 ## Acceptance sentence
@@ -30,7 +30,7 @@
 
 ## Proof
 
-- Task create/list/get/cancel/checkpoint;
+- Task create/list/get/cancel plus absence of a generic checkpoint action;
 - native Goal binding/reconciliation/recovery;
 - Demand terminal convergence through Public operations;
 - clear/resume/Daemon recovery;
