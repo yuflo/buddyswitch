@@ -60,7 +60,10 @@ source and includes:
 
 1. exact stage goal and acceptance sentence;
 2. source commit, tracked patch and non-ignored untracked identity;
-3. complete affected pre-mutation preservation evidence;
+3. complete affected pre-mutation preservation evidence and a
+   representation-complete consumer audit covering imports, literals,
+   data-driven IDs, generated names/paths, discovery, activation-dependent
+   subprocesses and package/test projection;
 4. material boundary-contract matrix and representative final-topology
    preflight identities;
 5. declared dependency, build, test and runtime environment identity;

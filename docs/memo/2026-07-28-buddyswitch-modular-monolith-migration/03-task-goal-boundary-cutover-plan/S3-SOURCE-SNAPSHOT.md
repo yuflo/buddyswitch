@@ -1,5 +1,8 @@
 # S3 Formal Source Snapshot
 
+> Historical pre-mutation snapshot. Current partial-candidate identity:
+> `S3-R1-SOURCE-SNAPSHOT.md`.
+
 ## Identity
 
 ```text

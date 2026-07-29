@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S2 ACCEPTED; S3 READY
-> Runtime authorization: S3 only through `BS-MM-S3-20260729-01`
+> Current state: S0–S2 ACCEPTED; S3 READY — R1 COMPLETION
+> Runtime authorization: S3 only through `BS-MM-S3-R1-20260730-01`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -21,7 +21,7 @@ Read:
 | S0 | `00-program-readiness.md` | ACCEPTED |
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
-| S3 | `03-task-goal-boundary-cutover.md` | READY |
+| S3 | `03-task-goal-boundary-cutover.md` | READY — R1 COMPLETION |
 | S4 | `04-independent-component-waves.md` | BLOCKED |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
@@ -76,7 +76,13 @@ unlocked. The hub adopted the S2 quality ratchet, refreshed the current
 Task/Goal source and consumers, passed the affected preservation baseline,
 selected and preflighted the acyclic Task–Demand boundary, and issued the
 structured plan at `03-task-goal-boundary-cutover-plan/README.md`.
-`BS-MM-S3-20260729-01` is the sole current execution authority.
+The initial S3 executor produced a coherent partial candidate and stopped
+correctly when a generated package-discovery consumer was outside the exact
+manifest. Hub review found the missing representation class, a neighboring
+generated router expectation and three candidate proof-quality drifts. The
+initial packet is consumed. D-049 and the reviewed R1 audit replace
+Task-specific test exceptions with owner/composition-derived generic proof.
+`BS-MM-S3-R1-20260730-01` is the sole current execution authority.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

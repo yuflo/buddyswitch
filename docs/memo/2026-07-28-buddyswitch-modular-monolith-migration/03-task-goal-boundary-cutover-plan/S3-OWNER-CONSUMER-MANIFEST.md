@@ -1,5 +1,9 @@
 # S3 Owner and Consumer Manifest
 
+> Historical initial manifest. Incomplete for execution because it omitted
+> indirect generated/discovery consumers. Current scope:
+> `S3-R1-CONSUMER-AUDIT.md`.
+
 ## 1. Final physical owner
 
 ```text

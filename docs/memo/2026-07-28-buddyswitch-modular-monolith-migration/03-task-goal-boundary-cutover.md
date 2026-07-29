@@ -1,8 +1,8 @@
 # S3 Task and Goal Boundary Cutover Charter
 
-> Current state: READY
+> Current state: READY — R1 COMPLETION
 > Entry prerequisite: S2 ACCEPTED
-> Execution authority: `BS-MM-S3-20260729-01`
+> Execution authority: `BS-MM-S3-R1-20260730-01`
 > Merge unit: one complete Task/Goal owner cutover
 
 ## Acceptance sentence

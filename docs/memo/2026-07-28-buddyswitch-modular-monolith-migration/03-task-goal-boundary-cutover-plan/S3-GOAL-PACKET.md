@@ -1,6 +1,9 @@
 # S3 Task and Goal Boundary Cutover Goal Packet
 
-> Packet state: READY
+> Packet state: `REJECTED AND CONSUMED`
+> Replacement: `BS-MM-S3-R1-20260730-01`
+
+This packet is historical evidence only. It must not be resumed.
 
 ## 0. Before acting
 

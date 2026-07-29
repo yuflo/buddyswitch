@@ -4,14 +4,14 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | `8db3a07c4cca6423a1e2c789281a813800bfa2a9` |
+| Evidence baseline | preserved S3 candidate on `1c99816c57196e47ddbff38bdd0d143bf5084e24` plus exact dirty identity in `S3-R1-SOURCE-SNAPSHOT.md` |
 | Active stage | S3 — Task and Goal Boundary Cutover |
-| State | READY |
-| Runtime migration authorized | S3 only through `BS-MM-S3-20260729-01` |
+| State | READY — R1 COMPLETION |
+| Runtime migration authorized | S3 only through `BS-MM-S3-R1-20260730-01` |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent executor runs the exact S3 Goal Packet and returns; hub accepts or replans |
+| Next gate | independent executor completes the preserved candidate through the exact S3 R1 Goal Packet and returns; hub accepts or replans |
 | Current executable truth | S1 one-package runtime plus one physically aggregated, explicitly composed Demand module |
 
 ## Stage ledger
@@ -21,7 +21,7 @@
 | S0 Audit/admission | ACCEPTED | none | migration lead + maintainer | closed |
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
-| S3 Task/Goal | READY | S2 | independent executor selected by user; hub retains acceptance | execute `BS-MM-S3-20260729-01` only |
+| S3 Task/Goal | READY — R1 COMPLETION | S2 | independent executor selected by user; hub retains acceptance | execute `BS-MM-S3-R1-20260730-01` only |
 | S4 Component waves | BLOCKED | S3 | unassigned per lane | frozen host contracts and lane traces |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
@@ -218,6 +218,26 @@ Actor Console section, contribution uniqueness and current package/test
 projection. The structured plan and READY review authorize
 `BS-MM-S3-20260729-01`.
 
+The initial executor created an unaccepted but statically coherent Task
+candidate, then stopped before further mutation because
+`tests/process/cli/test_env_tool_package_independence.py` was required but
+absent from the exact write scope. Hub review consumed the packet and
+expanded the audit across direct imports, literal paths, data-driven Tool
+sets, generated module/path names, directory discovery,
+activation-dependent subprocesses and package/test projection. It found the
+neighboring generated router expectation, one omitted changed cleanup proof
+and three proof-quality drifts. D-049 records the reusable READY rule.
+
+The candidate remains preserved at tracked src/tests patch
+`b70c08475d5ecb0ebd641bd1ba4880905bd5375b237ad1f37ae753e80ae441eb`
+and untracked content manifest
+`44c5c5359f780f127bbcd3a4f3520664db2bb2053c837a4b502b1ae06d5d82f4`.
+Static review found no need to change D-045–D-048. The stale installed runtime
+is an expected activation gate, and no post-mutation candidate GREEN exists.
+The return review, representation-complete consumer audit, activation-first
+completion plan and READY review authorize only
+`BS-MM-S3-R1-20260730-01`.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -243,6 +263,8 @@ projection. The structured plan and READY review authorize
 | 2026-07-29 | S2 | READY — R1 ACTIVATION-FIRST VERIFICATION | ACCEPTED | coordinating hub | exact source/activation identity reproduced; R1 exact, owner, Integration, Process and single frozen FINAL evidence passed; F003 closed and every S2 packet consumed |
 | 2026-07-29 | S3 | BLOCKED | PROPOSED — PREPARATION ONLY | coordinating hub | S2 accepted; source-bound S3 preparation unlocked with no execution packet |
 | 2026-07-29 | S3 | PROPOSED — PREPARATION ONLY | READY | coordinating hub | complete source/consumer trace, affected baseline, final-boundary preflight, implementation plan and Goal Packet reviewed |
+| 2026-07-30 | S3 | READY | REPLANNING | coordinating hub | initial executor stopped correctly on an unclassified generated package consumer; predecessor packet consumed and no candidate behavior accepted |
+| 2026-07-30 | S3 | REPLANNING | READY — R1 COMPLETION | coordinating hub | complete representation audit, candidate architecture review, generic proof-boundary correction and activation-first R1 packet reviewed |
 
 ## Checkpoint record
 
@@ -269,6 +291,8 @@ projection. The structured plan and READY review authorize
 | 2026-07-29 | S2 Browser lifecycle prerequisite | READY | F002 exact `fff09b42c52e43ed8719af14d608dd2b`; Process `6f72e37b3a66442ca851869c08eed516`; rejecting FINAL `4ca6ae44008d4387aedd13c2c265d566`; packet `BS-MM-S2-BROWSER-LIFECYCLE-20260729-01` | same executor performs one owner-boundary repair, proves complete Integration/Process, runs one frozen FINAL, then stops |
 | 2026-07-29 | S2 Browser lifecycle R1 | READY | RED `d871368dee4640acb8bd03e9f59aba51`; build-path preflight `S2-F003-R1-BUILD-20260729-01`; current two-file hashes `94df61c3…` / `0651a79d…`; expected pre-run `RUNTIME_MISMATCH`; packet `BS-MM-S2-BROWSER-LIFECYCLE-R1-20260729-01` | preserve source, reprovision runtime before any test, then exact/owner/Integration/Process/one FINAL |
 | 2026-07-29 | S2 stage acceptance | ACCEPTED | `02-demand-component-pilot-plan/S2-ACCEPTANCE.md`; exact `090399c8d6e74e888f7df159cd41b1b9`; Integration `5571fa5053b048e5b8b006a96e745a66`; Process `ac14e92bf10a46f1817bda50a2e07beb`; FINAL `865b88ce29d34c25aef70c122b41768c` | checkpoint S2, then refresh and READY-review S3; do not resume any S2 packet |
+| 2026-07-30 | S3 initial return review | REPLANNING | `03-task-goal-boundary-cutover-plan/S3-INITIAL-RETURN-REVIEW.md`; exact preserved dirty identity; no valid candidate test run | consume `BS-MM-S3-20260729-01`; audit all consumer representations before new authority |
+| 2026-07-30 | S3 R1 handoff | READY | `S3-R1-CONSUMER-AUDIT.md`, `S3-R1-SOURCE-SNAPSHOT.md`, `S3-R1-READY-REVIEW.md`; packet `BS-MM-S3-R1-20260730-01` | verify dirty candidate, reprovision before RED, fix generic proof owners, complete focused/affected/single FINAL |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -291,10 +315,10 @@ Stop/replan condition:
 
 ```text
 Stage: S3
-Master state: READY
-Goal Packet: BS-MM-S3-20260729-01
+Master state: READY — R1 COMPLETION
+Goal Packet: BS-MM-S3-R1-20260730-01
 Execution session: none
-Last hub checkpoint: S3 source refresh, preflight, plan and READY review complete
+Last hub checkpoint: initial packet consumed; representation-complete R1 scope and candidate review complete
 Next action: commit/push preparation checkpoint, then hand the exact packet to one independent executor
 No-polling state: NOT_APPLICABLE
 ```

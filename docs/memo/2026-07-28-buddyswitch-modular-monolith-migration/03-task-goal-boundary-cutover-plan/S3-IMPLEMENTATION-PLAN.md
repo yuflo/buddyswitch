@@ -3,7 +3,11 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: use
 > `superpowers:executing-plans`. Follow root `AGENTS.md` and
 > `$buddyswitch-testing`.
-> Plan state: READY
+> Plan state: `RETIRED`
+> Replacement: `S3-R1-IMPLEMENTATION-PLAN.md`
+
+This plan records the initial design and stopped execution history. It is not
+current execution authority.
 
 **Goal:** Make Task state, Task adapters, native Goal convergence and owning
 tests one physical component while preserving current behavior and deleting

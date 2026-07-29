@@ -1,8 +1,10 @@
 # S3 READY Review
 
-> Review result: READY
+> Review result: `INVALIDATED BY INCOMPLETE CONSUMER MANIFEST`
 > Packet: `BS-MM-S3-20260729-01`
 > Executable source base: `8db3a07c4cca6423a1e2c789281a813800bfa2a9`
+
+This review is historical. `S3-R1-READY-REVIEW.md` owns current admission.
 
 ## FRAME
 

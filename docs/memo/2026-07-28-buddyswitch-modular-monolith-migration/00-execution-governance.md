@@ -148,7 +148,11 @@ Required evidence:
 The ordinary READY questions still apply:
 
 - Can the executor explain the product/host outcome in one sentence?
-- Is every affected current consumer named?
+- Is every affected current consumer named across direct imports, literal
+  paths, data-driven IDs, generated module/path names, directory discovery,
+  activation-dependent subprocesses and package/test projections?
+- Do generic proofs derive expected topology from their semantic owner or
+  explicit composition instead of accumulating product-specific exceptions?
 - Does each new contract have one owner?
 - Can the selected RED distinguish the target from the current behavior?
 - Is every removal target explicit?
