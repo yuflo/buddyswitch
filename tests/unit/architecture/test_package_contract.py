@@ -156,3 +156,83 @@ def test_atomic_cutover_has_one_source_and_entrypoint_topology() -> None:
     assert old_paths == []
     assert missing_owners == []
     assert missing_entrypoints == []
+
+
+def test_current_guidance_names_only_current_installed_package_owners() -> None:
+    retired_tokens = (
+        "scripts/env/",
+        "scripts/runtime_kernel/",
+        "tools/launcher/",
+        "framework/contracts/",
+        "buddyswitch/manifest.toml",
+        "buddyswitch/env-profiles/",
+        "env_legacy_store",
+        "sys.path.insert",
+        "spec_from_file_location",
+        "--repo-root",
+        "PYTHONPATH",
+    )
+    guidance_paths = (
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "AGENTS.md",
+        *sorted((REPO_ROOT / "docs" / "arch").glob("*.md")),
+        *sorted(
+            (REPO_ROOT / "src" / "buddyswitch" / "launcher" / "assets" / "roles").glob(
+                "*/AGENTS.md"
+            )
+        ),
+        *sorted(
+            (REPO_ROOT / "src" / "buddyswitch" / "skills").glob("**/SKILL.md")
+        ),
+    )
+    violations: list[tuple[str, str]] = []
+    for path in guidance_paths:
+        relative_path = path.relative_to(REPO_ROOT).as_posix()
+        document = path.read_text(encoding="utf-8")
+        for token in retired_tokens:
+            violations.extend(
+                (relative_path, token)
+                for _ in range(document.count(token))
+            )
+    assert sorted(violations) == []
+
+    required_paths_by_owner = {
+        REPO_ROOT / "README.md": (
+            "pyproject.toml",
+            "src/buddyswitch/catalog/manifest.toml",
+            "src/buddyswitch/env/tool_runtime/definition.py",
+            "src/buddyswitch/env/tool_runtime/context.py",
+            "src/buddyswitch/env/tool_runtime/results.py",
+            "src/buddyswitch/env/tool_runtime/registry.py",
+            "src/buddyswitch/env/tools/<tool>/tool.py",
+            "src/buddyswitch/env/tools/<tool>/_impl.py",
+            "src/buddyswitch/runtime_kernel/protocol.py",
+            "src/buddyswitch/runtime_kernel/dispatcher.py",
+            "src/buddyswitch/contracts/prepare-turn-context.json",
+            "src/buddyswitch/contracts/{pm,design,dev,market,test}.md",
+            "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
+            "tests/",
+        ),
+        REPO_ROOT / "AGENTS.md": (
+            "src/buddyswitch/catalog/manifest.toml",
+            "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
+        ),
+        REPO_ROOT / "docs" / "arch" / "daemon-service-architecture.md": (
+            "src/buddyswitch/launcher/instance_daemon.py",
+        ),
+        REPO_ROOT / "docs" / "arch" / "demand-sys-architecture.md": (
+            "src/buddyswitch/env/domain/demand_sys.py",
+            "src/buddyswitch/env/repos/demands.py",
+        ),
+        REPO_ROOT / "docs" / "arch" / "task-sys-architecture.md": (
+            "src/buddyswitch/env/domain/task_sys.py",
+            "src/buddyswitch/launcher/task_goal_handler.py",
+        ),
+    }
+    missing_required_paths = sorted(
+        (owner.relative_to(REPO_ROOT).as_posix(), required_path)
+        for owner, required_paths in required_paths_by_owner.items()
+        for required_path in required_paths
+        if required_path not in owner.read_text(encoding="utf-8")
+    )
+    assert missing_required_paths == []

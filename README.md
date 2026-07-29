@@ -35,10 +35,10 @@ No `prepare/persist` lifecycle is required.
 Direct local runtime diagnostics use:
 
 ```bash
-source tools/launcher/env.sh
-buddyswitch_env_init
-"$BUDDYSWITCH_PYTHON" scripts/env/client.py context summarize
+./buddyswitch-codex env status
 ```
+
+An active Actor obtains exact Tool schemas through `context.get`.
 
 ## Workspace Layout
 
@@ -89,14 +89,20 @@ process, and system tiers serially, then checks shell syntax and diff hygiene.
 
 ## Canonical Runtime Sources
 
-- `scripts/env/tool_runtime/definition.py` for `ToolDefinition` / `ActionDefinition` protocol and schema validation.
-- `scripts/env/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
-- `scripts/env/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
-- `scripts/env/tool_runtime/registry.py` for runtime discovery, catalog/semantics projection, and selected tool dispatch.
-- `scripts/env/tools/<tool>/tool.py` as each tool's only public runtime entrypoint (`DEFINITION` + `invoke`).
-- `scripts/env/tools/<tool>/_impl.py` for selected private implementation invoked by `tool.py`.
-- `scripts/runtime_kernel/protocol.py` for runtime broker protocol envelope.
-- `scripts/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
-- `framework/contracts/prepare-turn-context.json` for context payload contract compatibility.
-- `framework/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
+Root launchers are thin stable interfaces. `pyproject.toml` is the sole
+package/build declaration.
+
+- `pyproject.toml` for package build and installed-distribution ownership.
+- `src/buddyswitch/catalog/manifest.toml` for the environment manifest.
+- `src/buddyswitch/env/tool_runtime/definition.py` for `ToolDefinition` / `ActionDefinition` protocol and schema validation.
+- `src/buddyswitch/env/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
+- `src/buddyswitch/env/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
+- `src/buddyswitch/env/tool_runtime/registry.py` for runtime discovery, catalog/semantics projection, and selected tool dispatch.
+- `src/buddyswitch/env/tools/<tool>/tool.py` as each tool's only public runtime entrypoint (`DEFINITION` + `invoke`).
+- `src/buddyswitch/env/tools/<tool>/_impl.py` for selected private implementation invoked by `tool.py`.
+- `src/buddyswitch/runtime_kernel/protocol.py` for the runtime broker protocol envelope.
+- `src/buddyswitch/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
+- `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.
+- `src/buddyswitch/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
+- `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md` for Role bootstrap guidance.
 - `tests/` for behavior and consistency gates.

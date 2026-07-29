@@ -4,23 +4,23 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | `9e527141ef9c6ca705015fcecfa0b2a6fe1c3fc3` |
-| Active stage | S1 — Single package and runtime cutover |
-| State | IN_PROGRESS — C1–C5 ACCEPTED, C6 PENDING |
-| Runtime migration authorized | no — C2–C5 packet consumed; C6 not yet READY |
+| Evidence baseline | `68e1272eb4dad276c8491f642006bbb24218c3f4` |
+| Active stage | S2 — Demand Component Pilot |
+| State | PROPOSED — S1 ACCEPTED; S2 PREPARATION NOT YET READY |
+| Runtime migration authorized | none — S1 is closed and no S2 Goal Packet exists |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | hub prepares and READY-reviews one source-bound C6 Goal Packet |
-| Current executable truth | activated distribution built from `src/buddyswitch/**`; root/current architecture guidance still requires C6 replacement |
+| Next gate | coordinating hub refreshes S2 source, consumer, state and test scope, then issues an evidence-backed READY decision |
+| Current executable truth | S1 accepted: one activated distribution built from `src/buddyswitch/**`, with current guidance aligned to installed-package ownership |
 
 ## Stage ledger
 
 | Stage | State | Depends on | Owner | Next gate |
 |---|---|---|---|---|
 | S0 Audit/admission | ACCEPTED | none | migration lead + maintainer | closed |
-| S1 Package/runtime | IN_PROGRESS | S0 | coordinating hub; next independent executor after READY | prepare C6 current-guidance/residue/full-acceptance packet |
-| S2 Demand | BLOCKED | S1 | unassigned | accepted single runtime |
+| S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
+| S2 Demand | PROPOSED | S1 | coordinating hub until READY | source-bound preparation and READY review; no implementation packet yet |
 | S3 Task/Goal | BLOCKED | S2 | unassigned | accepted Demand Public boundary |
 | S4 Component waves | BLOCKED | S3 | unassigned per lane | frozen host contracts and lane traces |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
@@ -104,6 +104,27 @@ inspected the one-path/Actor/process boundaries and accepted C2–C5 in
 packet is consumed. C6 still owns current guidance, final residue proof and
 the frozen full-suite gate; S1 and S2 remain unaccepted/blocked respectively.
 
+The accepted C2–C5 candidate is now committed and synchronized at
+`68e1272eb4dad276c8491f642006bbb24218c3f4`. C6 source refresh found exactly
+19 stale path occurrences confined to root README/AGENTS and three current
+architecture documents. Packaged Role/Skill guidance, CLI/help and production
+source have zero retired live-path match; remaining test terms are negative
+guards or environment isolation. The hub selected one structural assertion
+inside the existing package architecture test, proved every replacement
+target, froze the six-file non-memo scope and READY-reviewed packet
+`BS-MM-S1-C6-20260729-01`. No runtime mutation or S2 work was authorized.
+
+The C6 packet returned against the exact frozen source and six-file non-memo
+scope. The hub reproduced its identities, reviewed the replacement diff,
+reused the identity-valid frozen FINAL
+`af8cfbbe53ee4710894483c2fcb18350`, and independently passed the exact
+structural assertion in run `dde42ea2b544495fbef9f18d40ae8f86`. Current
+guidance and production-loader scans contain zero retired live-path matches,
+and resource cleanup is clean. C6 and S1 are accepted in
+`01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md`; R-PKG-016 and
+R-DOC-001 are closed. S2 preparation is now unblocked, but no S2 execution
+packet or runtime mutation is authorized.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -118,6 +139,9 @@ the frozen full-suite gate; S1 and S2 remain unaccepted/blocked respectively.
 | 2026-07-28 | S1 | READY | REPLANNING | coordinating hub | packet stopped before C2; F-033 baseline proof drift and F-034 C1 distribution-boundary defect confirmed |
 | 2026-07-28 | S1 | REPLANNING | READY | coordinating hub | D-038 accepted; complete preservation evidence, exact source/consumer manifests, final-topology preflight and atomic C2–C5 packet reviewed |
 | 2026-07-28 | S1 | READY | IN_PROGRESS | coordinating hub | C2–C5 source-bound return accepted; C6 remains before final S1 acceptance |
+| 2026-07-29 | S1 | IN_PROGRESS | READY | coordinating hub | C6 current-guidance inventory, exact enforcement boundary, focused preservation and source-bound Goal Packet passed READY review |
+| 2026-07-29 | S1 | READY | ACCEPTED | coordinating hub | C6 exact return, frozen FINAL, reviewer probe and residue scans accepted; S1 closed |
+| 2026-07-29 | S2 | BLOCKED | PROPOSED | coordinating hub | S1 accepted; source-bound S2 preparation unlocked, with no execution packet |
 
 ## Checkpoint record
 
@@ -137,6 +161,8 @@ the frozen full-suite gate; S1 and S2 remain unaccepted/blocked respectively.
 | 2026-07-28 | S1 C2–C5 preservation/preflight | DESIGN_FEASIBLE | F-036 RED/GREEN `284ed5522cf44a009fb1c2a7d5567891`/`e14d3fb26b0e43c992889e2ecca2dd31`; process `6768ab5bf5284b3987f1022708caa792`; system `daa2d57225484b38943edd65da7020b4`; topology `C2C5P-d24c5a85fec6b34a` | READY-review the atomic packet |
 | 2026-07-28 | S1 C2–C5 handoff | READY | `01-single-package-runtime-cutover-plan/S1-C2-C5-READY-REVIEW.md`; packet `BS-MM-S1-C2C5-20260728-01` | user starts one independent task; hub pauses without polling |
 | 2026-07-28 | S1 C2–C5 acceptance | ACCEPTED | `01-single-package-runtime-cutover-plan/S1-C2-C5-ACCEPTANCE.md`; direct `f4f7bf3cab9b4ba18a73d6cc6d1db94a`; Unit `d63166a0de0c4580998362227d8f332d`; Integration `5aed413f198e4bbc9586ff28a0096a12`; Process `7ba8e689b32a49c785bf98d7b42cf4ca`; System `aeec4cc8e03b4335a7a3e21b72cb5894` | prepare and READY-review C6; do not resume consumed packet or begin S2 |
+| 2026-07-29 | S1 C6 handoff | READY | `01-single-package-runtime-cutover-plan/S1-C6-READY-REVIEW.md`; packet `BS-MM-S1-C6-20260729-01`; focused baseline `978f3133b7dc4a689527ebc0e4262187` | user starts one independent C6 task; hub pauses without polling |
+| 2026-07-29 | S1 C6 and stage acceptance | ACCEPTED | `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md`; executor FINAL `af8cfbbe53ee4710894483c2fcb18350`; reviewer run `dde42ea2b544495fbef9f18d40ae8f86` | prepare S2 from current source; do not implement until a new READY-reviewed packet exists |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -158,11 +184,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S1
-Master state: IN_PROGRESS — C1–C5 ACCEPTED, C6 PENDING
+Stage: S2
+Master state: PROPOSED — S1 ACCEPTED; S2 PREPARATION REQUIRED
 Goal Packet: none
-Execution session: C2–C5 return accepted; packet consumed
-Last hub checkpoint: C2–C5 accepted; F-037 and runtime residue closed
-Next action: prepare and READY-review one source-bound C6 Goal Packet
-No-polling state: not handed off
+Execution session: none
+Last hub checkpoint: C6 and S1 accepted; packet BS-MM-S1-C6-20260729-01 consumed
+Next action: refresh S2 source/consumer/state/test scope and prepare a READY-reviewed Goal Packet
+No-polling state: NOT_HANDED_OFF
 ```

@@ -27,7 +27,7 @@ Statuses:
 | R-PKG-013 | CLOSED — Actor copied manifest/profile/contract/diagnostic implementation | S1 | `S1-C2-C5-ACCEPTANCE.md`; selected projection only |
 | R-PKG-014 | CLOSED — source-layout runtime/state inference | S1 | `S1-C2-C5-ACCEPTANCE.md`; explicit locator use |
 | R-PKG-015 | CLOSED — fixtures asserting executable old paths | S1 | `S1-C2-C5-ACCEPTANCE.md`; current proofs and old-path absence |
-| R-PKG-016 | REMOVING — packaged Role/Skill guidance is current; root README/AGENTS/docs remain | S1 C6 | `S1-C2-C5-ACCEPTANCE.md`; C6 current-guidance and final residue proof |
+| R-PKG-016 | CLOSED — packaged and root/current guidance names current package owners | S1 C6 | `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md` |
 | R-PKG-017 | CLOSED — runtime Python formerly resolved without activation binding | S1 | `S1-C2-C5-ACCEPTANCE.md`; exact activation record, non-editable install and mismatch failure |
 | R-PKG-018 | CLOSED — schema and test-only validator move-map omissions | S1 | `S1-C2-C5-ACCEPTANCE.md`; schemas packaged, validator in test support, old paths absent |
 | R-PKG-019 | CLOSED — C1 runtime attribution formerly lacked one-to-one path/content correspondence between valid non-test source package inputs and the installed package | S1 C1 E2 | `S1-E2-ACCEPTANCE.md`; exact source/install manifest equality at activate/verify, full-tree symlink rejection, required runtime-asset attribution, co-located test/cache exclusion and complete C1/C2 preservation proof |
@@ -77,7 +77,7 @@ Statuses:
 
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
-| R-DOC-001 | current architecture paths changed by S1 | S1 | `docs/arch` matches package/runtime truth |
+| R-DOC-001 | CLOSED — current architecture paths match accepted S1 installed-package truth | S1 | `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md` |
 | R-DOC-002 | Demand/Task/current component paths | S2–S4 | updated with owner cutover |
 | R-DOC-003 | Daemon/Web/foundation composition wording | S5 | final host truth |
 | R-DOC-004 | root stable Role/manifest paths | S6 | final RoleHost paths |

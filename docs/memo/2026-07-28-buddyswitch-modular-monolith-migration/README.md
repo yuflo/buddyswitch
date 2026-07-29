@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0 ACCEPTED; S1 IN PROGRESS — C1–C5 ACCEPTED, C6 PENDING
-> Runtime authorization: none; C2–C5 packet consumed
+> Current state: S0–S1 ACCEPTED; S2 PROPOSED — PREPARATION ONLY
+> Runtime authorization: none; every S1 packet consumed
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -19,8 +19,8 @@ Read:
 | Stage | Charter | State |
 |---|---|---|
 | S0 | `00-program-readiness.md` | ACCEPTED |
-| S1 | `01-single-package-runtime-cutover.md` | IN_PROGRESS |
-| S2 | `02-demand-component-pilot.md` | BLOCKED |
+| S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
+| S2 | `02-demand-component-pilot.md` | PROPOSED |
 | S3 | `03-task-goal-boundary-cutover.md` | BLOCKED |
 | S4 | `04-independent-component-waves.md` | BLOCKED |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
@@ -62,8 +62,11 @@ final-topology preflight in the atomic C2–C5 plan. Packet
 at the C5 gate in
 `01-single-package-runtime-cutover-plan/S1-C2-C5-ACCEPTANCE.md`. C2–C5 now
 form the sole live runtime path and that packet is consumed. The next action
-is coordinating-hub preparation and READY review of C6; no C6 or S2 packet is
-currently authorized.
+was C6 current-guidance replacement and frozen FINAL. Packet
+`BS-MM-S1-C6-20260729-01` completed that gate and is accepted in
+`01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md`. S1 is closed.
+S2 source refresh and READY preparation are now unlocked, but no S2 execution
+packet is currently authorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

@@ -1,7 +1,8 @@
 # S2 Demand Component Pilot Charter
 
-> Initial state: BLOCKED
-> Blocked by: S1 acceptance
+> State: PROPOSED — PREPARATION REQUIRED
+> Entry prerequisite: S1 ACCEPTED
+> Execution authority: none; no S2 Goal Packet exists
 > Merge unit: one complete Demand owner cutover
 
 ## Acceptance sentence

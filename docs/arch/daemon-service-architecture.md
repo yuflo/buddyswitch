@@ -85,7 +85,7 @@ does not add a product switch to daemon core.
 
 ## Composition root
 
-`tools/launcher/instance_daemon.py` is the only production composition root
+`src/buddyswitch/launcher/instance_daemon.py` is the only production composition root
 that imports generic daemon orchestration and concrete product handlers. It
 registers handlers and application commands explicitly and in visible order.
 

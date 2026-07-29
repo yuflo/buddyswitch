@@ -1,18 +1,19 @@
 # S1 Single Package and Runtime Cutover Implementation Plan Pack
 
-> Current state: IN_PROGRESS — C1–C5 ACCEPTED, C6 PENDING
+> Current state: ACCEPTED — C1–C6 COMPLETE
 > Formal packet `BS-MM-S1-20260728-01` is stopped and no longer authorized.
 > Bounded repair packet `BS-MM-S1-E1-20260728-01` also stopped and authorizes
 > no further execution. `BS-MM-S1-E2-20260728-01` is accepted and consumed.
-> `BS-MM-S1-C2C5-20260728-01` is accepted and consumed. No packet is
-> currently authorized.
+> `BS-MM-S1-C2C5-20260728-01` is accepted and consumed.
+> `BS-MM-S1-C6-20260729-01` is accepted and consumed. No S1 packet remains
+> authorized.
 >
 > **For the independent S1 agent:** REQUIRED SUB-SKILL:
 > `superpowers:executing-plans`; execute this pack checkpoint by checkpoint and
 > stop at its review gates.
-> Plan state: C6 PREPARATION REQUIRED
-> Source baseline: `9e527141ef9c6ca705015fcecfa0b2a6fe1c3fc3`
-> Runtime work: C1–C5 accepted; C6 pending
+> Plan state: COMPLETE
+> Source baseline: `68e1272eb4dad276c8491f642006bbb24218c3f4`
+> Runtime work: C1–C6 accepted
 > Charter: `../01-single-package-runtime-cutover.md`
 
 ## Goal
@@ -118,7 +119,15 @@ Current execution control:
 - `S1-C2-C5-GOAL-PACKET.md`;
 - `S1-C2-C5-READY-REVIEW.md`;
 - `S1-C2-C5-EXECUTION-STATE.md`;
-- `S1-C2-C5-ACCEPTANCE.md`.
+- `S1-C2-C5-ACCEPTANCE.md`;
+- `S1-C6-SOURCE-SNAPSHOT.md`;
+- `S1-C6-SCOPE-MANIFEST.md`;
+- `S1-C6-PREFLIGHT.md`;
+- `S1-C6-IMPLEMENTATION-PLAN.md`;
+- `S1-C6-GOAL-PACKET.md`;
+- `S1-C6-READY-REVIEW.md`;
+- `S1-C6-EXECUTION-STATE.md`;
+- `S1-ACCEPTANCE.md`.
 
 `S1-E1-REPAIR-PLAN.md`, `S1-E1-GOAL-PACKET.md`, and
 `S1-E1-READY-REVIEW.md` are historical records of the stopped bounded repair.
@@ -134,9 +143,14 @@ minimum runnable replacement boundary is C2 move + C3 process + C4 projection
 boundary as D-038. Complete preservation evidence and isolated preflight
 `C2C5P-d24c5a85fec6b34a` passed. Packet
 `BS-MM-S1-C2C5-20260728-01` then executed, returned at C5 and was accepted by
-the coordinating hub. It is consumed and cannot be resumed. The next
-permissible action is C6 source refresh, plan/Goal Packet preparation and
-READY review.
+the coordinating hub. C6 then enumerated the five stale current documents,
+selected one existing architecture-test owner, proved every replacement
+target and froze the final residue/full-gate sequence. Packet
+`BS-MM-S1-C6-20260729-01` returned against that exact source, replaced the
+five stale current documents, added the structural guard and passed the
+frozen full repository gate. The coordinating hub accepted the result in
+`S1-ACCEPTANCE.md`. Every S1 packet is consumed; S2 preparation is the only
+next permissible program action.
 
 The formal refresh additionally closed four plan-execution ambiguities before
 handoff:

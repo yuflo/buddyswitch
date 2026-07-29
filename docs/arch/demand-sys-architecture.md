@@ -36,13 +36,13 @@ The actor-scoped schema-version-5 aggregate contains exactly:
 - monotonic `demand_pool_revision`;
 - source-keyed `ingress_receipts`.
 
-`scripts/env/domain/demand_sys.py` is the only Demand mutation owner. Its
+`src/buddyswitch/env/domain/demand_sys.py` is the only Demand mutation owner. Its
 private record operations create, merge, revise, and terminalize records for
 the two current application paths: bound inbound resolution and Parent
 completion. Inbound cancellation and completion share one terminal-record
 implementation.
 
-`scripts/env/repos/demands.py` owns actor-scoped locking, exact aggregate
+`src/buddyswitch/env/repos/demands.py` owns actor-scoped locking, exact aggregate
 validation, and atomic replacement. One inbound-resolution transaction settles
 the receipt and applies any Demand change together.
 

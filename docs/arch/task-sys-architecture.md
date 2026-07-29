@@ -27,7 +27,7 @@ loop.
 
 ## One owner and one record
 
-`scripts/env/domain/task_sys.py` is the canonical Task owner. Its record has
+`src/buddyswitch/env/domain/task_sys.py` is the canonical Task owner. Its record has
 exactly:
 
 ```text
@@ -76,7 +76,7 @@ cleanup.
 
 ## Task–Goal convergence
 
-`tools/launcher/task_goal_handler.py` is the sole semantic adapter between Task
+`src/buddyswitch/launcher/task_goal_handler.py` is the sole semantic adapter between Task
 and native Goal state:
 
 - an unbound active Task with no Goal causes `thread/goal/set`, then binds the

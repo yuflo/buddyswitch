@@ -142,9 +142,9 @@ Do not add prose when a machine can enforce the rule, and do not build a framewo
 Stable BuddySwitch paths:
 
 - product source mount: `projects/app/`;
-- environment manifest: `buddyswitch/manifest.toml`;
+- environment manifest: `src/buddyswitch/catalog/manifest.toml`;
 - product launcher: `./buddyswitch-codex instance start --role <role>`;
-- role bootstrap guidance: `tools/launcher/assets/roles/<role>/AGENTS.md`;
+- role bootstrap guidance: `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md`;
 - runtime track projections: `buddyswitch/objects/tracks/*.json`;
 - runtime task projections: `buddyswitch/objects/task-sys/tasks/*.json`;
 - runtime artifact projections: `buddyswitch/objects/artifacts/*.json`;

@@ -1,7 +1,7 @@
 # S1 Single Package and Runtime Cutover Charter
 
-> State: IN_PROGRESS — C1–C5 ACCEPTED, C6 PENDING
-> Authorized packet: none
+> State: ACCEPTED
+> Authorized packet: none — C6 accepted and consumed
 > Merge unit: one complete package/runtime/lifecycle replacement
 > Plan pack: `01-single-package-runtime-cutover-plan/README.md`
 
@@ -49,7 +49,10 @@ by authorizing one source-bound C2–C5 replacement packet. That packet returned
 with one installed runtime path, complete affected-tier proof and clean
 operations. The coordinating hub accepted C2–C5 in
 `01-single-package-runtime-cutover-plan/S1-C2-C5-ACCEPTANCE.md`; the packet is
-consumed. C6 remains unauthorized until its own source-bound READY review.
+consumed. C6 then replaced the remaining current guidance, added the exact
+structural absence guard and passed the frozen repository-wide FINAL. The
+coordinating hub accepted S1 in
+`01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md`.
 
 ## Owned scope
 
@@ -141,3 +144,7 @@ No code remains at its prior executable path.
 Publish exact distribution manifest, final repository/Actor/runtime trees,
 lifecycle results, runtime identity evidence, deletion scan, cleanup evidence,
 omitted checks and residual risk.
+
+Exit record: `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md`.
+S1 is closed. S2 preparation is unlocked but no S2 implementation packet is
+authorized by this record.
