@@ -23,7 +23,8 @@ Read in order:
 9. `S2-FINAL-F003-BROWSER-LIFECYCLE-GOAL-PACKET.md`;
 10. `S2-FINAL-F003-BROWSER-LIFECYCLE-R1-RESUME-PLAN.md`;
 11. `S2-FINAL-F003-BROWSER-LIFECYCLE-R1-GOAL-PACKET.md`;
-12. `S2-ACCEPTANCE.md`.
+12. `S2-ACCEPTANCE.md`;
+13. `S2-DELIVERY-RETROSPECTIVE.md`.
 
 The executor owns implementation and source-bound evidence only. The
 coordinating hub retains the master ledger, decisions, residue and acceptance
