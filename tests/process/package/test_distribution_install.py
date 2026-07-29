@@ -21,6 +21,8 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/launcher/assets/web-management/vendor/dompurify/LICENSE-MPL",
     "buddyswitch/launcher/assets/web-management/vendor/highlightjs/LICENSE",
     "buddyswitch/launcher/assets/web-management/vendor/markdown-it/LICENSE",
+    "buddyswitch/modules/demand/skills/demand-triage/SKILL.md",
+    "buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md",
     "buddyswitch/skills/dev/implement-scoped-change/SKILL.md",
 }
 
@@ -37,6 +39,8 @@ def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path
         for name in names
     )
     assert "buddyswitch/application/entrypoints/runtime_activation.py" in names
+    assert "buddyswitch/modules/demand/skills/demand-triage/SKILL.md" in names
+    assert "buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md" in names
     assert not [
         name
         for name in names

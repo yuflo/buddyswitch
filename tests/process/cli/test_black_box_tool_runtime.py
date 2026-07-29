@@ -121,9 +121,11 @@ from pathlib import Path
 
 root = Path.cwd()
 
+from buddyswitch.application.build import activate_application
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 from buddyswitch.runtime_support import env_manifest
 
+activate_application()
 manifest_path = root / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 manifest = env_manifest.load_manifest(manifest_path)
 

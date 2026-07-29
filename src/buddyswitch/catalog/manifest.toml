@@ -176,14 +176,6 @@ path = "skills/dev/prepare-review-readiness"
 id = "smoke-test"
 path = "skills/test/smoke-test"
 
-[[skills]]
-id = "demand-triage"
-path = "skills/shared/demand-triage"
-
-[[skills]]
-id = "demand-orchestration"
-path = "skills/shared/demand-orchestration"
-
 [[roles]]
 id = "market"
 label = "Market"

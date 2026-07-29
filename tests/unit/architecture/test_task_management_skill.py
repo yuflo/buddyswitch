@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 
 from buddyswitch.env.tool_runtime import registry as tool_registry
+from buddyswitch.runtime_support.env_manifest import load_manifest
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-TRIAGE = ROOT / "src/buddyswitch/skills/shared/demand-triage/SKILL.md"
-ORCHESTRATION = ROOT / "src/buddyswitch/skills/shared/demand-orchestration/SKILL.md"
+TRIAGE = ROOT / "src/buddyswitch/modules/demand/skills/demand-triage/SKILL.md"
+ORCHESTRATION = ROOT / "src/buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md"
 RETIRED_TASK_SKILL = ROOT / "src/buddyswitch/skills/shared/task-management/SKILL.md"
 ROLE_AGENTS = tuple(sorted((ROOT / "src/buddyswitch/launcher/assets/roles").glob("*/AGENTS.md")))
-TRIAGE_HANDLER = ROOT / "src/buddyswitch/launcher/demand_triage_handler.py"
-ORCHESTRATION_HANDLER = ROOT / "src/buddyswitch/launcher/demand_orchestration_handler.py"
+TRIAGE_HANDLER = ROOT / "src/buddyswitch/modules/demand/private/adapters/daemon/demand_triage_handler.py"
+ORCHESTRATION_HANDLER = ROOT / "src/buddyswitch/modules/demand/private/adapters/daemon/demand_orchestration_handler.py"
 
 
 def _manifest() -> dict:
-    return tomllib.loads(MANIFEST.read_text(encoding="utf-8"))
+    return load_manifest(MANIFEST)
 
 
 def _active_skill_files(manifest: dict) -> list[Path]:
@@ -203,7 +203,7 @@ def test_current_actor_surfaces_contain_no_retired_or_future_task_architecture()
         ORCHESTRATION,
         TRIAGE_HANDLER,
         ORCHESTRATION_HANDLER,
-        ROOT / "src/buddyswitch/env/tools/demand_sys/tool.py",
+        ROOT / "src/buddyswitch/modules/demand/private/adapters/tool/tool.py",
         ROOT / "src/buddyswitch/env/tools/task_sys/tool.py",
         *ROLE_AGENTS,
     )

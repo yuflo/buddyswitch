@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Mapping, TextIO
+from typing import Callable, Mapping, Sequence, TextIO
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,97 @@ class CliError(Exception):
     code: str
     message: str
     details: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CliCommandResult:
+    kind: str
+    data: object
+
+
+CliCommandHandler = Callable[[Sequence[str]], CliCommandResult]
+
+
+@dataclass(frozen=True)
+class CliCommandRegistration:
+    name: str
+    help_rows: tuple[str, ...]
+    handler: CliCommandHandler
+
+
+def parse_options(
+    args: Sequence[str],
+    *,
+    allowed: tuple[str, ...],
+    context: str,
+) -> dict[str, str]:
+    values: dict[str, str] = {}
+    index = 0
+    allowed_set = set(allowed)
+    while index < len(args):
+        option = args[index]
+        if option not in allowed_set:
+            raise CliError(
+                "INVALID_ARGUMENT",
+                f"{context} does not accept: {option}",
+            )
+        if option in values:
+            raise CliError(
+                "INVALID_ARGUMENT",
+                f"{context} received {option} more than once",
+            )
+        if (
+            index + 1 >= len(args)
+            or not args[index + 1]
+            or args[index + 1].startswith("-")
+        ):
+            raise CliError(
+                "INVALID_ARGUMENT",
+                f"{context} requires {option} <value>",
+            )
+        values[option] = args[index + 1]
+        index += 2
+    return values
+
+
+def parse_required_options(
+    args: Sequence[str],
+    *,
+    required: tuple[str, ...],
+    context: str,
+) -> dict[str, str]:
+    values = parse_options(args, allowed=required, context=context)
+    for option in required:
+        if option not in values:
+            raise CliError(
+                "INVALID_ARGUMENT",
+                f"{context} requires {option} <value>",
+            )
+    return values
+
+
+def single_required_option(
+    args: Sequence[str],
+    option: str,
+    context: str,
+) -> str:
+    return parse_required_options(
+        args,
+        required=(option,),
+        context=context,
+    )[option]
+
+
+def optional_single_option(
+    args: Sequence[str],
+    option: str,
+    context: str,
+) -> str | None:
+    return parse_options(
+        args,
+        allowed=(option,),
+        context=context,
+    ).get(option)
 
 
 _EXIT_CODES = {

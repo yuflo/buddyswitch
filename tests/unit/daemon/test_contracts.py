@@ -26,7 +26,7 @@ HANDLER_PATHS = (
 def _load_contracts() -> Any:
     if not DAEMON_CONTRACTS_PATH.exists():
         raise AssertionError(f"expected module to exist: {DAEMON_CONTRACTS_PATH}")
-    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_contracts"))
+    return importlib.import_module("buddyswitch.launcher.daemon_contracts")
 
 
 def _imported_modules(path: Path) -> set[str]:

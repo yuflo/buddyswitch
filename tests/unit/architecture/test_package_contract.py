@@ -61,6 +61,7 @@ PACKAGE_ENTRYPOINTS = (
     "diagnostics",
     "browser_evidence",
     "artifact_selection",
+    "env_manifest",
 )
 
 
@@ -103,6 +104,7 @@ def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -
         "buddyswitch.config",
         "buddyswitch.contracts",
         "buddyswitch.launcher",
+        "buddyswitch.modules.demand",
         "buddyswitch.skills",
     }
     patterns = {
@@ -184,6 +186,11 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         *sorted(
             (REPO_ROOT / "src" / "buddyswitch" / "skills").glob("**/SKILL.md")
         ),
+        *sorted(
+            (REPO_ROOT / "src" / "buddyswitch" / "modules").glob(
+                "*/skills/**/SKILL.md"
+            )
+        ),
     )
     violations: list[tuple[str, str]] = []
     for path in guidance_paths:
@@ -221,8 +228,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/launcher/instance_daemon.py",
         ),
         REPO_ROOT / "docs" / "arch" / "demand-sys-architecture.md": (
-            "src/buddyswitch/env/domain/demand_sys.py",
-            "src/buddyswitch/env/repos/demands.py",
+            "src/buddyswitch/modules/demand/private/domain/demand_sys.py",
+            "src/buddyswitch/modules/demand/private/state/demands.py",
         ),
         REPO_ROOT / "docs" / "arch" / "task-sys-architecture.md": (
             "src/buddyswitch/env/domain/task_sys.py",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
@@ -13,6 +12,7 @@ ROOT = REPO_ROOT
 
 from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from buddyswitch.runtime_support import runtime_skills  # noqa: E402
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 
 class RuntimeSkillsTests(unittest.TestCase):
@@ -120,7 +120,7 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-        self.manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        self.manifest = env_manifest.load_manifest(manifest_path)
 
     def _dev_skill_file(self, skill_id: str) -> Path:
         return ROOT / "src" / "buddyswitch" / "skills" / "dev" / skill_id / "SKILL.md"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 MUTATES_NONE = "none"
 MUTATES_RUNTIME_OBJECTS = "runtime_objects"
@@ -56,6 +56,7 @@ class ActionDefinition:
     use_when: tuple[str, ...] = ()
     do_not_use_when: tuple[str, ...] = ()
     risk_hints: Mapping[str, Any] = field(default_factory=dict)
+    bound_capability_env: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,25 @@ class ToolDefinition:
     do_not_use_when: tuple[str, ...]
     actions: tuple[ActionDefinition, ...]
     backend_model: Mapping[str, Any] = field(default_factory=dict)
+
+
+ToolInvoke = Callable[..., dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class ToolRegistration:
+    definition: ToolDefinition
+    invoke: ToolInvoke
+
+
+def validate_registration(registration: ToolRegistration) -> None:
+    if not isinstance(registration, ToolRegistration):
+        raise ValueError("tool contribution must be ToolRegistration")
+    validate_definition(registration.definition)
+    if not callable(registration.invoke):
+        raise ValueError(
+            f"ToolRegistration.invoke for '{registration.definition.id}' must be callable"
+        )
 
 
 def _require_text(value: Any, *, field: str) -> str:
@@ -240,6 +260,11 @@ def validate_definition(definition: ToolDefinition) -> None:
         _require_text(action.result_content_level, field=f"{tool_id}.{name}.result_content_level")
         _require_text(action.success_effect, field=f"{tool_id}.{name}.success_effect")
         _require_text(action.failure_state_guarantee, field=f"{tool_id}.{name}.failure_state_guarantee")
+        if action.bound_capability_env is not None:
+            _require_text(
+                action.bound_capability_env,
+                field=f"{tool_id}.{name}.bound_capability_env",
+            )
         if action.durability not in _ALLOWED_DURABILITY_VALUES:
             raise ValueError(f"{tool_id}.{name}.durability must be one of {_ALLOWED_DURABILITY_VALUES}")
         _validate_text_tuple(action.reads, field=f"{tool_id}.{name}.reads")

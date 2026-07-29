@@ -43,6 +43,7 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
         "update_status",
     },
 }
+DISCOVERED_TOOL_PACKAGES = frozenset(SHIPPED_TOOLS) - {"demand_sys"}
 
 LEGACY_SHARED_RUNTIME_FILES = {
     "catalog.py",
@@ -75,8 +76,9 @@ FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS = {
 class ToolRuntimeArchitectureTests(unittest.TestCase):
     def _tool_dir(self, tool: str) -> Path:
         return ROOT / "src" / "buddyswitch" / "env" / "tools" / tool
-    def test_shipped_tools_expose_single_public_entrypoint(self) -> None:
-        for tool, expected_actions in sorted(SHIPPED_TOOLS.items()):
+    def test_discovered_tool_packages_expose_single_public_entrypoint(self) -> None:
+        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
+            expected_actions = SHIPPED_TOOLS[tool]
             with self.subTest(tool=tool):
                 package_dir = self._tool_dir(tool)
                 self.assertTrue(package_dir.is_dir(), msg=f"missing tool package: {package_dir}")
@@ -107,9 +109,25 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                         self.assertEqual(output_schema, {"$ref": "ToolResult"})
                     else:
                         self.assertEqual(output_schema.get("type"), "object", msg=action)
+
+    def test_demand_tool_is_explicitly_contributed_outside_discovered_packages(self) -> None:
+        from buddyswitch.env.tool_runtime import registry
+        from buddyswitch.modules.demand.module import DEMAND
+
+        self.assertNotIn("demand_sys", registry.discover_tool_ids())
+        self.assertFalse(self._tool_dir("demand_sys").exists())
+        self.assertEqual(len(DEMAND.tools), 1)
+        registration = DEMAND.tools[0]
+        self.assertEqual(registration.definition.id, "demand_sys")
+        self.assertTrue(callable(registration.invoke))
+        self.assertEqual(
+            {action.name for action in registration.definition.actions},
+            SHIPPED_TOOLS["demand_sys"],
+        )
+
     def test_tool_packages_import_only_runtime_sdk_and_local_modules(self) -> None:
         violations: list[str] = []
-        for tool in sorted(SHIPPED_TOOLS):
+        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
             package_dir = self._tool_dir(tool)
             for path in sorted(package_dir.rglob("*.py")):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -152,7 +170,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
             "buddyswitch/objects",
             "buddyswitch/local/actor_private",
         )
-        for tool in sorted(SHIPPED_TOOLS):
+        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
             package_dir = self._tool_dir(tool)
             for path in sorted(package_dir.rglob("*.py")):
                 source = path.read_text(encoding="utf-8")
@@ -320,7 +338,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
         tools_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
         for file_name in sorted(LEGACY_SHARED_RUNTIME_FILES):
             self.assertFalse((tools_root / file_name).exists(), msg=f"legacy shared file still exists: {file_name}")
-        for tool in sorted(SHIPPED_TOOLS):
+        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
             package_dir = self._tool_dir(tool)
             for file_name in sorted(LEGACY_TOOL_PUBLIC_FILES):
                 self.assertFalse((package_dir / file_name).exists(), msg=f"legacy file still exists: {package_dir / file_name}")

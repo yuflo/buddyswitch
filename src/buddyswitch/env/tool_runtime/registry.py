@@ -13,10 +13,13 @@ import buddyswitch.env.tools
 from buddyswitch.env.tool_runtime.definition import ActionDefinition
 from buddyswitch.env.tool_runtime.definition import TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED
 from buddyswitch.env.tool_runtime.definition import ToolDefinition
+from buddyswitch.env.tool_runtime.definition import ToolRegistration
 from buddyswitch.env.tool_runtime.definition import validate_definition
+from buddyswitch.env.tool_runtime.definition import validate_registration
 from buddyswitch.env.tool_runtime import results as tool_results
 
 _DEFINITION_CACHE: dict[str, ToolDefinition] = {}
+_EXPLICIT_REGISTRATIONS: dict[str, ToolRegistration] = {}
 _LOAD_ERRORS: dict[str, dict[str, str]] = {}
 _RETIRED_TOOL_IDS = frozenset({"task"})
 
@@ -24,6 +27,28 @@ _RETIRED_TOOL_IDS = frozenset({"task"})
 def clear_cache() -> None:
     _DEFINITION_CACHE.clear()
     _LOAD_ERRORS.clear()
+
+
+def configure_tool_registrations(
+    registrations: tuple[ToolRegistration, ...],
+) -> None:
+    if not isinstance(registrations, tuple):
+        raise ValueError("tool registrations must be a tuple")
+    discovered = set(discover_tool_ids())
+    configured: dict[str, ToolRegistration] = {}
+    for registration in registrations:
+        validate_registration(registration)
+        tool_id = registration.definition.id
+        if tool_id in configured:
+            raise ValueError(f"duplicate explicit tool registration: {tool_id}")
+        if tool_id in discovered:
+            raise ValueError(
+                f"tool '{tool_id}' is both explicitly registered and package-discovered"
+            )
+        configured[tool_id] = registration
+    _EXPLICIT_REGISTRATIONS.clear()
+    _EXPLICIT_REGISTRATIONS.update(configured)
+    clear_cache()
 
 
 def discover_tool_ids() -> list[str]:
@@ -49,6 +74,9 @@ def _load_tool_module(tool: str):
 
 
 def load_definition(tool: str) -> ToolDefinition:
+    registration = _EXPLICIT_REGISTRATIONS.get(tool)
+    if registration is not None:
+        return registration.definition
     if tool in _DEFINITION_CACHE:
         return _DEFINITION_CACHE[tool]
     module_name = _tool_module_name(tool)
@@ -76,7 +104,7 @@ def load_definition(tool: str) -> ToolDefinition:
 
 
 def supported_tools() -> set[str]:
-    rows: set[str] = set()
+    rows: set[str] = set(_EXPLICIT_REGISTRATIONS)
     for tool in discover_tool_ids():
         try:
             load_definition(tool)
@@ -422,13 +450,19 @@ def _active_task_required_rejection(
 
 
 def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]:
-    module = _load_tool_module(tool)
-    invoke = getattr(module, "invoke", None)
-    if not callable(invoke):
-        raise TypeError(f"{_tool_module_name(tool)}.invoke must be callable")
+    registration = _EXPLICIT_REGISTRATIONS.get(tool)
+    if registration is not None:
+        invoke = registration.invoke
+        invoke_label = f"explicit tool '{tool}'"
+    else:
+        module = _load_tool_module(tool)
+        invoke = getattr(module, "invoke", None)
+        invoke_label = _tool_module_name(tool)
+        if not callable(invoke):
+            raise TypeError(f"{invoke_label}.invoke must be callable")
     response = invoke(action=action, args=args, context=context)
     if not isinstance(response, dict):
-        raise TypeError(f"{_tool_module_name(tool)}.invoke must return an object")
+        raise TypeError(f"{invoke_label}.invoke must return an object")
     response.setdefault("tool", tool)
     response.setdefault("action", _semantic_action(tool=tool, action=action))
     current_identity = getattr(context, "current_identity", None)
@@ -458,7 +492,6 @@ def dispatch_env_tool_request(
     manifest: dict[str, Any],
     manifest_path: Path | None = None,
     invocation: dict[str, Any] | None = None,
-    demand_ingress_application: Any | None = None,
 ) -> dict[str, Any]:
     runtime_actor = _actor_identity_profile_from_dispatch(actor_id=actor_id, active_role=active_role)
     current_identity = runtime_actor.identity.to_payload()
@@ -610,7 +643,7 @@ def dispatch_env_tool_request(
         "thread_id",
         "turn_id",
         "request_id",
-        "demand_inbound_capability",
+        "bound_capability",
     ):
         value = invocation_payload.get(field_name)
         if value is not None and (
@@ -630,7 +663,6 @@ def dispatch_env_tool_request(
         manifest=dict(manifest),
         manifest_path=manifest_path,
         invocation=InvocationFact(**normalized_invocation),
-        demand_ingress_application=demand_ingress_application,
     )
     if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED:
         from buddyswitch.env.domain import task_sys

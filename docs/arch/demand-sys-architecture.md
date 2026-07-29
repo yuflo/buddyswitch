@@ -36,15 +36,17 @@ The actor-scoped schema-version-5 aggregate contains exactly:
 - monotonic `demand_pool_revision`;
 - source-keyed `ingress_receipts`.
 
-`src/buddyswitch/env/domain/demand_sys.py` is the only Demand mutation owner. Its
+`src/buddyswitch/modules/demand/private/domain/demand_sys.py` is the only
+Demand mutation owner. Its
 private record operations create, merge, revise, and terminalize records for
 the two current application paths: bound inbound resolution and Parent
 completion. Inbound cancellation and completion share one terminal-record
 implementation.
 
-`src/buddyswitch/env/repos/demands.py` owns actor-scoped locking, exact aggregate
-validation, and atomic replacement. One inbound-resolution transaction settles
-the receipt and applies any Demand change together.
+`src/buddyswitch/modules/demand/private/state/demands.py` owns actor-scoped
+locking, exact aggregate validation, and atomic replacement. One
+inbound-resolution transaction settles the receipt and applies any Demand
+change together.
 
 There is no compatibility schema, fallback reader, shadow intake queue,
 Actor-originated mutation path, or second write owner.
@@ -94,15 +96,17 @@ mutation. `handled` requires verified Message evidence.
 
 The side commits with `demand_sys__resolve_inbound` through the normal unified
 environment MCP server and `env.tool` broker method. A private one-use
-capability is injected only into that side process and becomes a private
-invocation fact; it is not an action payload field.
+capability is injected only into that side process. The registered action
+declares its environment source, and the generic native MCP host passes it as
+the `bound_capability` invocation fact; it is not an action payload field.
 
-Before mutation, the host application validates Actor, main-thread identity,
-actual side-thread identity, side purpose, source key, receipt attempt, and
-capability state. The normal Demand adapter then invokes the narrow
-host-composed ingress application. Success truthfully reports both ingress
-state change and capability consumption. Stale, foreign, missing, or consumed
-authority cannot mutate the aggregate.
+Before mutation, the Demand-private runtime validates Actor, main-thread
+identity, actual side-thread identity, side purpose, source key, receipt
+attempt, and capability state. The explicitly registered Demand Tool adapter
+calls that runtime directly using generic Actor, instance, thread, and
+capability facts. Success truthfully reports both ingress state change and
+capability consumption. Stale, foreign, missing, or consumed authority cannot
+mutate the aggregate.
 
 Demand Sys contains no model judgment, embedding, semantic similarity,
 keyword classifier, target selection, or scoring. It validates authority,
@@ -132,7 +136,10 @@ actions. Parent and Goal cannot obtain the private resolver capability.
 
 The adapter derives Actor ownership and uses the opaque current `demand_ref`
 returned by `get`. The Actor does not supply storage paths, receipt keys,
-numeric revisions, or terminal record structures.
+numeric revisions, or terminal record structures. Cross-component consumers
+use only `modules.demand.public.resolve_demand_ref` or
+`modules.demand.public.enqueue_inbound`; Demand private packages are not a
+cross-component interface.
 
 ## Task completion boundary
 
@@ -171,9 +178,27 @@ Demand work is split by responsibility:
 - `DemandOrchestrationHandler` owns pool attention, terminal Task
   reconciliation, and serialized next-Task selection.
 
-Both are product handlers composed by `instance_daemon.py`. Generic daemon
-code supplies triggers, schedules, reconciliation activation, and opaque
-checkpoints but contains no Demand meaning.
+Both are exported as typed registrations by
+`src/buddyswitch/modules/demand/module.py`. The application selects that
+passive module once, and `instance_daemon.py` receives the registrations
+without importing Demand. Generic daemon code supplies triggers, schedules,
+reconciliation activation, and opaque checkpoints but contains no Demand
+meaning.
+
+## Physical module and application composition
+
+Demand has one live physical root:
+`src/buddyswitch/modules/demand/`. Its private domain, state, read model,
+Tool, CLI, Daemon adapters, Skills, and owning tests live there. The module
+exports one passive `ModuleAssembly`; it starts no process and performs no
+registration side effect.
+
+`src/buddyswitch/application/composition.py` selects `(DEMAND,)` once.
+`application/build.py` validates and flattens two Daemon handlers, one explicit
+Tool, one CLI command, two Skill exports, and one cleanup contribution before
+any host starts. Generic hosts receive only their typed registrations. The
+legacy central owner, adapter, Tool-package, Skill-path, and owning-test paths
+do not exist.
 
 Canonical receipts, Demand pool revision, Task state, native Goal state, and
 handler checkpoints are recovery truth. Notifications accelerate attention

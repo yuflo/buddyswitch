@@ -8,9 +8,9 @@ from typing import Any
 
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import demand_sys_daemon_adapter  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.modules.demand import public as demand_public  # noqa: E402
 
 
 IM_MESSAGE_CREATED_EVENT_TYPE = "im.message.created"
@@ -111,7 +111,7 @@ class ImMessageCreatedHandler:
             if not isinstance(content, str) or not content.strip():
                 raise ValueError("IM message content must be a non-empty string")
             normalized_content = content.strip()
-            demand_sys_daemon_adapter.enqueue_inbound(
+            demand_public.enqueue_inbound(
                 state,
                 source_key=f"im.message.created:{message_id}",
                 description=normalized_content,

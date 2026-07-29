@@ -262,7 +262,11 @@ class TaskGoalReconciliationTests(RuntimeWorkspaceTestCase):
             frozenset({"task_goal.reconcile_task"}),
         )
         factories = instance_daemon.default_application_command_factories()
-        handlers = instance_daemon.default_daemon_handlers()
+        from buddyswitch.application.build import build_application
+
+        handlers = instance_daemon.default_daemon_handlers(
+            build_application().daemon_handlers
+        )
 
         self.assertIn(task_goal_handler.command_handlers, factories)
         self.assertTrue(any(isinstance(row, task_goal_handler.TaskGoalHandler) for row in handlers))

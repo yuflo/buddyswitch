@@ -35,4 +35,5 @@ namespaces = false
   "assets/**/LICENSE*",
   "shell/*.sh",
 ]
+"buddyswitch.modules.demand" = ["skills/**/*.md"]
 "buddyswitch.skills" = ["**/*.toml", "**/*.json", "**/*.md", "**/*.sh"]

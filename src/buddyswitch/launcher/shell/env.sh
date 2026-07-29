@@ -309,8 +309,10 @@ buddyswitch_require_env_profile() {
 import sys
 
 from buddyswitch.runtime_support import env_manifest
+from buddyswitch.application.build import activate_application
 
 try:
+    activate_application()
     env_manifest.require_role(env_manifest.load_manifest(), sys.argv[1])
 except env_manifest.ManifestError as exc:
     print(str(exc), file=sys.stderr)

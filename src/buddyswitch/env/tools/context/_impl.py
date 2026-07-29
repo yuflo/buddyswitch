@@ -26,42 +26,58 @@ _ACTION_DEFINITION_MAP = {
     ]
 }
 
-_PARENT_DEMAND_ACTIONS = frozenset({"list", "get", "complete"})
+def _parent_disabled_actions() -> dict[str, set[str]]:
+    return {
+        tool: {
+            action.name
+            for action in tool_registry.get_definition(tool).actions
+            if action.bound_capability_env is not None
+        }
+        for tool in tool_registry.supported_tools()
+    }
 
 
 def _parent_tool_catalog() -> dict[str, dict[str, Any]]:
     catalog = deepcopy(tool_registry.env_tools_description())
-    demand = catalog.get("demand_sys")
-    if not isinstance(demand, dict):
-        return catalog
-    demand["operations"] = [
-        action
-        for action in demand.get("operations", [])
-        if action in _PARENT_DEMAND_ACTIONS
-    ]
-    for field in ("payload_fields", "input_schemas", "action_semantics"):
-        rows = demand.get(field)
-        if isinstance(rows, dict):
-            demand[field] = {
+    for tool, disabled in _parent_disabled_actions().items():
+        if not disabled:
+            continue
+        row = catalog.get(tool)
+        if not isinstance(row, dict):
+            continue
+        row["operations"] = [
+            action
+            for action in row.get("operations", [])
+            if action not in disabled
+        ]
+        for field in ("payload_fields", "input_schemas", "action_semantics"):
+            values = row.get(field)
+            if isinstance(values, dict):
+                row[field] = {
+                    action: value
+                    for action, value in values.items()
+                    if action not in disabled
+                }
+        native_actions = (row.get("native_mcp") or {}).get("actions")
+        if isinstance(native_actions, dict):
+            row["native_mcp"]["actions"] = {
                 action: value
-                for action, value in rows.items()
-                if action in _PARENT_DEMAND_ACTIONS
+                for action, value in native_actions.items()
+                if action not in disabled
             }
-    native_actions = (demand.get("native_mcp") or {}).get("actions")
-    if isinstance(native_actions, dict):
-        demand["native_mcp"]["actions"] = {
-            action: value
-            for action, value in native_actions.items()
-            if action in _PARENT_DEMAND_ACTIONS
-        }
     return catalog
 
 
 def _parent_operation_semantics() -> dict[str, dict[str, Any]]:
+    disabled = {
+        f"{tool}.{action}"
+        for tool, actions in _parent_disabled_actions().items()
+        for action in actions
+    }
     return {
         action: semantics
         for action, semantics in tool_registry.operation_semantics().items()
-        if action != "demand_sys.resolve_inbound"
+        if action not in disabled
     }
 
 class ContextServiceContext(TypedDict):

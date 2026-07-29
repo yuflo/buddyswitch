@@ -18,7 +18,9 @@ GENERIC_DAEMON_PATHS = (
     Path("src/buddyswitch/env/tool_runtime/daemon_client.py"),
 )
 
-DEMAND_REPOSITORY_PATH = Path("src/buddyswitch/env/repos/demands.py")
+DEMAND_REPOSITORY_PATH = Path(
+    "src/buddyswitch/modules/demand/private/state/demands.py"
+)
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -125,39 +127,42 @@ def test_generic_daemon_modules_do_not_depend_on_product_adapters() -> None:
 
 def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
     handlers = (
-        "im_wake_handler.py",
-        "track_comment_added_handler.py",
-        "browser_page_expired_handler.py",
-        "browser_release_handler.py",
-        "demand_triage_handler.py",
-        "task_goal_handler.py",
-        "demand_orchestration_handler.py",
+        Path("src/buddyswitch/launcher/im_wake_handler.py"),
+        Path("src/buddyswitch/launcher/track_comment_added_handler.py"),
+        Path("src/buddyswitch/launcher/browser_page_expired_handler.py"),
+        Path("src/buddyswitch/launcher/browser_release_handler.py"),
+        Path(
+            "src/buddyswitch/modules/demand/private/adapters/daemon/"
+            "demand_triage_handler.py"
+        ),
+        Path("src/buddyswitch/launcher/task_goal_handler.py"),
+        Path(
+            "src/buddyswitch/modules/demand/private/adapters/daemon/"
+            "demand_orchestration_handler.py"
+        ),
     )
-    launcher_root = REPO_ROOT / "src" / "buddyswitch" / "launcher"
-    for name in handlers:
-        imports = _imported_modules(launcher_root / name)
+    for relative in handlers:
+        imports = _imported_modules(REPO_ROOT / relative)
         assert "buddyswitch.launcher.daemon_contracts" in imports
         assert "buddyswitch.launcher.daemon_core" not in imports
 
-    product_adapters = (
-        "demand_triage_handler",
-        "task_goal_handler",
-        "demand_orchestration_handler",
-        "im_wake_handler",
-        "track_comment_added_handler",
-        "browser_page_expired_handler",
-        "browser_release_handler",
+    instance_daemon = (
+        REPO_ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
     )
-    composition_roots: list[str] = []
-    for path in sorted(launcher_root.glob("*.py")):
-        imports = _imported_modules(path)
-        if "buddyswitch.launcher.daemon_core" in imports and any(
-            fragment in imported
-            for imported in imports
-            for fragment in product_adapters
-        ):
-            composition_roots.append(path.name)
-    assert composition_roots == ["instance_daemon.py"]
+    instance_imports = _imported_modules(instance_daemon)
+    assert "buddyswitch.launcher.daemon_core" in instance_imports
+    assert not [
+        imported
+        for imported in instance_imports
+        if imported.startswith("buddyswitch.modules.demand")
+    ]
+    composition = (
+        REPO_ROOT / "src" / "buddyswitch" / "application" / "composition.py"
+    )
+    assert _imported_modules(composition) == {
+        "buddyswitch.modules.demand.module",
+        "buddyswitch.modules.demand.module.DEMAND",
+    }
 
 
 def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
@@ -166,6 +171,7 @@ def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
         REPO_ROOT / "src" / "buddyswitch" / "env" / "tools",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "domain",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "repos",
+        REPO_ROOT / "src" / "buddyswitch" / "modules" / "demand",
     )
     violations: list[str] = []
     for root in roots:
@@ -183,12 +189,16 @@ def test_demand_actor_aggregate_has_one_atomic_repository_owner() -> None:
     calls = _called_names(repository)
 
     assert "fcntl" in imports
-    assert "runtime_files" in imports
+    assert "buddyswitch.env.repos.runtime_files" in imports
     assert {"flock", "write_json_object"}.issubset(calls)
     assert _call_count(repository, "write_json_object") == 1
 
     path_owners: list[str] = []
-    for root in (REPO_ROOT / "src" / "buddyswitch" / "env", REPO_ROOT / "src" / "buddyswitch" / "launcher"):
+    for root in (
+        REPO_ROOT / "src" / "buddyswitch" / "env",
+        REPO_ROOT / "src" / "buddyswitch" / "launcher",
+        REPO_ROOT / "src" / "buddyswitch" / "modules",
+    ):
         for path in sorted(root.rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             constants = {

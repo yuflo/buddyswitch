@@ -222,7 +222,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
         for argv in cases:
             with self.subTest(argv=argv):
                 completed = run_process(
-                    [PYTHON, "-m", "buddyswitch.runtime_support.env_manifest", *argv],
+                    [PYTHON, "-m", "buddyswitch.application.entrypoints.env_manifest", *argv],
                     cwd=ROOT,
                     text=True,
                     capture_output=True,
@@ -237,7 +237,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                 self.assertIsInstance(payload, dict)
         role_ids = {row["id"] for row in json.loads(
             run_process(
-                [PYTHON, "-m", "buddyswitch.runtime_support.env_manifest", "list-roles"],
+                [PYTHON, "-m", "buddyswitch.application.entrypoints.env_manifest", "list-roles"],
                 cwd=ROOT,
                 text=True,
                 capture_output=True,
@@ -248,7 +248,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
         self.assertIn("dev", role_ids)
     def test_env_manifest_list_roles_rejects_removed_json_flag(self) -> None:
         removed = run_process(
-            [PYTHON, "-m", "buddyswitch.runtime_support.env_manifest", "list-roles", "--" + "json"],
+            [PYTHON, "-m", "buddyswitch.application.entrypoints.env_manifest", "list-roles", "--" + "json"],
             cwd=ROOT,
             text=True,
             capture_output=True,

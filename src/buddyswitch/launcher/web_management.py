@@ -1206,7 +1206,3 @@ def main(argv: list[str] | None = None) -> int:
     worker = create_imessage_channel_worker(f"http://{args.host}:{server.server_port}")
     serve_with_imessage_worker(server, worker)
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

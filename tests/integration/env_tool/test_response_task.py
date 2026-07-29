@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from buddyswitch.env.domain import demand_sys, task_sys
+from buddyswitch.env.domain import task_sys
 from buddyswitch.env.tool_runtime import context as runtime_context
+from buddyswitch.modules.demand.private.domain import demand_sys
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 
 

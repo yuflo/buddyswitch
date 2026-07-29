@@ -195,7 +195,12 @@ class EnvNativeMcpServerTests(unittest.TestCase):
         }
         with patch.dict(
             os.environ,
-            {self.server.DEMAND_INBOUND_CAPABILITY_ENV: "host-secret"},
+            {
+                self.server.native_mcp.bound_capability_env(
+                    "demand_sys",
+                    "resolve_inbound",
+                ): "host-secret"
+            },
             clear=False,
         ):
             response = self.server.handle_request(
@@ -220,7 +225,7 @@ class EnvNativeMcpServerTests(unittest.TestCase):
             {
                 "thread_id": "thr-side-1",
                 "request_id": "12",
-                "demand_inbound_capability": "host-secret",
+                "bound_capability": "host-secret",
             },
         )
         self.assertFalse(response["result"]["isError"])

@@ -322,3 +322,138 @@ class CleanupRepositoryTests(unittest.TestCase):
         all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
         self.assertTrue(all_data_result["ok"], msg=all_data_result)
         self.assertFalse(dev_owned.exists())
+
+    def test_demand_cleanup_contribution_attributes_role_and_all_data_paths(self) -> None:
+        module_path = ROOT / "src" / "buddyswitch" / "modules" / "demand" / "module.py"
+        self.assertTrue(module_path.is_file(), msg=module_path)
+
+        from buddyswitch.modules.demand.module import DEMAND
+
+        demand_root = self._path("buddyswitch/objects/demand-sys/actors")
+        pm_path = demand_root / "act-pm-clean-pm.json"
+        dev_path = demand_root / "act-dev-clean-dev.json"
+        malformed_path = demand_root / "malformed.json"
+        invalid_utf8_path = demand_root / "invalid-utf8.json"
+        self._write_json(
+            "buddyswitch/objects/demand-sys/actors/act-pm-clean-pm.json",
+            {
+                "schema_version": 5,
+                "actor_target": {"actor_id": "act-pm-clean", "role_id": "pm"},
+                "demands": {},
+                "demand_pool_revision": 0,
+                "ingress_receipts": {},
+            },
+        )
+        self._write_json(
+            "buddyswitch/objects/demand-sys/actors/act-dev-clean-dev.json",
+            {
+                "schema_version": 5,
+                "actor_target": {"actor_id": "act-dev-clean", "role_id": "dev"},
+                "demands": {},
+                "demand_pool_revision": 0,
+                "ingress_receipts": {},
+            },
+        )
+        malformed_path.parent.mkdir(parents=True, exist_ok=True)
+        malformed_path.write_text("{", encoding="utf-8")
+        invalid_utf8_path.write_bytes(b"\xff")
+
+        role_plan = env_cleanup.build_cleanup_plan(
+            scope="role",
+            role="pm",
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            contributions=DEMAND.cleanup,
+        )
+        self.assertEqual(
+            {
+                path
+                for path, category in role_plan["path_categories"].items()
+                if category == "demand_aggregates"
+            },
+            {"buddyswitch/objects/demand-sys/actors/act-pm-clean-pm.json"},
+        )
+        self.assertTrue(
+            any("cannot be safely attributed" in warning for warning in role_plan["warnings"]),
+            msg=role_plan,
+        )
+        role_result = env_cleanup.execute_cleanup_plan(role_plan)
+        self.assertTrue(role_result["ok"], msg=role_result)
+        self.assertFalse(pm_path.exists())
+        self.assertTrue(dev_path.exists())
+        self.assertTrue(malformed_path.exists())
+        self.assertTrue(invalid_utf8_path.exists())
+
+        all_data_plan = env_cleanup.build_cleanup_plan(
+            scope="all-data",
+            role=None,
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            contributions=DEMAND.cleanup,
+        )
+        self.assertEqual(
+            {
+                path
+                for path, category in all_data_plan["path_categories"].items()
+                if category == "demand_aggregates"
+            },
+            {
+                "buddyswitch/objects/demand-sys/actors/act-dev-clean-dev.json",
+                "buddyswitch/objects/demand-sys/actors/invalid-utf8.json",
+                "buddyswitch/objects/demand-sys/actors/malformed.json",
+            },
+        )
+        all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
+        self.assertTrue(all_data_result["ok"], msg=all_data_result)
+        self.assertFalse(dev_path.exists())
+        self.assertFalse(invalid_utf8_path.exists())
+        self.assertFalse(malformed_path.exists())
+
+    def test_cleanup_host_rejects_escaping_and_symlink_owned_state_paths(self) -> None:
+        self.assertTrue(
+            (ROOT / "src" / "buddyswitch" / "runtime_support" / "env_cleanup.py").is_file()
+        )
+        self.assertTrue(hasattr(env_cleanup, "CleanupContribution"))
+        self.assertTrue(hasattr(env_cleanup, "OwnedStatePath"))
+        from buddyswitch.runtime_support.env_cleanup import (
+            CleanupContribution,
+            OwnedStatePath,
+        )
+
+        outside = self.shared_root / "outside.json"
+        outside.write_text("outside", encoding="utf-8")
+        symlink = self._path("buddyswitch/objects/demand-sys/actors/escape.json")
+        symlink.parent.mkdir(parents=True, exist_ok=True)
+        symlink.symlink_to(outside)
+
+        contribution = CleanupContribution(
+            category="unsafe",
+            discover=lambda _root: (
+                OwnedStatePath(relative_path="../outside.json", owner_role="pm"),
+                OwnedStatePath(relative_path=str(outside), owner_role="pm"),
+                OwnedStatePath(
+                    relative_path="buddyswitch/objects/demand-sys/actors/escape.json",
+                    owner_role="pm",
+                ),
+            ),
+        )
+        plan = env_cleanup.build_cleanup_plan(
+            scope="all-data",
+            role=None,
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            contributions=(contribution,),
+        )
+        self.assertFalse(
+            any(category == "unsafe" for category in plan["path_categories"].values()),
+            msg=plan,
+        )
+        self.assertGreaterEqual(
+            sum("Skipping unsafe cleanup path" in warning for warning in plan["warnings"]),
+            3,
+            msg=plan,
+        )
+        result = env_cleanup.execute_cleanup_plan(plan)
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "outside")
+        self.assertTrue(symlink.is_symlink())

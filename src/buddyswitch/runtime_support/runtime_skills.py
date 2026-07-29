@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST, ManifestError, load_manifest, require_role, skills_by_id
+from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST, load_manifest, require_role, skills_by_id
+from buddyswitch.runtime_support.env_manifest import configured_skill_exports
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -46,10 +45,6 @@ def _normalize_workspace(workspace_arg: object) -> Path:
     if not workspace.exists() or not workspace.is_dir():
         raise RuntimeSkillsError(f"workspace must exist as a directory: {workspace}")
     return workspace
-
-
-def _require_workspace(workspace_arg: str) -> Path:
-    return _normalize_workspace(workspace_arg)
 
 
 def _validate_runtime_target(workspace: object) -> tuple[Path, Path]:
@@ -201,41 +196,3 @@ def install_runtime_skills(
         )
         installed.append(entry.skill_id)
     return installed
-
-
-def _cmd_install(args: argparse.Namespace) -> int:
-    workspace = _require_workspace(args.workspace)
-    installed = install_runtime_skills(
-        manifest_path=args.manifest,
-        role_id=args.role,
-        workspace=workspace,
-    )
-    for skill_id in installed:
-        print(skill_id)
-    return 0
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Install runtime .agents/skills for the active role.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    install = subparsers.add_parser("install", help="Install runtime skills into workspace/.agents/skills")
-    install.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    install.add_argument("--role", required=True)
-    install.add_argument("--workspace", required=True)
-    install.set_defaults(func=_cmd_install)
-    return parser
-
-
-def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
-    try:
-        return args.func(args)
-    except (ManifestError, RuntimeSkillsError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

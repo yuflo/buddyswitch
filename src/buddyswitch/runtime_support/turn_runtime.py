@@ -152,7 +152,3 @@ def main() -> int:
             payload.update(exc.details)
         print(json.dumps(payload, ensure_ascii=True))
         return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

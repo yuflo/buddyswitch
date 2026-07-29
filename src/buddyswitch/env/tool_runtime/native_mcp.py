@@ -37,6 +37,10 @@ def resolve_native_tool_name(name: str) -> tuple[str, str]:
     return tool, action
 
 
+def bound_capability_env(tool: str, action: str) -> str | None:
+    return registry.get_action_definition(tool, action).bound_capability_env
+
+
 def _schema_copy(schema: Any) -> dict[str, Any]:
     if not isinstance(schema, dict):
         return {}

@@ -16,6 +16,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from buddyswitch.runtime_support.skill_contracts import SkillExport
+
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST = PACKAGE_ROOT / "catalog" / "manifest.toml"
 _SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -33,6 +35,7 @@ BROWSER_COCKPIT_HOST_EXECUTION = {
     "session_continuity": "instance-cockpit",
     "evidence_capture_level": "medium",
 }
+_COMPONENT_SKILL_EXPORTS: tuple[SkillExport, ...] = ()
 
 _LEGACY_KIND_TEMPLATE_MAP: dict[str, str] = {}
 for _kind in {
@@ -65,6 +68,28 @@ def _legacy_kind_to_template(kind: str) -> str:
 
 class ManifestError(ValueError):
     """Raised when the env manifest is invalid."""
+
+
+def configure_skill_exports(exports: tuple[SkillExport, ...]) -> None:
+    if not isinstance(exports, tuple):
+        raise ValueError("Skill exports must be a tuple")
+    seen: set[str] = set()
+    validated: list[SkillExport] = []
+    for export in exports:
+        if not isinstance(export, SkillExport):
+            raise ValueError("Skill contribution must be SkillExport")
+        if not export.id.strip() or not export.package_path.strip():
+            raise ValueError("Skill export id and package path must be non-empty")
+        if export.id in seen:
+            raise ValueError(f"duplicate Skill export: {export.id}")
+        seen.add(export.id)
+        validated.append(export)
+    global _COMPONENT_SKILL_EXPORTS
+    _COMPONENT_SKILL_EXPORTS = tuple(validated)
+
+
+def configured_skill_exports() -> tuple[SkillExport, ...]:
+    return _COMPONENT_SKILL_EXPORTS
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
@@ -113,6 +138,13 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
     skills = manifest.get("skills")
     if not isinstance(skills, list) or not skills:
         raise ManifestError("skills must be a non-empty list")
+    skills.extend(
+        {
+            "id": export.id,
+            "path": export.package_path,
+        }
+        for export in _COMPONENT_SKILL_EXPORTS
+    )
 
     skill_ids: set[str] = set()
     skill_lookup: dict[str, dict[str, Any]] = {}
@@ -294,7 +326,3 @@ def main() -> int:
     except ManifestError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -76,6 +76,9 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.instance_daemon = load_instance_daemon()
+        from buddyswitch.application.build import build_application
+
+        self.application = build_application()
 
     def test_default_daemon_handlers_are_built_through_notification_center(self) -> None:
         imports = imported_modules(INSTANCE_DAEMON_PATH)
@@ -84,21 +87,55 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertIn("buddyswitch.launcher.browser_inbound", imports)
         self.assertIn("buddyswitch.launcher.message_inbound", imports)
         self.assertIn("buddyswitch.launcher.track_comment_inbound", imports)
-        self.assertIn("buddyswitch.launcher.demand_triage_handler", imports)
-        self.assertIn("buddyswitch.launcher.demand_orchestration_handler", imports)
+        self.assertNotIn("buddyswitch.launcher.demand_triage_handler", imports)
+        self.assertNotIn("buddyswitch.launcher.demand_orchestration_handler", imports)
         self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("browser_page_expired_handler", imports)
         self.assertNotIn("task_" + "checkout_handler", imports)
         self.assertFalse((ROOT / "src" / "buddyswitch" / "launcher" / ("task_" + "checkout_handler.py")).exists())
         self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
-        handlers = self.instance_daemon.default_daemon_handlers()
+        handlers = self.instance_daemon.default_daemon_handlers(
+            self.application.daemon_handlers
+        )
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
         self.assertIsInstance(handlers[-2], self.instance_daemon.task_goal_handler.TaskGoalHandler)
-        self.assertIsInstance(
-            handlers[-1],
-            self.instance_daemon.demand_orchestration_handler.DemandOrchestrationHandler,
-        )
+        self.assertEqual(type(handlers[-1]).__name__, "DemandOrchestrationHandler")
+
+    def test_component_handler_identity_must_match_registration_and_built_ins(self) -> None:
+        from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
+
+        class MismatchedHandler:
+            name = "actual"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "daemon handler registration 'declared' constructed 'actual'",
+        ):
+            self.instance_daemon.default_daemon_handlers(
+                (
+                    DaemonHandlerRegistration(
+                        name="declared",
+                        factory=MismatchedHandler,
+                    ),
+                )
+            )
+
+        class TaskGoalCollision:
+            name = "task_goal"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "duplicate daemon handler registration: task_goal",
+        ):
+            self.instance_daemon.default_daemon_handlers(
+                (
+                    DaemonHandlerRegistration(
+                        name="task_goal",
+                        factory=TaskGoalCollision,
+                    ),
+                )
+            )
 
     def test_run_passes_unified_daemon_handler_list_to_daemon_core(self) -> None:
         recorded: dict[str, object] = {}
@@ -120,7 +157,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.addCleanup(setattr, self.instance_daemon.daemon_core, "run_daemon", original_run)
         self.instance_daemon.daemon_core.run_daemon = fake_run
 
-        result = self.instance_daemon.main(["run", "--instance-json", "/tmp/inst.json"])
+        result = self.instance_daemon.main(
+            ["run", "--instance-json", "/tmp/inst.json"],
+            component_registrations=self.application.daemon_handlers,
+        )
 
         self.assertEqual(result, 0)
         handlers = recorded["handlers"]
@@ -154,7 +194,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.instance_daemon.daemon_core.start_daemon = fake_start
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = self.instance_daemon.main(["start", "--instance-json", "/tmp/inst.json"])
+            result = self.instance_daemon.main(
+                ["start", "--instance-json", "/tmp/inst.json"],
+                component_registrations=self.application.daemon_handlers,
+            )
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {"started": True, "pid": 4321})
@@ -175,7 +218,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.instance_daemon.daemon_core.stop_daemon = fake_stop
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = self.instance_daemon.main(["stop", "--instance-json", "/tmp/inst.json"])
+            result = self.instance_daemon.main(
+                ["stop", "--instance-json", "/tmp/inst.json"],
+                component_registrations=self.application.daemon_handlers,
+            )
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {"ok": True, "terminated": True})
@@ -199,7 +245,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.instance_daemon.daemon_core.daemon_status = fake_status
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = self.instance_daemon.main(["status", "--instance-json", "/tmp/inst.json", "--json"])
+            result = self.instance_daemon.main(
+                ["status", "--instance-json", "/tmp/inst.json", "--json"],
+                component_registrations=self.application.daemon_handlers,
+            )
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {"live": True, "ready": True})

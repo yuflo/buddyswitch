@@ -20,9 +20,9 @@ DAEMON_OWNED_FILES = [
     ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "demand_triage_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "task_goal_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "demand_orchestration_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
     ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py",
     ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "context.py",
 ]
@@ -33,9 +33,9 @@ IM_ACTOR_DELIVERY_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" /
 PRODUCT_HANDLER_PATHS = (
     ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "demand_triage_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "task_goal_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "demand_orchestration_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "browser_page_expired_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "browser_release_handler.py",
 )
@@ -208,7 +208,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertIn("comment_id", handler_source)
         self.assertIn("thread_id", handler_source)
         self.assertIn("def handle(", handler_source)
-        self.assertIn("buddyswitch.launcher.demand_sys_daemon_adapter", handler_imports)
+        self.assertIn("buddyswitch.modules.demand.public", handler_imports)
         self.assertFalse(any("task_sys" in name for name in handler_imports), msg=handler_imports)
         self.assertNotIn("track_id", nc_source)
         self.assertNotIn("comment_id", nc_source)

@@ -7,8 +7,9 @@ import json
 import os
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from buddyswitch.env.repos import actor_private_files as actor_private_repo
 from buddyswitch.env.repos import runtime_files
@@ -38,6 +39,18 @@ MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.STATE_ROOT /
 RETIRED_MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
 COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACK_COMMENTS_DIR)
 ACTOR_PRIVATE_RELATIVE_DIR = "private"
+
+
+@dataclass(frozen=True)
+class OwnedStatePath:
+    relative_path: str
+    owner_role: str | None
+
+
+@dataclass(frozen=True)
+class CleanupContribution:
+    category: str
+    discover: Callable[[Path], tuple[OwnedStatePath, ...]]
 
 
 def rel(root: Path, path: Path) -> str:
@@ -668,6 +681,7 @@ def build_cleanup_plan(
     repo_root: Path = ROOT,
     manifest_path: Path | None = None,
     shared_root: Path | None = None,
+    contributions: tuple[CleanupContribution, ...] = (),
 ) -> dict[str, Any]:
     manifest_path = manifest_path or default_manifest_path(repo_root)
     valid_roles = load_valid_roles(manifest_path)
@@ -678,6 +692,25 @@ def build_cleanup_plan(
     plan["repo_root"] = str(repo_root)
     plan["shared_root"] = str(shared_root) if shared_root is not None else None
     plan["_path_categories"] = {}
+    contribution_categories: set[str] = set(CATEGORY_ORDER)
+    for contribution in contributions:
+        if not isinstance(contribution, CleanupContribution):
+            raise ValueError(
+                "cleanup contribution must be CleanupContribution"
+            )
+        category = contribution.category
+        if (
+            not isinstance(category, str)
+            or not category.strip()
+            or category in contribution_categories
+        ):
+            raise ValueError(f"invalid or duplicate cleanup category: {category}")
+        if not callable(contribution.discover):
+            raise ValueError(
+                f"cleanup discoverer for '{category}' must be callable"
+            )
+        contribution_categories.add(category)
+        plan["counts_by_category"][category] = 0
 
     artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
     message_objects, invalid_message_objects = discover_message_objects(repo_root)
@@ -766,6 +799,55 @@ def build_cleanup_plan(
             add_warning(plan, f"All-data cleanup will delete malformed comment object: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
+
+    resolved_repo_root = repo_root.resolve(strict=False)
+    for contribution in contributions:
+        for owned_path in contribution.discover(repo_root):
+            if not isinstance(owned_path, OwnedStatePath):
+                raise ValueError(
+                    f"cleanup contribution '{contribution.category}' returned "
+                    "a non-OwnedStatePath value"
+                )
+            relative_path = owned_path.relative_path
+            candidate = repo_path(repo_root, relative_path)
+            if candidate is None:
+                add_warning(
+                    plan,
+                    f"Skipping unsafe cleanup path '{relative_path}' from "
+                    f"'{contribution.category}'.",
+                )
+                continue
+            current = repo_root
+            unsafe = False
+            for part in Path(relative_path).parts:
+                current = current / part
+                if current.is_symlink():
+                    unsafe = True
+                    break
+            if unsafe or not is_path_within(
+                candidate.resolve(strict=False),
+                resolved_repo_root,
+            ):
+                add_warning(
+                    plan,
+                    f"Skipping unsafe cleanup path '{relative_path}' from "
+                    f"'{contribution.category}'.",
+                )
+                continue
+            if scope == "role":
+                if owned_path.owner_role is None:
+                    add_warning(
+                        plan,
+                        f"{relative_path} cannot be safely attributed to role "
+                        f"'{role}' and will be skipped in scoped cleanup.",
+                    )
+                    continue
+                if owned_path.owner_role != role:
+                    continue
+            if not candidate.exists():
+                continue
+            add_path(plan, candidate, contribution.category)
+            plan["direct_delete_paths"].append(relative_path)
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
@@ -908,7 +990,10 @@ def resolve_state_root_arg(*, state_root_arg: Path | None, shared_root: Path | N
     return resolved_state_argument
 
 
-def main() -> int:
+def main(
+    *,
+    contributions: tuple[CleanupContribution, ...] = (),
+) -> int:
     parser = build_parser()
     args = parser.parse_args()
 
@@ -925,6 +1010,7 @@ def main() -> int:
             repo_root=repo_root,
             manifest_path=manifest_path,
             shared_root=shared_root,
+            contributions=contributions,
         )
 
         if not args.yes:
@@ -937,7 +1023,3 @@ def main() -> int:
     except (OSError, ValueError, ManifestError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -8,11 +8,11 @@ from typing import Any
 
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import demand_sys_daemon_adapter  # noqa: E402
 from buddyswitch.env.domain import track_comments as track_comment_rules  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.repos import track_comments as track_comment_repo  # noqa: E402
 from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
+from buddyswitch.modules.demand import public as demand_public  # noqa: E402
 
 
 def _context_identity_route(context: Any) -> dict[str, str]:
@@ -121,7 +121,7 @@ class TrackCommentAddedHandler:
             track_id = payload["track_id"]
             comment_id = payload["comment_id"]
             thread_id = payload["thread_id"]
-            demand_sys_daemon_adapter.enqueue_inbound(
+            demand_public.enqueue_inbound(
                 state,
                 source_key=f"track.comment.added:{track_id}:{comment_id}",
                 description=content,

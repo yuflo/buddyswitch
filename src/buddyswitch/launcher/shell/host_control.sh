@@ -1125,8 +1125,10 @@ host_control_roles() {
   fi
   "${BUDDYSWITCH_PYTHON}" - <<'PY'
 import json
+from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support.env_manifest import load_manifest
 
+activate_application()
 manifest = load_manifest()
 roles = [
     {"id": role["id"], "label": role["label"], "scope": role["scope"]}

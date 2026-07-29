@@ -142,7 +142,12 @@ class BuddyEnvProfilesTests(unittest.TestCase):
 
     def test_validate_all_cli(self) -> None:
         completed = run_process(
-            [PYTHON, "-m", "buddyswitch.runtime_support.env_profiles", "validate-all"],
+            [
+                PYTHON,
+                "-m",
+                "buddyswitch.application.entrypoints.env_profiles",
+                "validate-all",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,

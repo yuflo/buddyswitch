@@ -64,9 +64,10 @@ cancel
 ```
 
 `task_sys__create` accepts only an opaque `demand_ref`, a self-contained
-`objective`, and a `selection_reason`. The tool boundary resolves the current Demand through
-the Demand rule capability, derives the Actor target, writes the Task through
-the Task owner, and requests idempotent Goal reconciliation.
+`objective`, and a `selection_reason`. The tool boundary resolves the current
+Demand through `modules.demand.public.resolve_demand_ref`, derives the Actor
+target, writes the Task through the Task owner, and requests idempotent Goal
+reconciliation.
 
 The Actor cannot bind a Goal, mark a Task successful, write terminal host
 snapshots, supply revisions, or synchronize a Demand. Successful completion
@@ -138,8 +139,10 @@ Only after terminal reconciliation may an empty Task slot be filled from the
 whole live Demand pool, and orchestration selects at most one next Demand.
 
 Task domain code does not import or mutate Demand state. Demand domain code
-does not import or mutate Task state. Demand orchestration is their explicit
-product composition point.
+does not import or mutate Task state. The Task Tool is a current Demand Public
+consumer; Demand completion evidence is checked by the Demand-owned Tool
+adapter through the generic Task domain capability. Demand orchestration is
+their explicit product composition point.
 
 ## Projections
 

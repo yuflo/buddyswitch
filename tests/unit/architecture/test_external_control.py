@@ -227,7 +227,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
     def test_public_cli_and_help_have_no_retired_command_families_or_output_tracks(self) -> None:
         source = _source("src/buddyswitch/launcher/cli.py")
         tree = ast.parse(source)
-        help_text = _constant_assignment(source, "HELP_TEXT")
+        help_text = _constant_assignment(source, "_HELP_TEMPLATE")
         forbidden_source = (
             "legacy_" + "command_hint",
             "fail_removed_" + "public_command",
@@ -264,10 +264,10 @@ class ExternalControlArchitectureTests(unittest.TestCase):
                 1,
             ),
             source.replace(
-                "        result = _dispatch(args)\n",
+                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
                 "        if any(arg == \"--\" + \"json\" for arg in args):\n"
                 "            raise RuntimeError(args)\n"
-                "        result = _dispatch(args)\n",
+                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
                 1,
             ),
             source.replace(
@@ -275,10 +275,10 @@ class ExternalControlArchitectureTests(unittest.TestCase):
                 'RETIRED_PREFIX = "--"\nRETIRED_NAME = "output"\nYES_FLAG = DASH + "yes"\n',
                 1,
             ).replace(
-                "        result = _dispatch(args)\n",
+                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
                 "        if any(arg == RETIRED_PREFIX + RETIRED_NAME for arg in args):\n"
                 "            raise RuntimeError(args)\n"
-                "        result = _dispatch(args)\n",
+                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
                 1,
             ),
         )

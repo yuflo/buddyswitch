@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S1 ACCEPTED; S2 PROPOSED — PREPARATION ONLY
-> Runtime authorization: none; every S1 packet consumed
+> Current state: S0–S2 ACCEPTED; S3 PROPOSED — PREPARATION ONLY
+> Runtime authorization: none; every S1/S2 packet consumed
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -20,8 +20,8 @@ Read:
 |---|---|---|
 | S0 | `00-program-readiness.md` | ACCEPTED |
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
-| S2 | `02-demand-component-pilot.md` | PROPOSED |
-| S3 | `03-task-goal-boundary-cutover.md` | BLOCKED |
+| S2 | `02-demand-component-pilot.md` | ACCEPTED |
+| S3 | `03-task-goal-boundary-cutover.md` | PROPOSED |
 | S4 | `04-independent-component-waves.md` | BLOCKED |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
@@ -65,8 +65,14 @@ form the sole live runtime path and that packet is consumed. The next action
 was C6 current-guidance replacement and frozen FINAL. Packet
 `BS-MM-S1-C6-20260729-01` completed that gate and is accepted in
 `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md`. S1 is closed.
-S2 source refresh and READY preparation are now unlocked, but no S2 execution
-packet is currently authorized.
+That acceptance unlocked the S2 source refresh and READY preparation.
+
+S2 then completed the direct Demand module cutover and the final
+activation-first Browser lifecycle prerequisite. The coordinating hub accepted
+the frozen candidate in
+`02-demand-component-pilot-plan/S2-ACCEPTANCE.md`; every S2 implementation and
+repair packet is consumed. S3 source refresh and READY preparation are now
+unlocked, but no S3 execution packet or runtime mutation is authorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

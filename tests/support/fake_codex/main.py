@@ -177,15 +177,33 @@ def maybe_capture_runtime_smoke() -> list[dict[str, object]] | None:
         ),
         (
             "context.summarize",
-            [os.environ["BUDDYSWITCH_PYTHON"], "-m", "buddyswitch.env.client", "context", "summarize"],
+            [
+                os.environ["BUDDYSWITCH_PYTHON"],
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "context",
+                "summarize",
+            ],
         ),
         (
             "actor_private.desc",
-            [os.environ["BUDDYSWITCH_PYTHON"], "-m", "buddyswitch.env.client", "actor_private", "desc"],
+            [
+                os.environ["BUDDYSWITCH_PYTHON"],
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "actor_private",
+                "desc",
+            ],
         ),
         (
             "search.status",
-            [os.environ["BUDDYSWITCH_PYTHON"], "-m", "buddyswitch.env.client", "search", "status"],
+            [
+                os.environ["BUDDYSWITCH_PYTHON"],
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "search",
+                "status",
+            ],
         ),
     )
     for name, command in smoke_commands:

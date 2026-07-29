@@ -1,7 +1,8 @@
 # S3 Task and Goal Boundary Cutover Charter
 
-> Initial state: BLOCKED
-> Blocked by: S2 acceptance
+> Current state: PROPOSED — PREPARATION ONLY
+> Entry prerequisite: S2 ACCEPTED
+> Execution authority: none; source refresh and READY review required
 > Merge unit: one complete Task/Goal owner cutover
 
 ## Acceptance sentence

@@ -196,6 +196,51 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
                     self._cli_error(result, code="INVALID_ARGUMENT")
                     self.assertEqual(aggregate.read_bytes(), before)
 
+    def test_option_errors_preserve_exact_host_cli_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            state_root = source_home_path / ".codex-buddyswitch" / "state"
+            aggregate = self._write_aggregate(state_root)
+            env = self._env(source_home_path, state_root)
+            before = aggregate.read_bytes()
+            cases = (
+                (
+                    ("demand", "list"),
+                    "demand list requires --actor <value>",
+                ),
+                (
+                    ("demand", "list", "--role", "pm"),
+                    "demand list does not accept: --role",
+                ),
+                (
+                    (
+                        "demand",
+                        "list",
+                        "--actor",
+                        "act-dev-demand",
+                        "--actor",
+                        "act-pm-demand",
+                    ),
+                    "demand list received --actor more than once",
+                ),
+                (
+                    ("demand", "list", "act-dev-demand", "--actor", "act-dev-demand"),
+                    "demand list does not accept: act-dev-demand",
+                ),
+                (
+                    ("demand", "get", "--actor", "act-dev-demand", "demand-older"),
+                    "demand get requires <demand id> --actor <actor-id>",
+                ),
+            )
+            for argv, message in cases:
+                with self.subTest(argv=argv):
+                    result = self._run(env, *argv)
+                    self.assertEqual(result.returncode, 2)
+                    error = self._cli_error(result, code="INVALID_ARGUMENT")
+                    self.assertEqual(error["message"], message)
+                    self.assertEqual(error["details"], {})
+                    self.assertEqual(aggregate.read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

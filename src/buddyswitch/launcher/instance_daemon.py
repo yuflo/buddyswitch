@@ -7,12 +7,12 @@ import argparse
 import signal
 import sys
 from pathlib import Path
+from collections.abc import Sequence
 
 
 from buddyswitch.launcher import daemon_core  # noqa: E402
 from buddyswitch.launcher import browser_inbound  # noqa: E402
-from buddyswitch.launcher import demand_orchestration_handler  # noqa: E402
-from buddyswitch.launcher import demand_triage_handler  # noqa: E402
+from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration  # noqa: E402
 from buddyswitch.launcher import message_inbound  # noqa: E402
 from buddyswitch.launcher import notification_center  # noqa: E402
 from buddyswitch.launcher import task_goal_handler  # noqa: E402
@@ -34,15 +34,64 @@ def default_application_command_factories() -> list[object]:
     return [task_goal_handler.command_handlers]
 
 
-def default_daemon_handlers() -> list[object]:
+def default_daemon_handlers(
+    component_registrations: Sequence[DaemonHandlerRegistration] = (),
+) -> list[object]:
     registrations = default_notification_registrations()
     browser_registrations = browser_inbound.inbound_registrations()
-    return [
+    built_in_before = [
         *notification_center.handlers_from_registrations(registrations),
         *notification_center.handlers_from_registrations(browser_registrations),
-        demand_triage_handler.DemandTriageHandler(),
-        task_goal_handler.TaskGoalHandler(),
-        demand_orchestration_handler.DemandOrchestrationHandler(),
+    ]
+    task_goal = task_goal_handler.TaskGoalHandler()
+    names: set[str] = set()
+    for handler in (*built_in_before, task_goal):
+        name = getattr(handler, "name", None)
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("built-in daemon handler name must be non-empty")
+        name = name.strip()
+        if name in names:
+            raise ValueError(f"duplicate built-in daemon handler: {name}")
+        names.add(name)
+
+    component_handlers: list[object] = []
+    for registration in component_registrations:
+        if not isinstance(registration, DaemonHandlerRegistration):
+            raise ValueError(
+                "daemon contribution must be DaemonHandlerRegistration"
+            )
+        declared_name = registration.name
+        if not isinstance(declared_name, str) or not declared_name.strip():
+            raise ValueError("daemon handler registration name must be non-empty")
+        declared_name = declared_name.strip()
+        if declared_name in names:
+            raise ValueError(
+                f"duplicate daemon handler registration: {declared_name}"
+            )
+        if not callable(registration.factory):
+            raise ValueError(
+                f"daemon handler factory for '{declared_name}' must be callable"
+            )
+        handler = registration.factory()
+        actual_name = getattr(handler, "name", None)
+        if not isinstance(actual_name, str) or not actual_name.strip():
+            raise ValueError(
+                f"daemon handler registration '{declared_name}' constructed "
+                "a handler without a name"
+            )
+        actual_name = actual_name.strip()
+        if actual_name != declared_name:
+            raise ValueError(
+                f"daemon handler registration '{declared_name}' constructed "
+                f"'{actual_name}'"
+            )
+        names.add(declared_name)
+        component_handlers.append(handler)
+    return [
+        *built_in_before,
+        *component_handlers[:1],
+        task_goal,
+        *component_handlers[1:],
     ]
 
 
@@ -57,7 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    component_registrations: tuple[DaemonHandlerRegistration, ...] = (),
+) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     instance_json = Path(args.instance_json)
@@ -74,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 return daemon_core.run_daemon(
                     instance_json,
-                    handlers=default_daemon_handlers(),
+                    handlers=default_daemon_handlers(component_registrations),
                     notify_subscriptions=default_notify_subscriptions(),
                     application_command_factories=default_application_command_factories(),
                 )
@@ -86,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(
                     daemon_core.start_daemon(
                         instance_json,
-                        handlers=default_daemon_handlers(),
+                        handlers=default_daemon_handlers(component_registrations),
                         notify_subscriptions=default_notify_subscriptions(),
                     ),
                     ensure_ascii=True,
@@ -101,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(
                     daemon_core.daemon_status(
                         instance_json,
-                        handlers=default_daemon_handlers(),
+                        handlers=default_daemon_handlers(component_registrations),
                         notify_subscriptions=default_notify_subscriptions(),
                     ),
                     ensure_ascii=True,
@@ -112,7 +165,3 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -20,9 +20,8 @@ ROOT = REPO_ROOT
 from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
-SHIPPED_TOOLS = {
+DISCOVERED_TOOL_PACKAGES = {
     "task_sys",
-    "demand_sys",
     "track",
     "artifact",
     "context",
@@ -49,7 +48,7 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
         )
 
     def test_shipped_tool_packages_own_black_box_required_files(self) -> None:
-        for tool in sorted(SHIPPED_TOOLS):
+        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
             package_dir = self._tool_dir(tool)
             with self.subTest(tool=tool):
                 self.assertTrue(package_dir.is_dir(), msg=f"missing tool package dir: {package_dir}")
@@ -65,7 +64,7 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
 
     def test_tool_packages_do_not_import_sibling_tools_or_host_forbidden_modules(self) -> None:
         violations: list[str] = []
-        for tool in sorted(SHIPPED_TOOLS):
+        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
             package_dir = self._tool_dir(tool)
             for path in sorted(package_dir.rglob("*.py")):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -78,7 +77,7 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
                                 violations.append(f"{rel}:{node.lineno}: import {name}")
                             if name.startswith("buddyswitch.env.tools."):
                                 parts = name.split(".")
-                                if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
+                                if len(parts) >= 3 and parts[2] in DISCOVERED_TOOL_PACKAGES and parts[2] != tool:
                                     violations.append(f"{rel}:{node.lineno}: import sibling tool {name}")
                     if isinstance(node, ast.ImportFrom):
                         module = node.module or ""
@@ -86,13 +85,13 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
                             violations.append(f"{rel}:{node.lineno}: from {module} import ...")
                         if module == "buddyswitch.env.tools":
                             for alias in node.names:
-                                if alias.name in SHIPPED_TOOLS and alias.name != tool:
+                                if alias.name in DISCOVERED_TOOL_PACKAGES and alias.name != tool:
                                     violations.append(
                                         f"{rel}:{node.lineno}: from buddyswitch.env.tools import {alias.name}"
                                     )
                         if module.startswith("buddyswitch.env.tools."):
                             parts = module.split(".")
-                            if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
+                            if len(parts) >= 3 and parts[2] in DISCOVERED_TOOL_PACKAGES and parts[2] != tool:
                                 violations.append(f"{rel}:{node.lineno}: from {module} import ...")
         self.assertEqual(violations, [], msg="\n".join(violations))
 
@@ -118,7 +117,8 @@ print(json.dumps({"tools": tools, "impl": loaded_impl, "repos": loaded_repos, "d
         completed = self._run_python(script)
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(set(payload["tools"]), SHIPPED_TOOLS)
+        self.assertEqual(set(payload["tools"]), DISCOVERED_TOOL_PACKAGES)
+        self.assertNotIn("demand_sys", payload["tools"])
         self.assertEqual(payload["impl"], [])
         self.assertEqual(payload["repos"], [])
         self.assertEqual(payload["domains"], [])

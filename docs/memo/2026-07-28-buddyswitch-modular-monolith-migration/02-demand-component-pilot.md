@@ -1,9 +1,11 @@
 # S2 Demand Component Pilot Charter
 
-> State: PROPOSED — PREPARATION REQUIRED
+> State: ACCEPTED
 > Entry prerequisite: S1 ACCEPTED
-> Execution authority: none; no S2 Goal Packet exists
+> Execution authority: none; all S2 packets consumed
 > Merge unit: one complete Demand owner cutover
+> Plan: `02-demand-component-pilot-plan/README.md`
+> Acceptance: `02-demand-component-pilot-plan/S2-ACCEPTANCE.md`
 
 ## Acceptance sentence
 

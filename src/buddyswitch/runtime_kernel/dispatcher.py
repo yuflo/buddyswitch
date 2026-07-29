@@ -10,10 +10,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.tool_runtime.context import DemandIngressApplicationAccess
 from buddyswitch.env.tool_runtime import results as tool_results
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
-from buddyswitch.launcher import browser_runtime_manager, demand_triage_runtime
+from buddyswitch.launcher import browser_runtime_manager
 from buddyswitch.runtime_support.env_manifest import ManifestError, load_manifest
 
 
@@ -113,11 +112,6 @@ def _browser_runtime_manager_for_session(session: RuntimeBrokerSession) -> Any:
     return browser_runtime_manager
 
 
-def _demand_triage_runtime_for_session(session: RuntimeBrokerSession) -> Any:
-    del session
-    return demand_triage_runtime
-
-
 @contextlib.contextmanager
 def _runtime_server_env(
     *,
@@ -173,11 +167,6 @@ def _env_tool_dispatch(
     actor_id = str(instance_record["actor_id"]).strip()
     active_role = str(instance_record["role"]).strip()
     payload = dict(params)
-    demand_ingress_application = DemandIngressApplicationAccess(
-        runtime_provider=lambda: _demand_triage_runtime_for_session(session),
-        instance_json=instance_json_path,
-        instance_payload=dict(instance_record),
-    )
     return dispatch_env_tool_request(
         payload={
             key: value
@@ -191,7 +180,6 @@ def _env_tool_dispatch(
         manifest=manifest,
         manifest_path=manifest_path,
         invocation=payload.get("invocation"),
-        demand_ingress_application=demand_ingress_application,
     )
 
 

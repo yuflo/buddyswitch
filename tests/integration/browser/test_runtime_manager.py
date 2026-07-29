@@ -195,6 +195,90 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
 
         self.assertEqual(manager._DETACHED_BROWSER_PROCESSES, [])
 
+    def test_terminate_owned_record_reconciles_tracked_child_on_all_terminal_exits(self) -> None:
+        self.addCleanup(manager._DETACHED_BROWSER_PROCESSES.clear)
+        record = manager.process_identity.RecordedProcess(
+            pid=4242,
+            start_identity="test",
+        )
+        terminal_cases = (
+            {
+                "name": "identity disappears before signal",
+                "is_running": [True, False],
+                "killpg": [],
+                "expected": False,
+            },
+            {
+                "name": "process group disappears before SIGTERM",
+                "is_running": [True, True],
+                "killpg": [ProcessLookupError()],
+                "expected": False,
+            },
+            {
+                "name": "process group disappears before SIGKILL",
+                "is_running": [True, True, True],
+                "killpg": [None, ProcessLookupError()],
+                "expected": True,
+            },
+        )
+
+        for case in terminal_cases:
+            with self.subTest(case["name"]):
+                proc = mock.Mock()
+                proc.pid = record.pid
+                proc.poll.return_value = 0
+                manager._DETACHED_BROWSER_PROCESSES[:] = [proc]
+
+                with (
+                    mock.patch.object(
+                        manager.process_identity,
+                        "is_running",
+                        side_effect=case["is_running"],
+                    ),
+                    mock.patch.object(
+                        manager.os,
+                        "getpgid",
+                        side_effect=[5252, 6262],
+                    ),
+                    mock.patch.object(
+                        manager.os,
+                        "killpg",
+                        side_effect=case["killpg"],
+                    ),
+                    mock.patch.object(
+                        manager,
+                        "_wait_pgid_gone",
+                        return_value=False,
+                    ),
+                    mock.patch.object(manager, "_pgid_alive", return_value=False),
+                ):
+                    self.assertEqual(
+                        manager._terminate_owned_record(record),
+                        case["expected"],
+                    )
+
+                self.assertEqual(manager._DETACHED_BROWSER_PROCESSES, [])
+
+        with self.subTest("same process group retains a live tracked child"):
+            proc = mock.Mock()
+            proc.pid = record.pid
+            proc.poll.return_value = None
+            manager._DETACHED_BROWSER_PROCESSES[:] = [proc]
+
+            with (
+                mock.patch.object(
+                    manager.process_identity,
+                    "is_running",
+                    return_value=True,
+                ),
+                mock.patch.object(manager.os, "getpgid", return_value=5252),
+                mock.patch.object(manager.os, "killpg") as killpg,
+            ):
+                self.assertFalse(manager._terminate_owned_record(record))
+
+            killpg.assert_not_called()
+            self.assertEqual(manager._DETACHED_BROWSER_PROCESSES, [proc])
+
     def test_acquire_reuses_owned_recorded_ready_endpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             temp_root_path = Path(temp_root)

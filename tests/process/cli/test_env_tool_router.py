@@ -130,9 +130,11 @@ class BlockMessageImpl(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BlockMessageImpl())
 
+from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_manifest
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 
+activate_application()
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
@@ -178,9 +180,11 @@ class BlockSelectedImpl(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BlockSelectedImpl())
 
+from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_manifest
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 
+activate_application()
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
@@ -193,7 +197,17 @@ response = dispatch_env_tool_request(
     manifest=env_manifest.load_manifest(manifest_path),
     manifest_path=manifest_path,
 )
-loaded = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.tools.") and name.endswith("._impl"))
+loaded = sorted(
+    name
+    for name in sys.modules
+    if name.endswith("._impl")
+    and name.startswith(
+        (
+            "buddyswitch.env.tools.",
+            "buddyswitch.modules.demand.private.adapters.tool.",
+        )
+    )
+)
 print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
 """
         return run_process(
@@ -330,9 +344,11 @@ import json
 import sys
 from pathlib import Path
 
+from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_manifest
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 
+activate_application()
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
@@ -345,7 +361,17 @@ response = dispatch_env_tool_request(
     manifest=env_manifest.load_manifest(manifest_path),
     manifest_path=manifest_path,
 )
-loaded = sorted(name for name in sys.modules if name.startswith("buddyswitch.env.tools.") and name.endswith("._impl"))
+loaded = sorted(
+    name
+    for name in sys.modules
+    if name.endswith("._impl")
+    and name.startswith(
+        (
+            "buddyswitch.env.tools.",
+            "buddyswitch.modules.demand.private.adapters.tool.",
+        )
+    )
+)
 print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
 """
             completed = run_process(
@@ -360,7 +386,11 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
             loaded = payload["loaded"]
             response = payload["response"]
             with self.subTest(tool=tool, action=action):
-                expected = f"buddyswitch.env.tools.{tool}._impl"
+                expected = (
+                    "buddyswitch.modules.demand.private.adapters.tool._impl"
+                    if tool == "demand_sys"
+                    else f"buddyswitch.env.tools.{tool}._impl"
+                )
                 self.assertIn(expected, loaded, msg=payload)
                 self.assertEqual(loaded, [expected], msg=payload)
                 if response.get("ok") is not True:

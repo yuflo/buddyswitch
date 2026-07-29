@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Any
 import unittest
+from unittest import mock
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -29,8 +30,11 @@ from tests.system.goal_mode.support import (
     response_created,
 )
 from buddyswitch.launcher import app_server
+from buddyswitch.launcher import central_daemon
+from buddyswitch.launcher import central_daemon_core
 from buddyswitch.launcher import codex_runtime
 from buddyswitch.launcher import daemon_core
+from buddyswitch.runtime_kernel import process_identity
 
 
 LAUNCHER = REPO_ROOT / "buddyswitch-codex"
@@ -1131,6 +1135,17 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
                 f"env reset failed: stdout={reset.stdout!r} stderr={reset.stderr!r}"
             )
 
+        central_paths = central_daemon_core.central_daemon_paths(self.shared_root)
+        try:
+            central_result = central_daemon.stop_central_daemon(central_paths)
+        except Exception as exc:
+            report.residuals.append(f"central daemon cleanup failed: {exc}")
+        else:
+            if central_result.get("ok") is not True:
+                report.residuals.append(
+                    f"central daemon cleanup failed: {central_result!r}"
+                )
+
         self.responses.close()
         if self.root.exists():
             try:
@@ -1400,6 +1415,44 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
         self.assertEqual(report.identity_mismatches, [])
         self.assertEqual(report.residuals, [])
         self.assertFalse(self.root.exists())
+
+    def test_failed_env_reset_still_stops_central_daemon_and_removes_owned_paths(
+        self,
+    ) -> None:
+        paths = central_daemon_core.central_daemon_paths(self.shared_root)
+        central_daemon.start_central_daemon(paths)
+        record = process_identity.read_record(paths.pid_file)
+        self.assertIsNotNone(record)
+        assert record is not None
+        lock_path = self.root / "cleanup.lock"
+        lock_path.write_text("owned\n", encoding="utf-8")
+        failed_reset = subprocess.CompletedProcess(
+            [str(LAUNCHER), "env", "reset", "--yes"],
+            1,
+            stdout="",
+            stderr="forced reset failure",
+        )
+
+        try:
+            with mock.patch(
+                f"{__name__}.run_process",
+                return_value=failed_reset,
+            ):
+                report = self._cleanup()
+
+            self.assertIn("env reset failed", "\n".join(report.residuals))
+            self.assertFalse(process_identity.is_running(record))
+            self.assertFalse(paths.socket_path.exists())
+            self.assertFalse(paths.pid_file.exists())
+            self.assertFalse(paths.pid_identity_file.exists())
+            self.assertFalse(lock_path.exists())
+            self.assertFalse(self.root.exists())
+        finally:
+            if process_identity.is_running(record):
+                central_daemon.terminate_record(record)
+            central_daemon.cleanup_runtime_files(paths)
+            if self.root.exists():
+                shutil.rmtree(self.root)
 
 
 if __name__ == "__main__":

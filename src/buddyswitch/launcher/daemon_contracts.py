@@ -1,5 +1,6 @@
 """Stable, product-neutral contracts for the actor instance daemon."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
@@ -72,6 +73,12 @@ class DaemonHandler(Protocol):
         trigger: "DaemonTrigger",
     ) -> HandlerResult | dict[str, Any]:
         """Handle one owned trigger and return the observable daemon result."""
+
+
+@dataclass(frozen=True)
+class DaemonHandlerRegistration:
+    name: str
+    factory: Callable[[], DaemonHandler]
 
 
 class DaemonReconciler(Protocol):

@@ -1,7 +1,15 @@
 """Verified instance Daemon entrypoint."""
 
+from buddyswitch.application.build import activate_application
 from buddyswitch.foundation.process_runtime.invocation import run_verified
-from buddyswitch.launcher.instance_daemon import main
+from buddyswitch.launcher import instance_daemon
+
+
+def main() -> int:
+    application = activate_application()
+    return instance_daemon.main(
+        component_registrations=application.daemon_handlers,
+    )
 
 
 if __name__ == "__main__":

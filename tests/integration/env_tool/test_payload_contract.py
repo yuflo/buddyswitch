@@ -146,7 +146,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             "src/buddyswitch/launcher/external_im_session.py",
             "src/buddyswitch/launcher/im_http_router.py",
             "src/buddyswitch/launcher/task_goal_handler.py",
-            "src/buddyswitch/skills/shared/demand-orchestration/SKILL.md",
+            "src/buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md",
             "docs/arch/web-interface-call-architecture.md",
         )
         retired = (

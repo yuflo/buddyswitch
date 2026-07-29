@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import time
 
 from buddyswitch.launcher import app_server
@@ -28,26 +29,66 @@ def _pid_exists(pid: int) -> bool:
 
 def test_app_server_early_exit_removes_pid_identity_socket_and_marker(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     instance_root = tmp_path / "instance"
     instance_root.mkdir()
     fake_codex = tmp_path / "fake-codex"
-    _write_executable(fake_codex, "import sys\nraise SystemExit(7)\n")
+    _write_executable(fake_codex, "import time\ntime.sleep(60)\n")
     socket_path = app_server.effective_socket_path(
         "act-dev-app-failure",
         instance_root,
         app_server.marker_file(instance_root),
     )
-
-    with pytest.raises(app_server.AppServerUnavailableError):
-        app_server.ensure_app_server(
-            "act-dev-app-failure",
-            instance_root,
-            str(fake_codex),
-            startup_timeout_seconds=1.0,
-        )
-
     pid_path = app_server.pid_file(instance_root)
+    real_popen = subprocess.Popen
+    real_write_record = process_identity.write_record
+    spawned_codex: list[subprocess.Popen[str]] = []
+
+    def capture_codex_process(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        command = args[0] if args else kwargs["args"]
+        if command[0] == str(fake_codex):
+            spawned_codex.append(process)
+        return process
+
+    def record_identity_then_stop_child(
+        record_path: Path,
+        pid: int,
+    ) -> process_identity.RecordedProcess:
+        record = real_write_record(record_path, pid)
+        assert record_path == pid_path
+        assert len(spawned_codex) == 1
+        process = spawned_codex[0]
+        assert process.pid == pid
+        assert process_identity.read_record(record_path) == record
+        process.terminate()
+        process.wait(timeout=2)
+        return record
+
+    monkeypatch.setattr(app_server.subprocess, "Popen", capture_codex_process)
+    monkeypatch.setattr(
+        app_server.process_identity,
+        "write_record",
+        record_identity_then_stop_child,
+    )
+
+    try:
+        with pytest.raises(app_server.AppServerUnavailableError):
+            app_server.ensure_app_server(
+                "act-dev-app-failure",
+                instance_root,
+                str(fake_codex),
+                startup_timeout_seconds=1.0,
+            )
+    finally:
+        for process in spawned_codex:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=2)
+
+    assert len(spawned_codex) == 1
+    assert spawned_codex[0].poll() is not None
     assert not pid_path.exists()
     assert not process_identity.identity_file(pid_path).exists()
     assert not socket_path.exists()
@@ -74,20 +115,32 @@ def test_browser_not_ready_failure_reaps_process_and_removes_identity(
         ),
         encoding="utf-8",
     )
-    child_pid_file = tmp_path / "fake-chrome.pid"
     fake_chrome = tmp_path / "fake-chrome"
     _write_executable(
         fake_chrome,
         "\n".join(
             [
-                "import os, signal, time",
-                "from pathlib import Path",
-                f"Path({str(child_pid_file)!r}).write_text(str(os.getpid()), encoding='utf-8')",
+                "import signal, time",
                 "signal.signal(signal.SIGTERM, lambda *_args: (_ for _ in ()).throw(SystemExit(0)))",
                 "time.sleep(60)",
             ]
         )
         + "\n",
+    )
+    real_popen = subprocess.Popen
+    spawned_chrome: list[subprocess.Popen[str]] = []
+
+    def capture_chrome_process(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        command = args[0] if args else kwargs["args"]
+        if command[0] == str(fake_chrome):
+            spawned_chrome.append(process)
+        return process
+
+    monkeypatch.setattr(
+        browser_runtime_manager.subprocess,
+        "Popen",
+        capture_chrome_process,
     )
     monkeypatch.setattr(browser_runtime_manager, "DEFAULT_READY_ATTEMPTS", 1)
     monkeypatch.setattr(browser_runtime_manager, "DEFAULT_READY_DELAY_SECONDS", 0.01)
@@ -104,7 +157,8 @@ def test_browser_not_ready_failure_reaps_process_and_removes_identity(
         listener.close()
 
     assert result["ok"] is False
-    pid = int(child_pid_file.read_text(encoding="utf-8"))
+    assert len(spawned_chrome) == 1
+    pid = spawned_chrome[0].pid
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline and _pid_exists(pid):
         time.sleep(0.02)

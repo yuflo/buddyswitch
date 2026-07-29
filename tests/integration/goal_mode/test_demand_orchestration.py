@@ -6,9 +6,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from buddyswitch.launcher import demand_orchestration_handler
-from buddyswitch.launcher import demand_triage_handler
-from buddyswitch.env.domain import demand_sys, task_sys
+from buddyswitch.env.domain import task_sys
+from buddyswitch.modules.demand.private.adapters.daemon import (
+    demand_orchestration_handler,
+    demand_triage_handler,
+)
+from buddyswitch.modules.demand.private.domain import demand_sys
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

@@ -15,7 +15,13 @@ ROOT = REPO_ROOT
 class SearchCliTests(unittest.TestCase):
     def test_search_cli_help_exposes_status_and_request_only(self) -> None:
         resource_help = run_process(
-            [PYTHON, "-m", "buddyswitch.env.client", "search", "--help"],
+            [
+                PYTHON,
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "search",
+                "--help",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -31,7 +37,14 @@ class SearchCliTests(unittest.TestCase):
         self.assertNotIn("--engine", resource_help.stdout)
 
         action_help = run_process(
-            [PYTHON, "-m", "buddyswitch.env.client", "search", "request", "--help"],
+            [
+                PYTHON,
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "search",
+                "request",
+                "--help",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -42,7 +55,15 @@ class SearchCliTests(unittest.TestCase):
 
     def test_search_cli_rejects_missing_backend_and_removed_open_browser_command(self) -> None:
         missing_backend = run_process(
-            [PYTHON, "-m", "buddyswitch.env.client", "search", "request", "--payload", '{"query":"x"}'],
+            [
+                PYTHON,
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "search",
+                "request",
+                "--payload",
+                '{"query":"x"}',
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -57,7 +78,7 @@ class SearchCliTests(unittest.TestCase):
             [
                 PYTHON,
                 "-m",
-                "buddyswitch.env.client",
+                "buddyswitch.application.entrypoints.env_client",
                 "search",
                 "open-browser",
                 "--payload",

@@ -25,7 +25,7 @@ class TestLauncherBootstrapConfig(ProcessLauncherHarness, unittest.TestCase):
         actor_environment = importlib.import_module("buddyswitch.launcher.actor_environment")
         codex_config = importlib.import_module("buddyswitch.launcher.codex_config")
         existing = (
-            actor_environment._BASE_CODEX_CONFIG
+            actor_environment.base_codex_config()
             + """
 
 [mcp_servers.buddyswitch-env]

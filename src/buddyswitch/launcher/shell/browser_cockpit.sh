@@ -702,8 +702,10 @@ buddyswitch_browser_profile_capability() {
   fi
   "${BUDDYSWITCH_PYTHON}" - "${role_id}" <<'PY'
 import sys
+from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_profiles
 
+activate_application()
 profile = env_profiles.require_env_profile(
     sys.argv[1],
 )

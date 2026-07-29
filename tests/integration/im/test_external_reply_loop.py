@@ -17,12 +17,12 @@ ROOT = REPO_ROOT
 from buddyswitch.launcher import daemon_mailbox  # noqa: E402
 from buddyswitch.launcher import im_http_router  # noqa: E402
 from buddyswitch.launcher import im_wake_handler  # noqa: E402
-from buddyswitch.env.domain import demand_sys  # noqa: E402
 from buddyswitch.env.repos import identities  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.services import messages as message_service  # noqa: E402
 from buddyswitch.env.tool_runtime import im_actor_delivery  # noqa: E402
 from buddyswitch.env.tool_runtime import im_client as im_client_module  # noqa: E402
+from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 

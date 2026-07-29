@@ -46,14 +46,17 @@ Demand inbound resolution illustrates the transport boundary:
 
 ```text
 isolated Side -> unified buddyswitch-env MCP -> env.tool
-  -> Demand adapter -> narrow host-composed ingress application
+  -> explicitly registered Demand adapter
   -> product-owned authority validation + Demand domain
 ```
 
-The generic environment dispatcher composes that narrow application lazily
-from the active instance facts. It does not interpret a Demand proposal or
-choose a transition. There is no dedicated Demand transport, special broker
-method, or daemon application command for inbound resolution.
+The generic environment dispatcher supplies Actor, instance, thread, and
+`bound_capability` facts. Capability environment lookup is declared by action
+metadata, so native MCP, the registry, the dispatcher, and `ToolContext`
+contain no Demand branch or Demand application class. They do not interpret a
+Demand proposal or choose a transition. There is no dedicated Demand
+transport, special broker method, or daemon application command for inbound
+resolution.
 
 `TaskGoalHandler` illustrates the boundary precisely:
 
@@ -85,9 +88,12 @@ does not add a product switch to daemon core.
 
 ## Composition root
 
-`src/buddyswitch/launcher/instance_daemon.py` is the only production composition root
-that imports generic daemon orchestration and concrete product handlers. It
-registers handlers and application commands explicitly and in visible order.
+`src/buddyswitch/application/composition.py` is the production component
+selection root. It selects the passive Demand module once.
+`src/buddyswitch/application/build.py` validates and flattens its typed handler
+registrations. `src/buddyswitch/launcher/instance_daemon.py` imports only
+generic daemon orchestration and current unmigrated handlers, then merges the
+injected registrations in the current visible execution order.
 
 There is no plugin discovery, semantic event bus, central product workflow
 engine, or product service locator.
@@ -105,10 +111,12 @@ each product.
 Allowed:
 
 ```text
+product module -> typed daemon registration
 product handler -> daemon contracts/runtime
 product handler -> product domain or App Server adapter
-instance_daemon -> daemon core + concrete product handlers
-product tool -> narrow host-composed application capability
+application -> selected product module + generic host
+instance_daemon -> daemon core + typed handler registrations
+product tool -> generic invocation facts + product-private runtime
 ```
 
 Forbidden:
@@ -118,4 +126,5 @@ daemon core/state/contracts -> product module or schema
 daemon status -> product storage
 transport -> product transition policy
 product tool -> broad daemon service locator
+generic host -> Demand private package
 ```

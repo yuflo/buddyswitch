@@ -51,7 +51,7 @@ _SHARED_ROOT = _shared_root_from_env()
 os.environ.setdefault("BUDDYSWITCH_SHARED_ROOT", str(_SHARED_ROOT))
 os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_SHARED_ROOT / "state"))
 
-from buddyswitch.env.domain import demand_read, task_read, track_read  # noqa: E402
+from buddyswitch.env.domain import task_read, track_read  # noqa: E402
 from buddyswitch.launcher import (  # noqa: E402
     actor_session,
     central_daemon,
@@ -85,7 +85,7 @@ class CommandResult:
     data: object
 
 
-HELP_TEXT = """Usage:
+_HELP_TEMPLATE = """Usage:
   buddyswitch-codex instance roles
   buddyswitch-codex instance start --role <role>
   buddyswitch-codex instance list [--role <role>]
@@ -103,8 +103,7 @@ HELP_TEXT = """Usage:
 
   buddyswitch-codex task list [--actor <actor-id>]
   buddyswitch-codex task get <task-id>
-  buddyswitch-codex demand list --actor <actor-id>
-  buddyswitch-codex demand get <demand-id> --actor <actor-id>
+{contributed_usage}
   buddyswitch-codex track list [--owner <identity-id>]
   buddyswitch-codex track get <track-id>
 
@@ -120,7 +119,7 @@ HELP_TEXT = """Usage:
 Commands:
   instance  Manage BuddySwitch product-mode instances.
   task      Read external-safe Task projections.
-  demand    Read actor-scoped external-safe Demand projections.
+{contributed_commands}
   track     Read external-safe Track projections.
   data      Manage BuddySwitch data cleanup commands.
   env       Manage BuddySwitch environment status and reset commands.
@@ -129,12 +128,64 @@ Commands:
 """
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _command_registrations(
+    registrations: tuple[cli_contract.CliCommandRegistration, ...],
+) -> dict[str, cli_contract.CliCommandRegistration]:
+    if not isinstance(registrations, tuple):
+        raise ValueError("CLI registrations must be a tuple")
+    reserved = {"instance", "task", "track", "data", "env", "web", "help"}
+    configured: dict[str, cli_contract.CliCommandRegistration] = {}
+    for registration in registrations:
+        if not isinstance(registration, cli_contract.CliCommandRegistration):
+            raise ValueError("CLI contribution must be CliCommandRegistration")
+        if (
+            not isinstance(registration.name, str)
+            or not registration.name.strip()
+        ):
+            raise ValueError("CLI command name must be a non-empty string")
+        name = registration.name.strip()
+        if name in reserved or name in configured:
+            raise ValueError(f"duplicate CLI command: {name}")
+        if not callable(registration.handler):
+            raise ValueError(f"CLI command handler for '{name}' must be callable")
+        configured[name] = registration
+    return configured
+
+
+def render_help(
+    registrations: tuple[cli_contract.CliCommandRegistration, ...],
+) -> str:
+    configured = _command_registrations(registrations)
+    rows = [
+        row
+        for registration in configured.values()
+        for row in registration.help_rows
+    ]
+    usage = [row for row in rows if row.startswith("  buddyswitch-codex ")]
+    commands = [row for row in rows if not row.startswith("  buddyswitch-codex ")]
+    return _HELP_TEMPLATE.format(
+        contributed_usage="\n".join(usage),
+        contributed_commands="\n".join(commands),
+    )
+
+
+HELP_TEXT = render_help(())
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    command_registrations: tuple[
+        cli_contract.CliCommandRegistration, ...
+    ] = (),
+) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     try:
+        commands = _command_registrations(command_registrations)
+        help_text = render_help(command_registrations)
         if _is_help(args):
-            raise HelpRequested(HELP_TEXT)
-        result = _dispatch(args)
+            raise HelpRequested(help_text)
+        result = _dispatch(args, commands=commands, help_text=help_text)
     except HelpRequested as exc:
         sys.stdout.write(exc.text)
         return 0
@@ -153,16 +204,21 @@ def _is_help(args: list[str]) -> bool:
     return args in (["help"], [DASH + "help"], ["-h"]) or DASH + "help" in args or "-h" in args
 
 
-def _dispatch(args: list[str]) -> CommandResult:
+def _dispatch(
+    args: list[str],
+    *,
+    commands: dict[str, cli_contract.CliCommandRegistration],
+    help_text: str,
+) -> CommandResult | cli_contract.CliCommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "BuddySwitch command is required")
     command, rest = args[0], args[1:]
     if command == "instance":
-        return _dispatch_instance(rest)
+        return _dispatch_instance(rest, help_text=help_text)
     if command == "task":
         return _dispatch_task(rest)
-    if command == "demand":
-        return _dispatch_demand(rest)
+    if command in commands:
+        return commands[command].handler(rest)
     if command == "track":
         return _dispatch_track(rest)
     if command == "data":
@@ -174,7 +230,7 @@ def _dispatch(args: list[str]) -> CommandResult:
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown top-level command: {command}")
 
 
-def _dispatch_instance(args: list[str]) -> CommandResult:
+def _dispatch_instance(args: list[str], *, help_text: str) -> CommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "instance command is required")
     command, rest = args[0], args[1:]
@@ -184,7 +240,7 @@ def _dispatch_instance(args: list[str]) -> CommandResult:
         return CommandResult("instance.roles", {"roles": control.roles()})
     if command == "help":
         _require_no_args(rest, "instance help")
-        raise HelpRequested(HELP_TEXT)
+        raise HelpRequested(help_text)
     if command == "start":
         role = _single_required_option(rest, DASH + "role", "instance start")
         return CommandResult("instance.start", control.start(role))
@@ -262,40 +318,6 @@ def _dispatch_task(args: list[str]) -> CommandResult:
     except ValueError as exc:
         raise cli_contract.CliError("INVALID_ARGUMENT", str(exc)) from exc
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown task command: {command}")
-
-
-def _dispatch_demand(args: list[str]) -> CommandResult:
-    if not args:
-        raise cli_contract.CliError("UNKNOWN_COMMAND", "demand command is required")
-    command, rest = args[0], args[1:]
-    try:
-        if command == "list":
-            actor_id = _single_required_option(rest, DASH + "actor", "demand list")
-            target = _actor_target_from_id(actor_id)
-            return CommandResult(
-                "demand.list",
-                {"demands": demand_read.list_external_demands(actor_target=target)},
-            )
-        if command == "get":
-            if not rest or rest[0].startswith("-"):
-                raise cli_contract.CliError(
-                    "INVALID_ARGUMENT",
-                    "demand get requires <demand id> --actor <actor-id>",
-                )
-            demand_id = rest[0]
-            actor_id = _single_required_option(rest[1:], DASH + "actor", "demand get")
-            target = _actor_target_from_id(actor_id)
-            demand = demand_read.get_external_demand(demand_id, actor_target=target)
-            if demand is None:
-                raise cli_contract.CliError(
-                    "NOT_FOUND",
-                    f"Demand not found for actor {actor_id}: {demand_id}",
-                    {"demand_id": demand_id, "actor_id": actor_id},
-                )
-            return CommandResult("demand.get", {"demand": demand})
-    except ValueError as exc:
-        raise cli_contract.CliError("INVALID_ARGUMENT", str(exc)) from exc
-    raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown demand command: {command}")
 
 
 def _dispatch_track(args: list[str]) -> CommandResult:
@@ -425,38 +447,27 @@ def _require_no_args(args: list[str], context: str) -> None:
 
 
 def _single_required_option(args: list[str], option: str, context: str) -> str:
-    values = _parse_required_options(args, required=(option,), context=context)
-    return values[option]
+    return cli_contract.single_required_option(args, option, context)
 
 
 def _optional_single_option(args: list[str], option: str, context: str) -> str | None:
-    values = _parse_options(args, allowed=(option,), context=context)
-    return values.get(option)
+    return cli_contract.optional_single_option(args, option, context)
 
 
 def _parse_required_options(args: list[str], *, required: tuple[str, ...], context: str) -> dict[str, str]:
-    values = _parse_options(args, allowed=required, context=context)
-    for option in required:
-        if option not in values:
-            raise cli_contract.CliError("INVALID_ARGUMENT", f"{context} requires {option} <value>")
-    return values
+    return cli_contract.parse_required_options(
+        args,
+        required=required,
+        context=context,
+    )
 
 
 def _parse_options(args: list[str], *, allowed: tuple[str, ...], context: str) -> dict[str, str]:
-    values: dict[str, str] = {}
-    index = 0
-    allowed_set = set(allowed)
-    while index < len(args):
-        option = args[index]
-        if option not in allowed_set:
-            raise cli_contract.CliError("INVALID_ARGUMENT", f"{context} does not accept: {option}")
-        if option in values:
-            raise cli_contract.CliError("INVALID_ARGUMENT", f"{context} received {option} more than once")
-        if index + 1 >= len(args) or not args[index + 1] or args[index + 1].startswith("-"):
-            raise cli_contract.CliError("INVALID_ARGUMENT", f"{context} requires {option} <value>")
-        values[option] = args[index + 1]
-        index += 2
-    return values
+    return cli_contract.parse_options(
+        args,
+        allowed=allowed,
+        context=context,
+    )
 
 
 def _parse_input(args: list[str]) -> tuple[str, str]:
@@ -875,7 +886,3 @@ def _map_actor_session_error(exc: actor_session.ActorSessionError) -> cli_contra
     ):
         return cli_contract.CliError("EXECUTION_FAILED", message)
     return cli_contract.CliError("INTERNAL_ERROR", "Unexpected internal error")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

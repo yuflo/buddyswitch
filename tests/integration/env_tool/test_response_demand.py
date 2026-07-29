@@ -6,11 +6,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.launcher import demand_triage_runtime
 from buddyswitch.launcher import side_thread_registry
-from buddyswitch.env.domain import demand_sys, task_sys
-from buddyswitch.env.repos import demands
+from buddyswitch.env.domain import task_sys
 from buddyswitch.env.services import messages as message_service
+from buddyswitch.modules.demand.private.adapters.daemon import (
+    demand_triage_runtime,
+)
+from buddyswitch.modules.demand.private.domain import demand_sys
+from buddyswitch.modules.demand.private.state import demands
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 
 
@@ -222,7 +225,7 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
             "request_id": f"req-{side_thread_id}",
         }
         if token is not None:
-            invocation["demand_inbound_capability"] = token
+            invocation["bound_capability"] = token
         return self._dispatch(
             instance_json=instance_json,
             actor_id=actor_label,
@@ -293,7 +296,7 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
         )
         self._assert_success_contract(opened)
         self.assertEqual(opened["demand"]["description"], "Ship a calendar.")
-        self.assertNotIn("demand_inbound_capability", json.dumps(result))
+        self.assertNotIn("bound_capability", json.dumps(result))
 
     def test_resolve_inbound_handled_reports_one_verified_durable_reply(self) -> None:
         actor_label = "act-dev-demand-wire-handled"

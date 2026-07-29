@@ -19,13 +19,12 @@ ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.launcher import demand_sys_daemon_adapter  # noqa: E402
-from buddyswitch.env.domain import demand_sys  # noqa: E402
 from buddyswitch.env.domain import task_sys  # noqa: E402
-from buddyswitch.env.repos import demands  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
 from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
+from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
+from buddyswitch.modules.demand.private.state import demands  # noqa: E402
 
 TRACK_COMMENT_DOMAIN_PATH = ROOT / "src" / "buddyswitch" / "env" / "domain" / "track_comments.py"
 DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"

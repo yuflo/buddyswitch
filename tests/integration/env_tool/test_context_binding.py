@@ -51,7 +51,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIsInstance(context.task_goal_runtime, runtime_context.TaskGoalRuntimeAccess)
         self.assertFalse(hasattr(context, "task_sys_runtime"))
         self.assertIsInstance(context.im_actor_delivery, runtime_context.ImActorDeliveryAccess)
-        self.assertIs(context.rules.demand_sys, runtime_context._demand_sys_domain)
+        self.assertFalse(hasattr(context.rules, "demand_sys"))
         self.assertFalse(hasattr(context.repos, "demand"))
         self.assertFalse(hasattr(context.repos, "demands"))
         self.assertFalse(hasattr(context, "daemon"))

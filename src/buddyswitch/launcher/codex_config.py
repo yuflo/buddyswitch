@@ -19,8 +19,28 @@ MANAGED_COMMENT = "# BuddySwitch managed automation permissions"
 MCP_SERVER_PREFIX = "mcp_servers."
 ENV_MCP_SECTION = "mcp_servers.buddyswitch-env"
 MCP_TOOLS_APPROVAL_KEY = "default_tools_approval_mode"
-PARENT_DEMAND_DISABLED_TOOLS = 'disabled_tools = ["demand_sys__resolve_inbound"]\n'
+_PARENT_DISABLED_TOOLS: tuple[str, ...] = ()
 WEB_SEARCH_KEY = "web_search"
+
+
+def configure_parent_disabled_tools(tool_names: tuple[str, ...]) -> None:
+    if not isinstance(tool_names, tuple) or not all(
+        isinstance(name, str) and name.strip()
+        for name in tool_names
+    ):
+        raise ValueError("parent disabled tools must be a tuple of names")
+    if len(set(tool_names)) != len(tool_names):
+        raise ValueError("parent disabled tools must be unique")
+    global _PARENT_DISABLED_TOOLS
+    _PARENT_DISABLED_TOOLS = tuple(tool_names)
+
+
+def _parent_disabled_tools_row() -> str:
+    return (
+        "disabled_tools = "
+        + json.dumps(list(_PARENT_DISABLED_TOOLS), ensure_ascii=False)
+        + "\n"
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -304,7 +324,7 @@ def patch_mcp_server_approvals(config_text: str) -> str:
     return "".join(output)
 
 
-def patch_parent_demand_tool_projection(config_text: str) -> str:
+def patch_parent_tool_projection(config_text: str) -> str:
     lines = config_text.splitlines(keepends=True)
     output: list[str] = []
     in_env_mcp = False
@@ -329,7 +349,7 @@ def patch_parent_demand_tool_projection(config_text: str) -> str:
             continue
         if in_env_mcp and top_level_key_assignment(line, "disabled_tools"):
             if not filter_written:
-                output.append(PARENT_DEMAND_DISABLED_TOOLS)
+                output.append(_parent_disabled_tools_row())
                 filter_written = True
             continue
         output.append(line)
@@ -343,10 +363,10 @@ def patch_parent_demand_tool_projection(config_text: str) -> str:
 def append_mcp_projection(output: list[str]) -> None:
     if output and output[-1].strip() == "":
         trailing_blank = output.pop()
-        output.append(PARENT_DEMAND_DISABLED_TOOLS)
+        output.append(_parent_disabled_tools_row())
         output.append(trailing_blank)
         return
-    output.append(PARENT_DEMAND_DISABLED_TOOLS)
+    output.append(_parent_disabled_tools_row())
 
 
 def path_contains(container: Path, path: Path) -> bool:
@@ -539,7 +559,7 @@ def patched_config_text(
 ) -> str:
     preserved = strip_managed_sections(existing_text)
     if profile_mode:
-        preserved = patch_parent_demand_tool_projection(preserved)
+        preserved = patch_parent_tool_projection(preserved)
     preserved = patch_mcp_server_approvals(preserved).rstrip("\n")
     managed_top_level = render_managed_permission_top_level_block() if profile_mode else render_managed_top_level_block()
     if profile_mode:
@@ -584,7 +604,3 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -293,7 +293,3 @@ def main() -> int:
     if args.command != "serve":
         print(json.dumps(payload, ensure_ascii=True))
     return code
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -742,31 +742,31 @@ def _marker_matches_profile(snapshot: BrowserResourceSnapshot) -> bool:
 
 
 def _terminate_owned_record(record: process_identity.RecordedProcess) -> bool:
-    if not process_identity.is_running(record):
-        _reap_child_pid(record.pid)
-        return False
     try:
-        pgid = os.getpgid(record.pid)
-        current_pgid = os.getpgid(os.getpid())
-    except (ProcessLookupError, PermissionError):
-        return False
-    if pgid == current_pgid or not process_identity.is_running(record):
-        return False
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        return False
-    if not _wait_pgid_gone(pgid):
-        if not process_identity.is_running(record) and not _pgid_alive(pgid):
-            _reap_child_pid(record.pid)
-            return True
+        if not process_identity.is_running(record):
+            return False
         try:
-            os.killpg(pgid, signal.SIGKILL)
+            pgid = os.getpgid(record.pid)
+            current_pgid = os.getpgid(os.getpid())
         except (ProcessLookupError, PermissionError):
-            return not _pgid_alive(pgid)
-        _wait_pgid_gone(pgid)
-    _reap_child_pid(record.pid)
-    return True
+            return False
+        if pgid == current_pgid or not process_identity.is_running(record):
+            return False
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            return False
+        if not _wait_pgid_gone(pgid):
+            if not process_identity.is_running(record) and not _pgid_alive(pgid):
+                return True
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                return not _pgid_alive(pgid)
+            _wait_pgid_gone(pgid)
+        return True
+    finally:
+        _reap_child_pid(record.pid)
 
 
 def _stop_owned_chrome_processes(snapshot: BrowserResourceSnapshot) -> list[int]:

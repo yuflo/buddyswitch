@@ -6,11 +6,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from buddyswitch.launcher import demand_sys_daemon_adapter
 from buddyswitch.launcher import im_wake_handler
 from buddyswitch.env.repos import identities as identity_repo
 from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.services import messages as message_service
+from buddyswitch.modules.demand.private.adapters.daemon import (
+    demand_sys_daemon_adapter,
+)
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 

@@ -197,7 +197,3 @@ def main() -> int:
 
     print(json.dumps(response, ensure_ascii=True, indent=2))
     return 0 if response.get("ok") is True else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

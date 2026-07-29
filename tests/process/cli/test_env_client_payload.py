@@ -43,7 +43,13 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def _tool_help_actions(self, tool: str) -> set[str]:
         completed = run_process(
-            [PYTHON, "-m", "buddyswitch.env.client", tool, "--help"],
+            [
+                PYTHON,
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                tool,
+                "--help",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -59,7 +65,12 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def test_cli_help_lists_tools_from_registry(self) -> None:
         completed = run_process(
-            [PYTHON, "-m", "buddyswitch.env.client", "--help"],
+            [
+                PYTHON,
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "--help",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -143,7 +154,15 @@ class EnvClientPayloadCliTests(unittest.TestCase):
 
     def test_actor_private_cli_resource_is_not_registered(self) -> None:
         completed = run_process(
-            [PYTHON, "-m", "buddyswitch.env.client", "actor_private", "write", "--payload", "{}"],
+            [
+                PYTHON,
+                "-m",
+                "buddyswitch.application.entrypoints.env_client",
+                "actor_private",
+                "write",
+                "--payload",
+                "{}",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,

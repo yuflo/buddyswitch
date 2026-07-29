@@ -53,7 +53,7 @@ def test_actor_tool_resolves_demand_at_boundary_and_exposes_exact_actions() -> N
     for retired in ("close", "need_parent"):
         assert f'name="{retired}"' not in tool_source
         assert f"def {retired}(" not in impl_source
-    assert "context.rules.demand_sys.resolve_demand_ref" in impl_source
+    assert "demand_public.resolve_demand_ref" in impl_source
     assert "task_goal_runtime" in impl_source
     assert "execution_brief" not in tool_source
     assert "selection_reason" in tool_source

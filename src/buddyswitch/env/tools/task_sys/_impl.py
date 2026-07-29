@@ -6,6 +6,7 @@ import importlib
 from typing import Any, Mapping
 
 from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.modules.demand import public as demand_public
 from .tool import DEFINITION
 
 _ACTION_ALLOWED_FIELDS = {
@@ -291,7 +292,7 @@ def _write_success(
 def create(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
     domain = _task_domain(context)
     try:
-        resolved_ref = context.rules.demand_sys.resolve_demand_ref(
+        resolved_ref = demand_public.resolve_demand_ref(
             actor_target=_actor_target(context),
             demand_ref=args.get("demand_ref"),
         )

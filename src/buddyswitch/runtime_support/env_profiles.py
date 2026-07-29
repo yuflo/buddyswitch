@@ -462,7 +462,3 @@ def main() -> int:
     except (EnvProfileError, ManifestError) as exc:
         print(f"Env profile invalid: {exc}", file=sys.stderr)
         return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -39,17 +39,28 @@ _FORBIDDEN_WORKSPACE_ENTRIES = (
     "buddyswitch-codex",
     "runs",
 )
-_BASE_CODEX_CONFIG = """[skills.bundled]
-enabled = false
-
-[[skills.config]]
-name = "demand-triage"
-enabled = false
-
-[features]
-plugins = false
-goals = true
-"""
+def base_codex_config() -> str:
+    disabled_skills = [
+        export.id
+        for export in runtime_skills.configured_skill_exports()
+        if not export.enabled_by_default
+    ]
+    skill_rows = "".join(
+        (
+            "\n[[skills.config]]\n"
+            f'name = "{skill_id}"\n'
+            "enabled = false\n"
+        )
+        for skill_id in disabled_skills
+    )
+    return (
+        "[skills.bundled]\n"
+        "enabled = false\n"
+        f"{skill_rows}\n"
+        "[features]\n"
+        "plugins = false\n"
+        "goals = true\n"
+    )
 
 
 class ActorEnvironmentBuildError(RuntimeError):
@@ -282,7 +293,10 @@ class ActorEnvironmentBuilder:
         ):
             directory.mkdir(parents=True, exist_ok=False)
 
-        (codex_home_dir / "config.toml").write_text(_BASE_CODEX_CONFIG, encoding="utf-8")
+        (codex_home_dir / "config.toml").write_text(
+            base_codex_config(),
+            encoding="utf-8",
+        )
         self._install_auth_surface(paths, codex_home_dir)
         shutil.copy2(paths.role_agents_path, workspace / "AGENTS.md", follow_symlinks=False)
         try:
@@ -614,7 +628,3 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(json.dumps(_result_payload(result), ensure_ascii=True))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
