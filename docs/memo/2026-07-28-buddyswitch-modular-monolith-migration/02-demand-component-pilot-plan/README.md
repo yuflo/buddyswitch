@@ -24,9 +24,14 @@ Read in order:
 10. `S2-FINAL-F003-BROWSER-LIFECYCLE-R1-RESUME-PLAN.md`;
 11. `S2-FINAL-F003-BROWSER-LIFECYCLE-R1-GOAL-PACKET.md`;
 12. `S2-ACCEPTANCE.md`;
-13. `S2-DELIVERY-RETROSPECTIVE.md`.
+13. `S2-DELIVERY-RETROSPECTIVE.md`;
+14. `S2-QUALITY-RATCHET-ADOPTION-PLAN.md`.
 
 The executor owns implementation and source-bound evidence only. The
 coordinating hub retains the master ledger, decisions, residue and acceptance
 authority. S2 is closed by `S2-ACCEPTANCE.md`; no packet in this directory is
 executable after acceptance.
+
+Items 13 and 14 are historical delivery rationale and its completed
+documentation-only adoption record. They are not active execution policy;
+the live owners they cite remain authoritative.

@@ -63,14 +63,17 @@ source and includes:
 3. complete affected pre-mutation preservation evidence;
 4. material boundary-contract matrix and representative final-topology
    preflight identities;
-5. read order and governing decisions;
-6. exact allowed, shared and forbidden scope;
-7. frozen behavior and protected contracts;
-8. task/checkpoint order and first direct proof;
-9. residue and current-guidance obligations;
-10. verification commands and cleanup;
-11. stop/replan conditions;
-12. exact asynchronous return packet.
+5. declared dependency, build, test and runtime environment identity;
+6. source-mutation to rebuild/install/activate/verify to proof ordering;
+7. read order and governing decisions;
+8. exact allowed, shared and forbidden scope;
+9. frozen behavior and protected contracts;
+10. task/checkpoint order and first direct proof;
+11. residue and current-guidance obligations;
+12. verification commands, complete contrary-evidence reporting and
+    identity-safe cleanup;
+13. stop/replan conditions;
+14. exact asynchronous return packet.
 
 The stage remains `PROPOSED` until the hub proves every required field exact
 and no boundary decision remains for the executor. A plan that delegates
@@ -126,6 +129,9 @@ Completed checkpoints:
 Changed/created/deleted files:
 Focused and final test commands:
 Run IDs, results, duration and cleanup:
+Declared dependency/runtime identity:
+Every failure/timeout/flake/residue signal since candidate freeze and owning disposition:
+Process/resource identity captured before cleanup deletion:
 Consumer-observed proof:
 Proposed residue closures/new residue:
 Current docs changed:
@@ -145,11 +151,20 @@ On return, the hub:
 3. inspects executable ownership and replacement;
 4. validates supplied tests against the current candidate;
 5. runs only missing or invalidated claim-scoped probes;
-6. checks residue, current guidance and cleanup;
-7. writes the acceptance record;
-8. transitions the ledger or reopens the owning checkpoint.
+6. rejects ad hoc dependencies, stale runtime ordering and any unresolved
+   failure, timeout, flake or residue signal, even after a later pass;
+7. checks that cleanup preserved parent-known process/resource identity until
+   the owning resource stopped;
+8. checks residue, current guidance and cleanup;
+9. writes the acceptance record;
+10. transitions the ledger or reopens the owning checkpoint.
 
 Only an accepted stage unlocks preparation of its successor.
+
+Stage-specific retrospectives may be linked as historical rationale. They do
+not become execution-policy owners. Root `AGENTS.md` and
+`$buddyswitch-testing` remain the durable authorities;
+`00-execution-governance.md` remains this migration's active plan projection.
 
 If the return contradicts the packet specification, the hub also applies
 D-037: retire the packet, identify the missing pre-READY proof and revalidate

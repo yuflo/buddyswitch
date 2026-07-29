@@ -10,6 +10,10 @@ This document prevents two failure modes:
 It defines the handoff unit, stage authority, checkpoint format, change
 control, pause/restart behavior, and acceptance ownership.
 
+Root `AGENTS.md` and `$buddyswitch-testing` own durable repository and testing
+policy. This document is the active execution-plan owner for this migration
+only; it projects those durable rules into S0–S7 and does not supersede them.
+
 `00-coordination-hub.md` owns how the coordinating Codex session and
 independent execution sessions interact. This document owns stage execution
 governance within that model.
@@ -136,6 +140,8 @@ Required evidence:
 | Current truth | every affected preservation group the packet will later rely on has run before mutation; every failure is explained and owner-classified |
 | Boundary contract | material positive, negative, correspondence, mutation and cleanup claims are proved or explicitly inapplicable |
 | Mechanism | packaging, filesystem, process or framework assumptions have an isolated representative final-topology probe |
+| Declared environment | the build, test and runtime environment is reproducible from committed declarations; no ad hoc package or hidden local mutation is required |
+| Execution order | every environment-consuming proof follows the source mutation and rebuild/install/activate/verify step that makes its runtime current |
 | Identity | every proof records source/diff, fixture, exact probe, result, cleanup and residual risk |
 | Handoff | no semantic owner, public/foundation contract, state identity or boundary decision remains for the executor to infer |
 
@@ -179,8 +185,11 @@ Stage / checkpoint:
 Source/diff identity:
 Completed outcome:
 Evidence:
+Failure/timeout/flake/residue signals since candidate freeze and owning disposition:
 Files changed:
 Residue closed/discovered:
+Declared dependency/runtime identity:
+Process/resource identity captured before cleanup deletion:
 Current risk:
 Next exact action:
 Stop/replan condition:
@@ -329,9 +338,12 @@ decision needed
 Resume begins by:
 
 1. confirming repository identity;
-2. confirming no external stage changed the owner/contract;
-3. re-running the nearest completed proof;
-4. updating the stage plan if facts changed.
+2. confirming the declared dependency/runtime environment is current;
+3. confirming no external stage changed the owner/contract;
+4. diagnosing every unresolved failure, timeout, flake or residue signal;
+5. re-running the nearest completed proof only after its owning diagnosis and
+   any required rebuild/install/activate/verify step;
+6. updating the stage plan if facts changed.
 
 Do not reconstruct state from chat history alone.
 
@@ -346,8 +358,15 @@ The migration lead verifies:
 - Architecture;
 - Replacement;
 - Operations;
+- declared dependency/runtime reproducibility;
+- complete failure, timeout, flake and residue history since candidate freeze,
+  with an owning disposition for every signal;
+- process/resource identity captured before cleanup removes its attribution;
 - documentation current truth;
 - residue register closure.
+
+A later pass never erases an unresolved contrary signal. Material undeclared
+environment mutation or unresolved failure history rejects acceptance.
 
 Only the migration lead changes the ledger state to `ACCEPTED`.
 

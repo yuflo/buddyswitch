@@ -16,6 +16,7 @@ Migration lead:
 Acceptance date:
 Public test run IDs:
 Real Actor/process identities where applicable:
+Declared dependency/build/test/runtime identity:
 ```
 
 ## 2. Outcome
@@ -87,6 +88,8 @@ Record:
 - failure attribution;
 - restart/recovery;
 - process/Actor/socket/lock/temp-root cleanup;
+- parent-known process/resource identity captured before owner stop and
+  attribution-root deletion;
 - logs/telemetry where applicable.
 
 ## 8. Current-document proof
@@ -116,7 +119,20 @@ cleanup:
 
 Include `git diff --check` and exact residue scans.
 
-## 10. Omitted checks and residual risk
+## 10. Contrary evidence since candidate freeze
+
+List every failure, timeout, flake and cleanup residue, including signals later
+followed by a passing run:
+
+| Signal/run | Source/environment identity | Owning diagnosis | Disposition and proof | Resolved |
+|---|---|---|---|---|
+| `[REQUIRED: exact signal or NONE]` | `[REQUIRED]` | `[REQUIRED]` | `[REQUIRED]` | YES / NO |
+
+Any material `NO`, missing owning diagnosis, ad hoc dependency install or
+hidden environment mutation rejects acceptance. A later pass does not erase
+the earlier signal.
+
+## 11. Omitted checks and residual risk
 
 For each omission:
 
@@ -130,18 +146,21 @@ next owner/action:
 Do not describe a material blocked proof as low risk merely to accept the
 stage.
 
-## 11. Final review
+## 12. Final review
 
 - [ ] Product proof agrees with persisted and consumer-visible effects.
 - [ ] Contract proof includes failure and authority.
 - [ ] Architecture boundary is machine-proved.
 - [ ] Every owned residue row is CLOSED.
+- [ ] Declared dependencies reproduce the build/test/runtime environment.
+- [ ] Every contrary signal since freeze has an owning resolved disposition.
+- [ ] Process/resource identity was captured before destructive cleanup.
 - [ ] Operations and cleanup are clean.
 - [ ] Current docs match executable truth.
 - [ ] No unrelated work was staged or rewritten.
 - [ ] Stage can stand without a later stage making it truthful.
 
-## 12. Transition proposal
+## 13. Transition proposal
 
 ```text
 Proposed ledger transition:

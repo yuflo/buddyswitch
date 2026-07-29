@@ -17,6 +17,13 @@ roles, and adding actors does not create new test obligations.
 - Run a finding-specific probe when a suspected issue needs evidence.
 - If the review needs a broader claim, run only the missing breadth.
 - Do not rerun focused or final verification merely to demonstrate independence.
+- For process-lifecycle proof, require a parent-known real process identity;
+  reject child-authored PID/timing markers as the sole observation boundary.
+- Require the owning controller to stop the process before deleting its root,
+  identity file, socket, or other attribution state.
+- Before adding another cleanup call to one return/exception branch, inspect
+  every terminal exit and relevant current history for the same invariant;
+  repair the lifecycle owner instead of stacking branch-local patches.
 
 ## Controller
 
@@ -41,6 +48,8 @@ Provide the next actor with:
 - changed behavior and direct boundaries
 - canonical commands and targets already run
 - source/environment identity and clean result
+- every contrary signal since freeze, its owning diagnosis, and disposition
+- process/resource identity captured before destructive cleanup where material
 - findings, residual risk, and any missing proof
 
 Review or handoff without repository changes does not make evidence stale.

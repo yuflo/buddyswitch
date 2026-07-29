@@ -10,8 +10,13 @@ Verification Evidence
 - state: <RED | GREEN | IMPACT | MILESTONE | FINAL | FIX_AFTER_FINAL>
 - source: <repo root, HEAD, tracked patch identity, non-ignored untracked identity>
 - command: <canonical command and explicit targets>
-- environment: <material runner and toolchain identity>
+- environment: <declared dependency inputs, material runner/toolchain/runtime
+  identity, and any local environment mutation>
 - result: <exit status, summary, duration, cleanup/residual state>
+- contrary-signals: <every failure, timeout, flake, or cleanup residue since
+  candidate freeze, with owning diagnosis and disposition>
+- cleanup-identity: <parent-known process/resource identity captured before
+  owner stop and attribution deletion, or exact inapplicability>
 - proves: <exact claim and direct boundaries>
 - valid-for: <current worktree or frozen SHA>
 - residual-risk: <none or explicit risk>
@@ -40,9 +45,13 @@ changes from its claim, but the command still ran in the complete worktree state
 | New claim is broader than recorded proof | Run only the missing scope |
 | Relevant source/test/fixture/contract changed | Invalidate affected scope |
 | Runner, dependency, or material environment changed | Invalidate prior execution evidence |
+| A required dependency or environment mutation is absent from committed declarations | Stop; repair the declared owner before further acceptance proof |
 | Pure prose outside executable contracts changed | Preserve code evidence; verify prose separately |
 | Identity is unknown or incomplete | Do not assume; rerun narrow proof |
-| Failure, flake, timeout, or cleanup residual occurred | Supersede earlier pass and diagnose |
+| Failure, flake, timeout, or cleanup residual occurred | Supersede earlier pass; diagnose the owning cause before reuse or rerun |
+
+A later pass does not restore evidence validity while a contrary signal remains
+without an owning diagnosis and source-bound disposition.
 
 ## FINAL Sensitivity
 
@@ -51,3 +60,6 @@ runner, dependency, generated executable artifact, merge, or rebase change that
 alters the candidate invalidates FINAL. During repair, run exact and affected proof;
 run final once after the candidate freezes again.
 
+Cleanup evidence remains attributable only when the controller or parent captures
+the real process/resource identity before stopping the owner and before deleting
+PID files, sockets, roots, or other attribution state.

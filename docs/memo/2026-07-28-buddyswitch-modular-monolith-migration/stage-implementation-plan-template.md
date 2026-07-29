@@ -196,7 +196,13 @@ baseline.
 # complete relevant type/function/assembly shape
 ```
 
-- [ ] **Step 4: Run focused GREEN**
+- [ ] **Step 4: Make the declared runtime current**
+
+If `src/buddyswitch/**` changed, rebuild/install/activate/verify the declared
+runtime. If it did not, record exact inapplicability. No
+`./buddyswitch-test` command may precede this gate after that source mutation.
+
+- [ ] **Step 5: Run focused GREEN**
 
 Run:
 
@@ -206,15 +212,20 @@ Run:
 
 Expected: PASS with run identity and clean residual state.
 
-- [ ] **Step 5: Refactor without changing behavior**
+- [ ] **Step 6: Refactor without changing behavior**
 
 Name the exact duplication, old owner, or private assembly being removed.
 
-- [ ] **Step 6: Re-run GREEN**
+- [ ] **Step 7: Make the declared runtime current after refactor**
+
+If the refactor changed `src/buddyswitch/**`, repeat
+rebuild/install/activate/verify. Otherwise record exact inapplicability.
+
+- [ ] **Step 8: Re-run GREEN**
 
 Record exact public command, run ID, result, duration, and cleanup.
 
-- [ ] **Step 7: Commit the coherent checkpoint**
+- [ ] **Step 9: Commit the coherent checkpoint**
 
 List exact files to stage. Do not stage unrelated work.
 ````

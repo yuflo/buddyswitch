@@ -49,6 +49,8 @@ Boundary negative proof:
 Correspondence/mutation/cleanup proof or exact inapplicability:
 Representative final-topology probe:
 Source/diff and material toolchain identity:
+Declared dependency/build/test/runtime inputs:
+Source-mutation -> rebuild/install/activate/verify -> proof order:
 Cleanup:
 Residual private implementation risk:
 ```
@@ -68,6 +70,22 @@ the packet is not READY.
 6. current stage implementation plan/checkpoints;
 7. applicable decisions, findings and residue rows;
 8. current executable contracts/tests/docs.
+
+### Before acting
+
+Durable authority: root `AGENTS.md` and `$buddyswitch-testing`. Active
+migration-plan projection: `00-execution-governance.md`, D-037 and D-044.
+Link any stage retrospective only as historical rationale.
+
+- unresolved failure/timeout/flake/residue: diagnose and stop; a later pass
+  does not erase it;
+- undeclared dependency or hidden environment mutation: stop;
+- `src/buddyswitch/**` mutation: rebuild/install/activate/verify before the
+  next `./buddyswitch-test` command;
+- resource cleanup: capture parent-known identity and stop the owner before
+  deleting attribution;
+- repeated branch-local lifecycle repair: inspect all terminal exits and
+  relevant history before editing.
 
 ## 6. Allowed and forbidden scope
 
@@ -104,6 +122,8 @@ Link exact checkpoint documents and state the order. For each checkpoint name:
 
 - first RED or preservation proof;
 - exact files/disposition;
+- declared environment and, after any `src/buddyswitch/**` mutation, the
+  rebuild/install/activate/verify gate before another public-runner command;
 - focused verification;
 - required checkpoint return;
 - stop condition.
@@ -169,8 +189,12 @@ Source commit and exact final diff:
 Completed checkpoints:
 Changed/created/deleted files:
 Focused/final commands and run IDs:
+Declared dependency/runtime identity:
+Every failure/timeout/flake/residue signal since candidate freeze:
+Owning diagnosis and disposition for every signal:
 Consumer-observed result:
 Runtime/process/Actor identities:
+Process/resource identity captured before cleanup deletion:
 Cleanup/residual state:
 Proposed residue closures/new residue:
 Current docs changed:

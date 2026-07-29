@@ -13,17 +13,36 @@ Owning module/capability:
 Source commit:
 Exact dirty diff:
 Implementation plan:
+Live delivery rules:
+Stage-specific historical rationale:
 ```
 
 ## Read in this order
 
 1. root `AGENTS.md`;
-2. target architecture design;
-3. master roadmap;
-4. execution governance;
-5. current stage charter;
-6. current stage implementation plan;
-7. relevant decision and residue rows.
+2. `$buddyswitch-testing`;
+3. target architecture design;
+4. master roadmap;
+5. execution governance;
+6. current stage charter;
+7. current stage implementation plan;
+8. relevant decision and residue rows.
+
+## Before acting
+
+Durable authority: root `AGENTS.md` and `$buddyswitch-testing`. Active
+migration-plan projection: `00-execution-governance.md`, D-037 and D-044.
+A stage retrospective is historical rationale only.
+
+- unresolved failure/timeout/flake/residue: diagnose and stop; a later pass
+  does not erase it;
+- undeclared dependency or hidden environment mutation: stop;
+- `src/buddyswitch/**` mutation: rebuild/install/activate/verify before the
+  next `./buddyswitch-test` command;
+- resource cleanup: capture parent-known identity and stop the owner before
+  deleting attribution;
+- repeated branch-local lifecycle repair: inspect all terminal exits and
+  relevant history before editing.
 
 ## Allowed work
 
@@ -89,6 +108,8 @@ Stage-specific forbidden scope:
 
 ```text
 semantic owner changes
+accepted mechanism or READY specification is contradicted
+direct proof cannot detect the claimed outcome
 public/host contract must change outside the plan
 persisted state identity/schema changes
 another stage's owner is required
@@ -106,8 +127,11 @@ Stage / checkpoint:
 Source/diff identity:
 Completed outcome:
 Evidence:
+Failure/timeout/flake/residue signals since candidate freeze and owning disposition:
 Files changed:
 Residue closed/discovered:
+Declared dependency/runtime identity:
+Process/resource identity captured before cleanup deletion:
 Current risk:
 Next exact action:
 Stop/replan condition:

@@ -1,6 +1,6 @@
 # S2 Delivery Retrospective and Quality-Ratchet Design
 
-> Status: `DESIGN ACCEPTED — WRITTEN REVIEW PENDING`
+> Status: `ADOPTED`
 > Scope: S2 delivery and verification process
 > Product outcome: S2 remains `ACCEPTED`
 > Policy authority: none; this is a historical root-cause and adoption design
@@ -16,11 +16,14 @@ record separates:
 - the accepted product architecture;
 - latent defects correctly exposed by broader proof;
 - execution and coordination mistakes that should not recur;
-- the smallest changes to existing governance owners that prevent recurrence.
+- the smallest changes to existing durable owners and active plan projections
+  that prevent recurrence.
 
 This memo is historical evidence, not a second testing policy, lifecycle
-state, packet validator or acceptance authority. After written review, the
-selected rules must move into the existing owners named in section 8.
+state, packet validator or acceptance authority. Reusable testing judgment
+moves into `$buddyswitch-testing`; the active migration plan projects durable
+root `AGENTS.md` and skill rules into the execution surfaces named in section
+8.
 
 ## 2. Outcome that did not fail
 
@@ -235,10 +238,33 @@ that environment. For BuddySwitch package source:
 source mutation -> runtime reprovision -> activation verify -> test
 ```
 
-The current implementation-plan template still teaches
+At the start of this review, the implementation-plan template still taught
 “implementation -> GREEN” without this mandatory boundary. D-044 is therefore
-accepted policy that has not yet been fully projected into its execution
-templates.
+the accepted policy projected by the adoption recorded below.
+
+### 6.6 Read-only pressure baseline
+
+A separate read-only Codex worker reviewed the pre-adoption instructions
+against five S2-derived scenarios and made no repository edits:
+
+| Scenario | Pre-adoption decision | Demonstrated gap |
+|---|---|---|
+| timeout followed by three passes | STOP; existing testing skill already superseded the pass | owning-diagnosis closure and execution-handoff visibility were not explicit |
+| manually installed undeclared package | REPAIR the declared owner | manual install prohibition and canonical declaration provenance were not prominent |
+| package-source mutation followed by GREEN before reprovision | reorder after reprovision | implementation-plan template lacked the mandatory gate |
+| child asynchronously writes the only PID marker | STOP and redesign the proof | parent-known real-process identity was not an explicit reviewer probe |
+| another branch-local cleanup patch for a repeated invariant | STOP and repair the owner boundary | all-terminal-exit and relevant-history review were absent from action-time guidance |
+
+The pressure result also identified `executor-handoff-card.md` as the most
+likely action-time surface and found that its read order omitted
+`$buddyswitch-testing`. The adoption therefore changes that existing handoff
+instead of creating a new policy layer.
+
+The same worker repeated the review after adoption. It confirmed that root
+`AGENTS.md` and `$buddyswitch-testing` are the durable authorities,
+`00-execution-governance.md` is only the active migration-plan projection,
+the handoff stops on a contradicted READY mechanism or inadequate direct
+proof, and no duplicate-policy-owner contradiction remains.
 
 ## 7. Considered approaches
 
@@ -261,7 +287,8 @@ runtime mismatch. A new validator is rejected as speculative complexity.
 
 ## 8. Selected adoption surfaces
 
-The implementation is deliberately limited to existing owners.
+The implementation is deliberately limited to existing durable owners and
+active migration-plan projections.
 
 ### 8.1 Execution governance
 
@@ -359,7 +386,7 @@ docs/memo/2026-07-28-buddyswitch-modular-monolith-migration/
 
 Add the declared environment, execution ordering and complete failure history
 to just-in-time Goal Packet and hub acceptance responsibilities. It remains a
-projection of `00-execution-governance.md`, not a second owner.
+projection of the active migration plan, not a durable policy owner.
 
 ## 9. Explicit non-goals
 
@@ -386,8 +413,9 @@ The governance update is complete only when:
    cleanup ordering;
 5. lifecycle branch repair review requires all-terminal-exit and relevant
    history inspection;
-6. `00-execution-governance.md` remains the sole migration execution-policy
-   owner;
+6. root `AGENTS.md` and `$buddyswitch-testing` remain the durable policy
+   owners, while `00-execution-governance.md` remains this migration's active
+   plan owner;
 7. artifact checks pass and no executable source, test or runtime changes.
 
 ## 11. S3 admission effect
@@ -408,3 +436,34 @@ successor and must apply the new rules while preparing:
 
 S3 implementation remains unauthorized until that packet is reviewed and
 declared READY by the coordinating hub.
+
+## 12. Adoption record
+
+The accepted lessons are now projected through these durable owners, active
+migration plan and execution-facing views:
+
+```text
+durable policy owners:
+  root AGENTS.md
+  .agents/skills/buddyswitch-testing/references/evidence.md
+  .agents/skills/buddyswitch-testing/references/review.md
+
+active migration-plan projection:
+  00-execution-governance.md
+
+execution projections:
+  00-coordination-hub.md
+  executor-handoff-card.md
+  stage-goal-packet-template.md
+  stage-implementation-plan-template.md
+  stage-acceptance-template.md
+```
+
+The Goal Packet and handoff card provide the action-time reminder and cite
+the durable owners, active migration plan, D-037 and D-044. An S3 packet must
+additionally link this retrospective only as historical rationale.
+
+No new migration state, packet validator, runner, evidence service, policy
+owner, executable source, test, dependency declaration or runtime path was
+added. The adoption implementation is recorded in
+`S2-QUALITY-RATCHET-ADOPTION-PLAN.md`.
