@@ -232,8 +232,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/modules/demand/private/state/demands.py",
         ),
         REPO_ROOT / "docs" / "arch" / "task-sys-architecture.md": (
-            "src/buddyswitch/env/domain/task_sys.py",
-            "src/buddyswitch/launcher/task_goal_handler.py",
+            "src/buddyswitch/modules/task/private/domain/task_sys.py",
+            "src/buddyswitch/modules/task/private/adapters/goal/handler.py",
         ),
     }
     missing_required_paths = sorted(

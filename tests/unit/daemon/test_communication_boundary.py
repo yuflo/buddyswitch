@@ -21,7 +21,7 @@ DAEMON_OWNED_FILES = [
     ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "task_goal_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
     ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py",
     ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "context.py",
@@ -34,7 +34,7 @@ PRODUCT_HANDLER_PATHS = (
     ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "task_goal_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "browser_page_expired_handler.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "browser_release_handler.py",
@@ -90,11 +90,11 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         context_tree = ast.parse(context_source, filename=str(CONTEXT_PATH))
         class_names = {node.name for node in ast.walk(context_tree) if isinstance(node, ast.ClassDef)}
         self.assertNotIn("Daemon" + "Access", class_names)
+        self.assertNotIn("TaskGoalRuntimeAccess", class_names)
         self.assertNotIn('"daemon"', context_source)
         for name in (
             "ActorDirectoryAccess",
             "SignalDeliveryAccess",
-            "TaskGoalRuntimeAccess",
             "ImActorDeliveryAccess",
         ):
             self.assertIn(name, class_names)

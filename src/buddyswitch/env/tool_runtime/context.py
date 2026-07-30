@@ -14,7 +14,6 @@ from buddyswitch.env.domain import artifact_relations as _artifact_relations_dom
 from buddyswitch.env.domain import artifact_visibility as _artifact_visibility_domain
 from buddyswitch.env.domain import actor_private_workspace as _actor_private_workspace_domain
 from buddyswitch.env.domain import source_refs as _source_ref_domain
-from buddyswitch.env.domain import task_sys as _task_sys_domain
 from buddyswitch.env.domain import track_comments as _track_comment_domain
 from buddyswitch.env.domain import track_artifact_relations as _track_artifact_relations_domain
 from buddyswitch.env.domain.identity import ActorIdentityProfile
@@ -30,7 +29,6 @@ from buddyswitch.env.repos import track_comments as _track_comment_repo
 from buddyswitch.env.repos import tracks as _track_repo
 from buddyswitch.env.tool_runtime import daemon_client
 from buddyswitch.env.tool_runtime import im_actor_delivery
-from buddyswitch.env.tool_runtime import task_goal_runtime_client
 from buddyswitch.env.tool_runtime import role_auth as _role_auth
 import re
 
@@ -394,19 +392,6 @@ class ImActorDeliveryAccess:
         return im_actor_delivery.deliver(payload)
 
 
-class TaskGoalRuntimeAccess:
-    """Task-owned access to the daemon's native Goal reconciliation adapter."""
-
-    def __init__(self, *, instance_json: Path) -> None:
-        self._instance_root = instance_json.parent
-
-    def reconcile_task(self, task_id: str) -> dict[str, Any]:
-        return task_goal_runtime_client.reconcile_task(
-            instance_root=self._instance_root,
-            task_id=task_id,
-        )
-
-
 @dataclass(frozen=True)
 class DomainAccess:
     """Host-owned domain validator/normalizer access."""
@@ -415,7 +400,6 @@ class DomainAccess:
     artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
     actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
     source_refs: Any = field(default_factory=lambda: _source_ref_domain)
-    task_sys: Any = field(default_factory=lambda: _task_sys_domain)
     track_comment: Any = field(default_factory=lambda: _track_comment_domain)
     track_artifact_relations: Any = field(default_factory=lambda: _track_artifact_relations_domain)
 
@@ -491,11 +475,6 @@ class ToolContext(Mapping[str, Any]):
                 current_identity=self.current_identity,
                 role_id=self.role_id,
             ),
-        )
-        object.__setattr__(
-            self,
-            "task_goal_runtime",
-            TaskGoalRuntimeAccess(instance_json=self.instance_json),
         )
         object.__setattr__(
             self,

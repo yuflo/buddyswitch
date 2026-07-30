@@ -6,7 +6,7 @@ import copy
 import importlib
 import pkgutil
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import buddyswitch.env.tools
 
@@ -22,6 +22,7 @@ _DEFINITION_CACHE: dict[str, ToolDefinition] = {}
 _EXPLICIT_REGISTRATIONS: dict[str, ToolRegistration] = {}
 _LOAD_ERRORS: dict[str, dict[str, str]] = {}
 _RETIRED_TOOL_IDS = frozenset({"task"})
+_ACTIVE_TASK_PROBE: Callable[[Any], bool] | None = None
 
 
 def clear_cache() -> None:
@@ -49,6 +50,15 @@ def configure_tool_registrations(
     _EXPLICIT_REGISTRATIONS.clear()
     _EXPLICIT_REGISTRATIONS.update(configured)
     clear_cache()
+
+
+def configure_active_task_probe(
+    probe: Callable[[Any], bool] | None,
+) -> None:
+    if probe is not None and not callable(probe):
+        raise ValueError("active Task probe must be callable")
+    global _ACTIVE_TASK_PROBE
+    _ACTIVE_TASK_PROBE = probe
 
 
 def discover_tool_ids() -> list[str]:
@@ -665,10 +675,7 @@ def dispatch_env_tool_request(
         invocation=InvocationFact(**normalized_invocation),
     )
     if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED:
-        from buddyswitch.env.domain import task_sys
-
-        projection = task_sys.actor_task_projection(actor_profile=runtime_actor)
-        if projection["active_count"] == 0:
+        if _ACTIVE_TASK_PROBE is None or not _ACTIVE_TASK_PROBE(runtime_actor):
             return _active_task_required_rejection(
                 tool=tool,
                 action=action,

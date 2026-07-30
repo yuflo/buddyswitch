@@ -20,7 +20,7 @@ from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.repos import track_comments as track_comment_repo
 from buddyswitch.env.repos import tracks as track_repo
 from tests.support import object_builders
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -263,7 +263,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
         before = json.loads(track_repo._track_file("track-task-hint").read_text(encoding="utf-8"))
 
         instance_root = self._instance_root("act-task-track-hint")
-        result = task_sys.create(
+        result = task_fixtures.create_task(
             actor_target={"actor_id": "act-dev-task-track-hint", "role_id": "dev"},
             demand_ref={
                 "demand_id": "demand-task-track-hint",
@@ -292,7 +292,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("artifact_ids", task)
         self.assertNotIn("artifact_slots", task)
 
-        stored = task_sys.get_task(result["task_id"])
+        stored = task_fixtures.get_task_record(result["task_id"])
         self.assertIsNotNone(stored)
         assert isinstance(stored, dict)
         self.assertNotIn("artifact_ids", stored)
@@ -317,7 +317,7 @@ class TaskTrackStoreContractTests(RuntimeWorkspaceTestCase):
             "updated_at": "2026-05-18T10:00:00+08:00",
         }
         with self.assertRaisesRegex(ValueError, "retired or invalid Task record"):
-            task_sys._validate_task(payload)
+            task_fixtures.validate_task_record(payload)
 
 
 class TrackStoreContractTests(RuntimeWorkspaceTestCase):

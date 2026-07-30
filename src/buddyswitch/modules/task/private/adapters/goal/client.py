@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-import sys
 from typing import Any, Mapping
 
 
 from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
-from buddyswitch.env.tool_runtime import task_goal_runtime_protocol as protocol  # noqa: E402
+from buddyswitch.modules.task.private.adapters.goal import protocol  # noqa: E402
 
 TASK_GOAL_RESPONSE_TIMEOUT_SECONDS = 65.0
 
@@ -19,6 +19,17 @@ class TaskGoalRuntimeClientError(RuntimeError):
         self.code = code
         self.message = message
         self.response = dict(response) if response is not None else None
+
+
+@dataclass(frozen=True)
+class TaskGoalClient:
+    instance_root: Path
+
+    def reconcile_task(self, task_id: str) -> dict[str, Any]:
+        return reconcile_task(
+            instance_root=self.instance_root,
+            task_id=task_id,
+        )
 
 
 def reconcile_task(

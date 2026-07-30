@@ -19,7 +19,7 @@ from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.repos import track_comments as track_comment_repo
 from buddyswitch.env.repos import tracks as track_repo
 from tests.support import object_builders
-from buddyswitch.env.domain import task_sys
+from tests.support import task_fixtures
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 import buddyswitch.runtime_kernel.lifecycle as runtime_lifecycle  # noqa: E402
@@ -370,7 +370,7 @@ class RunlessRuntimeContractTests(unittest.TestCase):
 
     def test_task_artifact_records_reject_run_fields(self) -> None:
         with self.assertRaises(ValueError):
-            task_sys._validate_task(
+            task_fixtures.validate_task_record(
                 {
                     "id": "task-pm-runless",
                     "role": "pm",

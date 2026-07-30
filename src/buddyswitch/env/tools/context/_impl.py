@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 from buddyswitch.runtime_support import env_profiles
 from buddyswitch.env.tool_runtime import registry as tool_registry
 from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.modules.task import public as task_public
 from .tool import DEFINITION
 
 
@@ -382,8 +383,8 @@ def _visible_tasks(
     limit_value: int,
     context: ContextServiceContext,
 ) -> list[dict[str, Any]]:
-    projection = context.rules.task_sys.actor_task_projection(
-        actor_profile=context.current_actor_identity_profile,
+    projection = task_public.actor_task_projection(
+        context.current_actor_identity_profile,
     )
     tasks = projection["tasks"]
     if isinstance(task_filter, str) and task_filter.strip():

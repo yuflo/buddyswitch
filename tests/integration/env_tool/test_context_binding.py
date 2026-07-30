@@ -21,7 +21,7 @@ from buddyswitch.env.repos import track_comments as track_comment_repo
 from buddyswitch.env.repos import tracks as track_repo
 from tests.support import object_builders
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.services import messages as message_service  # noqa: E402
 from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
@@ -48,9 +48,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
 
         self.assertIsInstance(context.actor_directory, runtime_context.ActorDirectoryAccess)
         self.assertIsInstance(context.signal_delivery, runtime_context.SignalDeliveryAccess)
-        self.assertIsInstance(context.task_goal_runtime, runtime_context.TaskGoalRuntimeAccess)
+        self.assertFalse(hasattr(context, "task_goal_runtime"))
+        self.assertFalse(hasattr(runtime_context, "TaskGoalRuntimeAccess"))
         self.assertFalse(hasattr(context, "task_sys_runtime"))
         self.assertIsInstance(context.im_actor_delivery, runtime_context.ImActorDeliveryAccess)
+        self.assertFalse(hasattr(context.rules, "task_sys"))
         self.assertFalse(hasattr(context.rules, "demand_sys"))
         self.assertFalse(hasattr(context.repos, "demand"))
         self.assertFalse(hasattr(context.repos, "demands"))
@@ -72,7 +74,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         detail = f"Context binding fixture for {source_type}."
         if track_id is not None:
             detail += f" Track context: {track_id}."
-        result = task_sys.create(
+        result = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": f"demand-context-{runtime_files.slugify(source_type)}",
@@ -128,9 +130,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             + "\n",
             encoding="utf-8",
         )
-        if not task_sys.list_tasks(
+        if not task_fixtures.list_task_records(
             actor_target={"actor_id": actor_id, "role_id": role},
-            statuses=task_sys.ACTIVE_TASK_STATUSES,
+            statuses=task_fixtures.ACTIVE_TASK_STATUSES,
         ):
             self._seed_active_task_for_instance(
                 instance_json=instance_json_path,
@@ -242,7 +244,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             source_type="test.context.archived",
             track_id="track-context-archived",
         )
-        archived_task = task_sys.get_task(self.archived_task_id)
+        archived_task = task_fixtures.get_task_record(self.archived_task_id)
         archived_goal = {
             "threadId": "thread-context-archived",
             "objective": archived_task["objective"],
@@ -253,8 +255,8 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             "createdAt": 100,
             "updatedAt": 101,
         }
-        task_sys.bind_goal(self.archived_task_id, archived_goal)
-        task_sys.record_goal_complete(
+        task_fixtures.bind_goal(self.archived_task_id, archived_goal)
+        task_fixtures.record_goal_complete(
             self.archived_task_id,
             archived_goal,
         )

@@ -51,7 +51,7 @@ _SHARED_ROOT = _shared_root_from_env()
 os.environ.setdefault("BUDDYSWITCH_SHARED_ROOT", str(_SHARED_ROOT))
 os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_SHARED_ROOT / "state"))
 
-from buddyswitch.env.domain import task_read, track_read  # noqa: E402
+from buddyswitch.env.domain import track_read  # noqa: E402
 from buddyswitch.launcher import (  # noqa: E402
     actor_session,
     central_daemon,
@@ -101,8 +101,6 @@ _HELP_TEMPLATE = """Usage:
   buddyswitch-codex instance capabilities <actor-id> get
   buddyswitch-codex instance capabilities <actor-id> set --parent <level> --side <level>
 
-  buddyswitch-codex task list [--actor <actor-id>]
-  buddyswitch-codex task get <task-id>
 {contributed_usage}
   buddyswitch-codex track list [--owner <identity-id>]
   buddyswitch-codex track get <track-id>
@@ -118,7 +116,6 @@ _HELP_TEMPLATE = """Usage:
 
 Commands:
   instance  Manage BuddySwitch product-mode instances.
-  task      Read external-safe Task projections.
 {contributed_commands}
   track     Read external-safe Track projections.
   data      Manage BuddySwitch data cleanup commands.
@@ -133,7 +130,7 @@ def _command_registrations(
 ) -> dict[str, cli_contract.CliCommandRegistration]:
     if not isinstance(registrations, tuple):
         raise ValueError("CLI registrations must be a tuple")
-    reserved = {"instance", "task", "track", "data", "env", "web", "help"}
+    reserved = {"instance", "track", "data", "env", "web", "help"}
     configured: dict[str, cli_contract.CliCommandRegistration] = {}
     for registration in registrations:
         if not isinstance(registration, cli_contract.CliCommandRegistration):
@@ -215,8 +212,6 @@ def _dispatch(
     command, rest = args[0], args[1:]
     if command == "instance":
         return _dispatch_instance(rest, help_text=help_text)
-    if command == "task":
-        return _dispatch_task(rest)
     if command in commands:
         return commands[command].handler(rest)
     if command == "track":
@@ -298,26 +293,6 @@ def _dispatch_capabilities(args: list[str], control: host_control.HostControl) -
             control.capabilities_set(actor_id, values[DASH + "parent"], values[DASH + "side"]),
         )
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown instance capabilities command: {action}")
-
-
-def _dispatch_task(args: list[str]) -> CommandResult:
-    if not args:
-        raise cli_contract.CliError("UNKNOWN_COMMAND", "task command is required")
-    command, rest = args[0], args[1:]
-    try:
-        if command == "list":
-            actor_id = _optional_single_option(rest, DASH + "actor", "task list")
-            target = _actor_target_from_id(actor_id) if actor_id is not None else None
-            return CommandResult("task.list", {"tasks": task_read.list_external_tasks(actor_target=target)})
-        if command == "get":
-            task_id = _single_positional(rest, "task id", "task get")
-            task = task_read.get_external_task(task_id)
-            if task is None:
-                raise cli_contract.CliError("NOT_FOUND", f"Task not found: {task_id}", {"task_id": task_id})
-            return CommandResult("task.get", {"task": task})
-    except ValueError as exc:
-        raise cli_contract.CliError("INVALID_ARGUMENT", str(exc)) from exc
-    raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown task command: {command}")
 
 
 def _dispatch_track(args: list[str]) -> CommandResult:
@@ -567,14 +542,6 @@ def _parse_web_args(args: list[str]) -> dict[str, str]:
         "host": parsed.get(DASH + "host"),
         "port": parsed.get(DASH + "port"),
     }
-
-
-def _actor_target_from_id(actor_id: str) -> dict[str, str]:
-    _validate_actor_id(actor_id)
-    role, separator, _suffix = actor_id.removeprefix("act-").partition("-")
-    if not separator or not role:
-        raise cli_contract.CliError("INVALID_ARGUMENT", "actor id must include a role segment")
-    return {"actor_id": actor_id, "role_id": role}
 
 
 def _require_known_actor(actor_id: str) -> None:

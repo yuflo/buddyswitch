@@ -340,6 +340,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         for tool, action, args, role in self._CHEAP_ACTION_CASES:
             payload_json = json.dumps({"tool": tool, "action": action, "args": args}, ensure_ascii=True)
             script = f"""
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -348,7 +349,24 @@ from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_manifest
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
 
-activate_application()
+application = activate_application()
+registration_by_tool = {{
+    registration.definition.id: registration
+    for registration in application.tools
+}}
+registration = registration_by_tool.get({tool!r})
+if registration is None:
+    selected_tool_module = importlib.import_module(
+        f"buddyswitch.env.tools.{{{tool!r}}}.tool"
+    )
+    selected_invoke_module = selected_tool_module.invoke.__module__
+else:
+    selected_invoke_module = registration.invoke.__module__
+expected = f"{{selected_invoke_module.rsplit('.', 1)[0]}}._impl"
+component_private_tool_roots = tuple(
+    f"{{registration.invoke.__module__.rsplit('.', 1)[0]}}."
+    for registration in application.tools
+)
 manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
@@ -368,11 +386,14 @@ loaded = sorted(
     and name.startswith(
         (
             "buddyswitch.env.tools.",
-            "buddyswitch.modules.demand.private.adapters.tool.",
+            *component_private_tool_roots,
         )
     )
 )
-print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
+print(json.dumps(
+    {{"response": response, "loaded": loaded, "expected": expected}},
+    sort_keys=True,
+))
 """
             completed = run_process(
                 [PYTHON, "-c", script],
@@ -386,11 +407,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
             loaded = payload["loaded"]
             response = payload["response"]
             with self.subTest(tool=tool, action=action):
-                expected = (
-                    "buddyswitch.modules.demand.private.adapters.tool._impl"
-                    if tool == "demand_sys"
-                    else f"buddyswitch.env.tools.{tool}._impl"
-                )
+                expected = payload["expected"]
                 self.assertIn(expected, loaded, msg=payload)
                 self.assertEqual(loaded, [expected], msg=payload)
                 if response.get("ok") is not True:

@@ -10,8 +10,8 @@ import unittest
 from unittest.mock import patch
 
 from buddyswitch.runtime_support import turn_runtime
-from buddyswitch.env.domain import task_sys
 from buddyswitch.env.repos import runtime_files
+from tests.support import task_fixtures
 
 
 RUNTIME_WORKSPACE_HEADER = "# BuddySwitch Runtime Workspace\n"
@@ -90,7 +90,7 @@ class RuntimeTestWorkspace:
         if track_id is not None:
             detail_parts.append(f"Track context: {track_id}")
         demand_id = _fixture_demand_id(role, actor_id, task_slug)
-        result = task_sys.create(
+        result = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": demand_id,
@@ -112,7 +112,7 @@ class RuntimeTestWorkspace:
     ) -> str:
         del instance_json
         demand_id = _fixture_demand_id(role, actor_id, task_slug)
-        result = task_sys.create(
+        result = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": demand_id,

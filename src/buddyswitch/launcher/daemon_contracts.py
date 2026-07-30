@@ -79,6 +79,7 @@ class DaemonHandler(Protocol):
 class DaemonHandlerRegistration:
     name: str
     factory: Callable[[], DaemonHandler]
+    application_command_factory: ApplicationCommandFactory | None = None
 
 
 class DaemonReconciler(Protocol):

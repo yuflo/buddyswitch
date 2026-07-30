@@ -70,6 +70,11 @@ The daemon activates and reconciles the bridge. Codex App Server owns native
 Goal persistence, continuation, turn scheduling, and model API calls. The
 daemon does not execute the Task objective.
 
+The Task registration also owns the factory for the single mailbox command
+`task_goal.reconcile_task`. The generic daemon extracts application-command
+factories from typed handler registrations; it neither imports Task nor names
+that command.
+
 ## Notifications and recovery
 
 App Server notifications are acceleration signals. Product handlers reread
@@ -89,11 +94,20 @@ does not add a product switch to daemon core.
 ## Composition root
 
 `src/buddyswitch/application/composition.py` is the production component
-selection root. It selects the passive Demand module once.
-`src/buddyswitch/application/build.py` validates and flattens its typed handler
-registrations. `src/buddyswitch/launcher/instance_daemon.py` imports only
-generic daemon orchestration and current unmigrated handlers, then merges the
-injected registrations in the current visible execution order.
+selection root. It selects the passive Demand assembly, constructs the passive
+Task assembly with Demand's resolver capability, and selects
+`(DEMAND, TASK)` once. It also owns the exact current component order:
+
+```text
+demand_triage -> task_goal -> demand_orchestration
+```
+
+`src/buddyswitch/application/build.py` validates that this order is a
+one-to-one permutation of the contributed handler names and flattens each
+typed registration, including Task's mailbox command factory.
+`src/buddyswitch/launcher/instance_daemon.py` imports only generic daemon
+orchestration and current unmigrated handlers, then merges the injected
+registrations in that explicit order.
 
 There is no plugin discovery, semantic event bus, central product workflow
 engine, or product service locator.
@@ -127,4 +141,5 @@ daemon status -> product storage
 transport -> product transition policy
 product tool -> broad daemon service locator
 generic host -> Demand private package
+generic host -> Task private package
 ```

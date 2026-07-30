@@ -74,9 +74,12 @@ def test_demand_is_one_passive_module_selected_once_by_application_composition()
     from buddyswitch.application.composition import COMPONENTS
     from buddyswitch.foundation.composition import ModuleAssembly
     from buddyswitch.modules.demand.module import DEMAND
+    from buddyswitch.modules.task.module import build_task_module
 
-    assert COMPONENTS == (DEMAND,)
+    assert COMPONENTS[0] is DEMAND
+    assert [module.name for module in COMPONENTS] == ["demand", "task"]
     assert isinstance(DEMAND, ModuleAssembly)
+    assert callable(build_task_module)
     assert [field.name for field in fields(ModuleAssembly)] == [
         "name",
         "daemon_handlers",
@@ -84,12 +87,19 @@ def test_demand_is_one_passive_module_selected_once_by_application_composition()
         "cli_commands",
         "skills",
         "cleanup",
+        "actor_console_sections",
     ]
 
     composition_imports = _imports(APPLICATION_COMPOSITION)
     assert composition_imports == {
+        "buddyswitch.modules.demand",
+        "buddyswitch.modules.demand.public",
         "buddyswitch.modules.demand.module",
         "buddyswitch.modules.demand.module.DEMAND",
+        "buddyswitch.modules.task",
+        "buddyswitch.modules.task.public",
+        "buddyswitch.modules.task.module",
+        "buddyswitch.modules.task.module.build_task_module",
     }
     composition_source = (REPO_ROOT / APPLICATION_COMPOSITION).read_text(encoding="utf-8")
     for private_name in (
@@ -111,18 +121,28 @@ def test_application_build_rejects_duplicate_and_invalid_contributions() -> None
     from buddyswitch.foundation.composition import ModuleAssembly
     from buddyswitch.modules.demand.module import DEMAND
 
-    built = build_application((DEMAND,))
+    built = build_application(
+        (DEMAND,),
+        daemon_handler_order=("demand_triage", "demand_orchestration"),
+    )
     assert built.modules == (DEMAND,)
     assert len(built.daemon_handlers) == 2
     assert len(built.tools) == 1
     assert len(built.cli_commands) == 1
     assert len(built.skills) == 2
     assert len(built.cleanup) == 1
+    assert len(built.actor_console_sections) == 0
 
     with pytest.raises(ValueError, match="module name"):
-        build_application((replace(DEMAND, name=""),))
+        build_application(
+            (replace(DEMAND, name=""),),
+            daemon_handler_order=("demand_triage", "demand_orchestration"),
+        )
     with pytest.raises(ValueError, match="duplicate module"):
-        build_application((DEMAND, DEMAND))
+        build_application(
+            (DEMAND, DEMAND),
+            daemon_handler_order=("demand_triage", "demand_orchestration"),
+        )
 
     duplicate_cases = (
         ("daemon handler", "daemon_handlers"),
@@ -137,11 +157,14 @@ def test_application_build_rejects_duplicate_and_invalid_contributions() -> None
             **{field_name: getattr(DEMAND, field_name)},
         )
         with pytest.raises(ValueError, match=expected):
-            build_application((DEMAND, duplicate))
+            build_application(
+                (DEMAND, duplicate),
+                daemon_handler_order=("demand_triage", "demand_orchestration"),
+            )
 
     invalid = ModuleAssembly(name="invalid", tools=(object(),))  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="ToolRegistration"):
-        build_application((invalid,))
+        build_application((invalid,), daemon_handler_order=())
 
 
 def test_demand_owner_public_and_local_proofs_have_one_final_physical_root() -> None:
@@ -215,7 +238,6 @@ def test_hosts_receive_typed_contributions_and_consumers_use_demand_public() -> 
         ], relative
 
     consumers = (
-        Path("src/buddyswitch/env/tools/task_sys/_impl.py"),
         Path("src/buddyswitch/launcher/im_wake_handler.py"),
         Path("src/buddyswitch/launcher/track_comment_added_handler.py"),
     )
@@ -413,7 +435,11 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
 
     orchestration_imports = _imports(FINAL_DAEMON_ROOT / "demand_orchestration_handler.py")
     assert "buddyswitch.modules.demand.private.domain.demand_sys" in orchestration_imports
-    assert "buddyswitch.env.domain.task_sys" in orchestration_imports
+    assert "buddyswitch.modules.task.public" in orchestration_imports
+    assert not any(
+        name.startswith("buddyswitch.modules.task.private")
+        for name in orchestration_imports
+    )
     assert "buddyswitch.launcher.daemon_contracts" in orchestration_imports
     instance_daemon_source = (REPO_ROOT / "src/buddyswitch/launcher/instance_daemon.py").read_text(encoding="utf-8")
     assert "DemandTriageHandler" not in instance_daemon_source
@@ -442,7 +468,7 @@ def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
     assert [
         registration.definition.id
         for registration in build_application().tools
-    ] == ["demand_sys"]
+    ] == ["demand_sys", "task_sys"]
 
     read_imports = _imports(FINAL_READ_MODEL)
     cli_imports = _imports(CLI)

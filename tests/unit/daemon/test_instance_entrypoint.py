@@ -69,10 +69,24 @@ def imported_modules(path: Path) -> set[str]:
 class InstanceDaemonEntrypointTests(unittest.TestCase):
     def test_task_application_commands_are_registered_only_at_composition_root(self) -> None:
         imports = imported_modules(INSTANCE_DAEMON_PATH)
-        self.assertIn("buddyswitch.launcher.task_goal_handler", imports)
+        self.assertFalse(
+            [
+                name
+                for name in imports
+                if name.startswith("buddyswitch.modules.task")
+                or name == "buddyswitch.launcher.task_goal_handler"
+            ]
+        )
         self.assertNotIn("task_sys_daemon_adapter", imports)
-        factories = self.instance_daemon.default_application_command_factories()
-        self.assertEqual(factories, [self.instance_daemon.task_goal_handler.command_handlers])
+        factories = self.instance_daemon.default_application_command_factories(
+            self.application.daemon_handlers
+        )
+        expected = [
+            registration.application_command_factory
+            for registration in self.application.daemon_handlers
+            if registration.name == "task_goal"
+        ]
+        self.assertEqual(factories, expected)
 
     def setUp(self) -> None:
         self.instance_daemon = load_instance_daemon()
@@ -99,7 +113,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             self.application.daemon_handlers
         )
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
-        self.assertIsInstance(handlers[-2], self.instance_daemon.task_goal_handler.TaskGoalHandler)
+        self.assertEqual(type(handlers[-2]).__name__, "TaskGoalHandler")
         self.assertEqual(type(handlers[-1]).__name__, "DemandOrchestrationHandler")
 
     def test_component_handler_identity_must_match_registration_and_built_ins(self) -> None:
@@ -121,18 +135,18 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
                 )
             )
 
-        class TaskGoalCollision:
-            name = "task_goal"
+        class BuiltInCollision:
+            name = "im_message_created"
 
         with self.assertRaisesRegex(
             ValueError,
-            "duplicate daemon handler registration: task_goal",
+            "duplicate daemon handler registration: im_message_created",
         ):
             self.instance_daemon.default_daemon_handlers(
                 (
                     DaemonHandlerRegistration(
-                        name="task_goal",
-                        factory=TaskGoalCollision,
+                        name="im_message_created",
+                        factory=BuiltInCollision,
                     ),
                 )
             )
@@ -172,7 +186,9 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
         self.assertEqual(
             recorded["application_command_factories"],
-            self.instance_daemon.default_application_command_factories(),
+            self.instance_daemon.default_application_command_factories(
+                self.application.daemon_handlers
+            ),
         )
 
     def test_start_prints_json_from_daemon_core(self) -> None:

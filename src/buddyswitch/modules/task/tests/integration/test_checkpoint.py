@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import sys
 import unittest
 from pathlib import Path
@@ -13,11 +12,12 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.modules.task.private.domain import task_sys  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
 def _task_sys() -> Any:
-    return importlib.import_module("buddyswitch.env.domain.task_sys")
+    return task_sys
 
 
 class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestCase):

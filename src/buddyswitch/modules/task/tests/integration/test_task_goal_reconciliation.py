@@ -8,9 +8,9 @@ from unittest.mock import patch
 from buddyswitch.launcher import daemon_contracts
 from buddyswitch.launcher import daemon_triggers
 from buddyswitch.launcher import instance_daemon
-from buddyswitch.launcher import task_goal_handler
-from buddyswitch.env.domain import task_sys
-from buddyswitch.env.tool_runtime import task_goal_runtime_protocol
+from buddyswitch.modules.task.private.adapters.goal import handler as task_goal_handler
+from buddyswitch.modules.task.private.adapters.goal import protocol as task_goal_runtime_protocol
+from buddyswitch.modules.task.private.domain import task_sys
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 
@@ -261,11 +261,14 @@ class TaskGoalReconciliationTests(RuntimeWorkspaceTestCase):
             task_goal_runtime_protocol.COMMAND_KEYS,
             frozenset({"task_goal.reconcile_task"}),
         )
-        factories = instance_daemon.default_application_command_factories()
         from buddyswitch.application.build import build_application
 
+        application = build_application()
+        factories = instance_daemon.default_application_command_factories(
+            application.daemon_handlers
+        )
         handlers = instance_daemon.default_daemon_handlers(
-            build_application().daemon_handlers
+            application.daemon_handlers
         )
 
         self.assertIn(task_goal_handler.command_handlers, factories)

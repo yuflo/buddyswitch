@@ -15,7 +15,6 @@ from buddyswitch.launcher import browser_inbound  # noqa: E402
 from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration  # noqa: E402
 from buddyswitch.launcher import message_inbound  # noqa: E402
 from buddyswitch.launcher import notification_center  # noqa: E402
-from buddyswitch.launcher import task_goal_handler  # noqa: E402
 from buddyswitch.launcher import track_comment_inbound  # noqa: E402
 
 
@@ -30,8 +29,14 @@ def default_notify_subscriptions() -> list[str]:
     return notification_center.subscriptions_from_registrations(default_notification_registrations())
 
 
-def default_application_command_factories() -> list[object]:
-    return [task_goal_handler.command_handlers]
+def default_application_command_factories(
+    component_registrations: Sequence[DaemonHandlerRegistration] = (),
+) -> list[object]:
+    return [
+        registration.application_command_factory
+        for registration in component_registrations
+        if registration.application_command_factory is not None
+    ]
 
 
 def default_daemon_handlers(
@@ -43,9 +48,8 @@ def default_daemon_handlers(
         *notification_center.handlers_from_registrations(registrations),
         *notification_center.handlers_from_registrations(browser_registrations),
     ]
-    task_goal = task_goal_handler.TaskGoalHandler()
     names: set[str] = set()
-    for handler in (*built_in_before, task_goal):
+    for handler in built_in_before:
         name = getattr(handler, "name", None)
         if not isinstance(name, str) or not name.strip():
             raise ValueError("built-in daemon handler name must be non-empty")
@@ -87,12 +91,7 @@ def default_daemon_handlers(
             )
         names.add(declared_name)
         component_handlers.append(handler)
-    return [
-        *built_in_before,
-        *component_handlers[:1],
-        task_goal,
-        *component_handlers[1:],
-    ]
+    return [*built_in_before, *component_handlers]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -129,7 +128,9 @@ def main(
                     instance_json,
                     handlers=default_daemon_handlers(component_registrations),
                     notify_subscriptions=default_notify_subscriptions(),
-                    application_command_factories=default_application_command_factories(),
+                    application_command_factories=default_application_command_factories(
+                        component_registrations
+                    ),
                 )
             finally:
                 signal.signal(signal.SIGINT, previous_sigint)

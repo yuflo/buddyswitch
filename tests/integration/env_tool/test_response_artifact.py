@@ -24,7 +24,7 @@ from tests.support.fake_cdp import (
 ROOT = REPO_ROOT
 
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import messages as message_repo  # noqa: E402
 from buddyswitch.env.services import messages as message_service  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402

@@ -4,15 +4,15 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | preserved S3 candidate on `1c99816c57196e47ddbff38bdd0d143bf5084e24` plus exact dirty identity in `S3-R1-SOURCE-SNAPSHOT.md` |
-| Active stage | S3 — Task and Goal Boundary Cutover |
-| State | READY — R1 COMPLETION |
-| Runtime migration authorized | S3 only through `BS-MM-S3-R1-20260730-01` |
+| Evidence baseline | accepted S3 candidate and frozen FINAL recorded in `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md` |
+| Active stage | S4 — Independent Component Waves preparation |
+| State | PROPOSED — PREPARATION ONLY |
+| Runtime migration authorized | none; no S4 lane packet is READY |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent executor completes the preserved candidate through the exact S3 R1 Goal Packet and returns; hub accepts or replans |
-| Current executable truth | S1 one-package runtime plus one physically aggregated, explicitly composed Demand module |
+| Next gate | refresh S4 source/consumer/state/test facts, freeze shared host contracts and lane dependencies, then READY-review lane-sized packets |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand and Task modules |
 
 ## Stage ledger
 
@@ -21,8 +21,8 @@
 | S0 Audit/admission | ACCEPTED | none | migration lead + maintainer | closed |
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
-| S3 Task/Goal | READY — R1 COMPLETION | S2 | independent executor selected by user; hub retains acceptance | execute `BS-MM-S3-R1-20260730-01` only |
-| S4 Component waves | BLOCKED | S3 | unassigned per lane | frozen host contracts and lane traces |
+| S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
+| S4 Component waves | PROPOSED — PREPARATION ONLY | S3 | coordinating hub preparing; lanes unassigned | source refresh, frozen host contracts and lane traces |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -238,6 +238,16 @@ The return review, representation-complete consumer audit, activation-first
 completion plan and READY review authorize only
 `BS-MM-S3-R1-20260730-01`.
 
+R1 returned against the exact preserved candidate, corrected the generic
+package/router proof owners, completed the four current architecture
+documents and passed focused, affected and one frozen FINAL run
+`79c7f25e1c03484d9b600a85bd503712`. The hub reproduced the complete tracked,
+untracked and activation identities, reviewed the physical owner/Public/
+contribution boundaries, proved retired Task paths absent from source and the
+installed distribution, and accepted S3 in
+`03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`. Both S3 packets are
+consumed. S4 preparation is unblocked; no S4 implementation packet exists.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -265,6 +275,8 @@ completion plan and READY review authorize only
 | 2026-07-29 | S3 | PROPOSED — PREPARATION ONLY | READY | coordinating hub | complete source/consumer trace, affected baseline, final-boundary preflight, implementation plan and Goal Packet reviewed |
 | 2026-07-30 | S3 | READY | REPLANNING | coordinating hub | initial executor stopped correctly on an unclassified generated package consumer; predecessor packet consumed and no candidate behavior accepted |
 | 2026-07-30 | S3 | REPLANNING | READY — R1 COMPLETION | coordinating hub | complete representation audit, candidate architecture review, generic proof-boundary correction and activation-first R1 packet reviewed |
+| 2026-07-30 | S3 | READY — R1 COMPLETION | ACCEPTED | coordinating hub | exact source/activation identity, focused/affected/single FINAL evidence, one-owner/Public/contribution boundaries and replacement absence accepted |
+| 2026-07-30 | S4 | BLOCKED | PROPOSED — PREPARATION ONLY | coordinating hub | S3 accepted; source-bound lane preparation unlocked with no execution authority |
 
 ## Checkpoint record
 
@@ -293,6 +305,7 @@ completion plan and READY review authorize only
 | 2026-07-29 | S2 stage acceptance | ACCEPTED | `02-demand-component-pilot-plan/S2-ACCEPTANCE.md`; exact `090399c8d6e74e888f7df159cd41b1b9`; Integration `5571fa5053b048e5b8b006a96e745a66`; Process `ac14e92bf10a46f1817bda50a2e07beb`; FINAL `865b88ce29d34c25aef70c122b41768c` | checkpoint S2, then refresh and READY-review S3; do not resume any S2 packet |
 | 2026-07-30 | S3 initial return review | REPLANNING | `03-task-goal-boundary-cutover-plan/S3-INITIAL-RETURN-REVIEW.md`; exact preserved dirty identity; no valid candidate test run | consume `BS-MM-S3-20260729-01`; audit all consumer representations before new authority |
 | 2026-07-30 | S3 R1 handoff | READY | `S3-R1-CONSUMER-AUDIT.md`, `S3-R1-SOURCE-SNAPSHOT.md`, `S3-R1-READY-REVIEW.md`; packet `BS-MM-S3-R1-20260730-01` | verify dirty candidate, reprovision before RED, fix generic proof owners, complete focused/affected/single FINAL |
+| 2026-07-30 | S3 stage acceptance | ACCEPTED | `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`; generic proof GREEN `cc5a797cd76943f9a256a9027b23d435`; affected `addf01ca26e24149b9f0b7b2e1d99301`, `5d07ed065a98413da4b77ed8125045ba`, `38ad62540de645a6b8c08a1903dc53db`; FINAL `79c7f25e1c03484d9b600a85bd503712` | checkpoint S3, then refresh and READY-review S4 lane boundaries; do not resume either S3 packet |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -314,11 +327,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S3
-Master state: READY — R1 COMPLETION
-Goal Packet: BS-MM-S3-R1-20260730-01
+Stage: S4
+Master state: PROPOSED — PREPARATION ONLY
+Goal Packet: none
 Execution session: none
-Last hub checkpoint: initial packet consumed; representation-complete R1 scope and candidate review complete
-Next action: commit/push preparation checkpoint, then hand the exact packet to one independent executor
+Last hub checkpoint: S3 accepted; all S3 packets consumed
+Next action: commit/push the S3 checkpoint, then refresh S4 source and lane boundaries
 No-polling state: NOT_APPLICABLE
 ```

@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from buddyswitch.env.domain import task_sys
+from tests.support import task_fixtures
 from buddyswitch.modules.demand.private.adapters.daemon import (
     demand_orchestration_handler,
     demand_triage_handler,
@@ -107,7 +107,7 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
             actor_target=self.actor_target,
             demand_ref=demand["demand_ref"],
         )
-        return task_sys.create(
+        return task_fixtures.create_task(
             actor_target=self.actor_target,
             demand_ref=resolved,
             objective=f"Complete the observable Task result for {suffix}.",
@@ -125,8 +125,8 @@ class DemandOrchestrationTests(RuntimeWorkspaceTestCase):
             "createdAt": 100,
             "updatedAt": 120,
         }
-        task_sys.bind_goal(task["task_id"], goal)
-        return task_sys.record_goal_complete(task["task_id"], goal)
+        task_fixtures.bind_goal(task["task_id"], goal)
+        return task_fixtures.record_goal_complete(task["task_id"], goal)
 
     def test_triage_handler_owns_only_side_ingress_and_no_task_or_parent_rule(self) -> None:
         source = Path(demand_triage_handler.__file__).read_text(encoding="utf-8")

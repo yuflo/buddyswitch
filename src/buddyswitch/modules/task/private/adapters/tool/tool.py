@@ -15,6 +15,7 @@ from buddyswitch.env.tool_runtime.definition import (
     ToolDefinition,
     validate_definition,
 )
+from buddyswitch.modules.task.public.contracts import DemandSelectionResolver
 
 
 def _object_schema(
@@ -288,7 +289,23 @@ def _build_definition() -> ToolDefinition:
 DEFINITION = _build_definition()
 
 
-def invoke(*, action: str, args: dict[str, Any], context: "ToolContext") -> dict[str, Any]:
-    from ._impl import invoke as _invoke
+def build_invoke(demand_selection_resolver: DemandSelectionResolver):
+    if not callable(demand_selection_resolver):
+        raise ValueError("Demand selection resolver must be callable")
 
-    return _invoke(action=action, args=args, context=context)
+    def invoke(
+        *,
+        action: str,
+        args: dict[str, Any],
+        context: "ToolContext",
+    ) -> dict[str, Any]:
+        from ._impl import invoke as _invoke
+
+        return _invoke(
+            action=action,
+            args=args,
+            context=context,
+            demand_selection_resolver=demand_selection_resolver,
+        )
+
+    return invoke

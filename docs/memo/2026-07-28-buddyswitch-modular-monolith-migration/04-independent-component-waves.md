@@ -1,7 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Initial state: BLOCKED
-> Blocked by: S3 acceptance
+> Current state: PROPOSED — PREPARATION ONLY
+> Entry prerequisite: S3 ACCEPTED
+> Execution authority: none; source refresh and READY review required
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence

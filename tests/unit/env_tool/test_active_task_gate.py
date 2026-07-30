@@ -14,9 +14,10 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from buddyswitch.env.tool_runtime import results as tool_results  # noqa: E402
+from buddyswitch.modules.task import public as task_public  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
@@ -80,7 +81,7 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
     def _seed_active_task(self, *, instance: dict[str, Any], task_id: str = "task-0001-active-gate") -> None:
         role = str(instance["role"])
         actor_id = str(instance["actor_id"])
-        task_sys.create(
+        task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": f"demand-active-gate-{role}",
@@ -163,11 +164,15 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
             state_changed=False,
             durability="none",
         )
-        with patch.object(tool_registry, "_invoke_tool", return_value=handler_response) as invoke_tool, patch.object(
-            task_sys,
-            "actor_task_projection",
-            wraps=task_sys.actor_task_projection,
-        ) as actor_projection:
+        with patch.object(
+            tool_registry,
+            "_invoke_tool",
+            return_value=handler_response,
+        ) as invoke_tool, patch.object(
+            tool_registry,
+            "_ACTIVE_TASK_PROBE",
+            wraps=task_public.has_active_task,
+        ) as active_probe:
             response = self._dispatch(
                 instance=instance,
                 tool="search",
@@ -176,8 +181,8 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
             )
         self.assertEqual(response, handler_response)
         invoke_tool.assert_called_once()
-        actor_projection.assert_called_once()
-        projection_profile = actor_projection.call_args.kwargs["actor_profile"]
+        active_probe.assert_called_once()
+        projection_profile = active_probe.call_args.args[0]
         self.assertEqual(projection_profile.identity.id, instance["actor_id"])
         self.assertEqual(projection_profile.role_id, instance["role"])
 

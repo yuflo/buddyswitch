@@ -27,8 +27,8 @@ loop.
 
 ## One owner and one record
 
-`src/buddyswitch/env/domain/task_sys.py` is the canonical Task owner. Its record has
-exactly:
+`src/buddyswitch/modules/task/private/domain/task_sys.py` is the canonical
+Task owner. Its record has exactly:
 
 ```text
 schema_version
@@ -64,10 +64,12 @@ cancel
 ```
 
 `task_sys__create` accepts only an opaque `demand_ref`, a self-contained
-`objective`, and a `selection_reason`. The tool boundary resolves the current
-Demand through `modules.demand.public.resolve_demand_ref`, derives the Actor
-target, writes the Task through the Task owner, and requests idempotent Goal
-reconciliation.
+`objective`, and a `selection_reason`. Task owns the narrow
+`DemandSelectionResolver` input port. The application composition root injects
+`modules.demand.public.resolve_demand_ref` into that port. The Task Tool uses
+the injected resolver, derives the Actor target, writes through the Task owner,
+and requests idempotent Goal reconciliation. Task private code never imports
+Demand.
 
 The Actor cannot bind a Goal, mark a Task successful, write terminal host
 snapshots, supply revisions, or synchronize a Demand. Successful completion
@@ -77,8 +79,8 @@ cleanup.
 
 ## Task–Goal convergence
 
-`src/buddyswitch/launcher/task_goal_handler.py` is the sole semantic adapter between Task
-and native Goal state:
+`src/buddyswitch/modules/task/private/adapters/goal/handler.py` is the sole
+semantic adapter between Task and native Goal state:
 
 - an unbound active Task with no Goal causes `thread/goal/set`, then binds the
   returned Goal;
@@ -139,10 +141,11 @@ Only after terminal reconciliation may an empty Task slot be filled from the
 whole live Demand pool, and orchestration selects at most one next Demand.
 
 Task domain code does not import or mutate Demand state. Demand domain code
-does not import or mutate Task state. The Task Tool is a current Demand Public
-consumer; Demand completion evidence is checked by the Demand-owned Tool
-adapter through the generic Task domain capability. Demand orchestration is
-their explicit product composition point.
+does not import or mutate Task state. The Task Tool consumes its Task-owned
+resolver port, wired once to Demand Public by application composition. Demand's
+Tool adapter and orchestration handler consume Task Public for evidence,
+attention, and active-slot reads. Neither component imports the other's private
+package.
 
 ## Projections
 
@@ -160,5 +163,32 @@ actor
 updated_at
 ```
 
-Actor Console exposes active and terminal collections only. Web and public CLI
-are read-only Task consumers.
+Actor Console exposes active and terminal collections only. Task owns the
+`task_sys` section projector and contributes it through the typed Actor Console
+registration. The generic Web host invokes the projector without importing
+Task private code or copying Task lifecycle rules. Task also contributes its
+read-only public CLI command through the typed CLI registration.
+
+## Physical module and application composition
+
+Task has one live physical root:
+`src/buddyswitch/modules/task/`. Its private domain, read model, Tool, Goal,
+CLI, Web, and cleanup adapters and its owning tests live there. Public exposes
+only Task-owned contracts and operations.
+
+`build_task_module` returns one passive `ModuleAssembly` with exactly one
+Tool, one Goal daemon handler and mailbox command factory, one CLI command, one
+Actor Console section, and one cleanup contribution. It starts no process and
+performs no registration side effect.
+
+`src/buddyswitch/application/composition.py` constructs Task with the Demand
+resolver, selects `(DEMAND, TASK)`, supplies Task's active predicate to the
+generic Tool gate, and declares the exact daemon order:
+
+```text
+demand_triage -> task_goal -> demand_orchestration
+```
+
+Application build validates and flattens those typed contributions. The
+retired central Task domain/read model, Tool package, Goal handler/client/
+protocol, central CLI/Web branches, and root owning-test paths do not exist.

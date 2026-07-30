@@ -22,7 +22,7 @@ ROOT = REPO_ROOT
 HELPER_DIR = ROOT / "src" / "buddyswitch" / "launcher"
 ACTOR_SESSION_PATH = HELPER_DIR / "actor_session.py"
 
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.launcher import actor_capability  # noqa: E402
 
@@ -185,14 +185,14 @@ class ActorSessionTests(RuntimeWorkspaceTestCase):
         self.addCleanup(setattr, self.actor_session.app_server, "input_turn", original_input)
         self.actor_session.app_server.thread_settings_update = fake_update
         self.actor_session.app_server.input_turn = fake_input
-        before = task_sys.list_tasks()
+        before = task_fixtures.list_task_records()
 
         session = self.actor_session.ActorSession(shared_root=instance_json.parents[2])
         result = session.input("act-dev-session", "direct parent input")
 
         self.assertEqual(result["action"], "start")
         self.assertEqual(result["turn_id"], "turn-direct")
-        self.assertEqual(task_sys.list_tasks(), before)
+        self.assertEqual(task_fixtures.list_task_records(), before)
 
     def test_input_rejects_empty_text_missing_actor_and_runtime_unavailable_with_stable_errors(self) -> None:
         instance_json = self._write_instance()

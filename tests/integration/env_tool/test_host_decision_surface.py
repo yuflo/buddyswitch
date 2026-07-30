@@ -17,7 +17,7 @@ from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.repos import track_comments as track_comment_repo
 from buddyswitch.env.repos import tracks as track_repo
 from tests.support import object_builders
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
@@ -51,7 +51,7 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         detail = "Exercise the host decision surface."
         if track_id is not None:
             detail += f" Track context: {track_id}."
-        result = task_sys.create(
+        result = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": f"demand-decision-surface-{role}-{track_id or 'none'}",
@@ -65,9 +65,9 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
 
     def _dispatch(self, *, role: str, tool: str, action: str, args: dict[str, object]) -> dict[str, object]:
         actor_id = self.workspace.actor_id(role=role, label="act-market-decision-surface")
-        if not task_sys.list_tasks(
+        if not task_fixtures.list_task_records(
             actor_target={"actor_id": actor_id, "role_id": role},
-            statuses=task_sys.ACTIVE_TASK_STATUSES,
+            statuses=task_fixtures.ACTIVE_TASK_STATUSES,
         ):
             self.workspace.seed_active_task(
                 instance_json=self.instance_json,

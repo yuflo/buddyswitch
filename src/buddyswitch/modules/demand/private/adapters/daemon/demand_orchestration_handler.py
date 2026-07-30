@@ -8,9 +8,9 @@ from typing import Any, Mapping
 
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
+import buddyswitch.modules.task.public as task_public  # noqa: E402
 
 ORCHESTRATION_TRIGGER = "demand.orchestrate"
 RETRY_SECONDS = 5
@@ -63,24 +63,6 @@ def _write_checkpoint(state: Any, name: str, checkpoint: Mapping[str, Any]) -> b
     return True
 
 
-def _terminal_task_ids(actor_target: Mapping[str, Any]) -> list[str]:
-    rows = task_sys.list_tasks(
-        actor_target=actor_target,
-        statuses=task_sys.TERMINAL_TASK_STATUSES,
-    )
-    return sorted(str(row["id"]) for row in rows)
-
-
-def _active_task(actor_target: Mapping[str, Any]) -> dict[str, Any] | None:
-    rows = task_sys.list_tasks(
-        actor_target=actor_target,
-        statuses=task_sys.ACTIVE_TASK_STATUSES,
-    )
-    if len(rows) > 1:
-        raise ValueError("Demand orchestration requires at most one active Task")
-    return rows[0] if rows else None
-
-
 def _schedule_retry(state: Any) -> None:
     state.upsert_schedule(
         delay_seconds=RETRY_SECONDS,
@@ -107,8 +89,9 @@ class DemandOrchestrationHandler:
     ) -> daemon_contracts.HandlerResult:
         actor_target = _actor_target(context)
         pool = demand_sys.pool_snapshot(actor_target)
-        active = _active_task(actor_target)
-        terminal_ids = _terminal_task_ids(actor_target)
+        task_attention = task_public.demand_attention(actor_target)
+        active_task_id = task_attention["active_task_id"]
+        terminal_ids = list(task_attention["terminal_task_ids"])
         previous = _checkpoint(state, self.name)
         observed_terminal = {
             row
@@ -123,7 +106,7 @@ class DemandOrchestrationHandler:
             "live_demand_count": pool["live_demand_count"],
             "terminal_task_ids": unobserved_terminal,
             "observed_terminal_task_ids": sorted(observed_terminal),
-            "active_task_id": active.get("id") if active is not None else None,
+            "active_task_id": active_task_id,
             "submitted_turn_id": (
                 previous.get("submitted_turn_id")
                 if isinstance(previous.get("submitted_turn_id"), str)
@@ -131,7 +114,7 @@ class DemandOrchestrationHandler:
             ),
         }
 
-        if active is not None:
+        if active_task_id is not None:
             changed = _write_checkpoint(
                 state,
                 self.name,

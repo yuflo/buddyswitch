@@ -78,15 +78,21 @@ def test_public_launcher_is_a_thin_python_cli_bootstrap() -> None:
     assert "PYTHONPATH" not in launcher
 
 
-def test_public_cli_adapter_delegates_to_concrete_read_owners() -> None:
+def test_public_cli_adapter_is_neutral_and_task_owns_its_cli_projection() -> None:
     cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "launcher" / "cli.py"
+    task_cli_adapter = (
+        REPO_ROOT
+        / "src/buddyswitch/modules/task/private/adapters/cli.py"
+    )
     imports = _imported_modules(cli_adapter)
+    task_imports = _imported_modules(task_cli_adapter)
     calls = _called_names(cli_adapter)
 
     assert "buddyswitch.launcher.host_control" in imports
     assert "buddyswitch.launcher.actor_session" in imports
-    assert "buddyswitch.env.domain.task_read" in imports
     assert "buddyswitch.env.domain.track_read" in imports
+    assert not any("task" in name for name in imports)
+    assert "buddyswitch.modules.task.private.read_model" in task_imports
     assert not {
         "save_track",
         "create_track",
@@ -135,7 +141,9 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
             "src/buddyswitch/modules/demand/private/adapters/daemon/"
             "demand_triage_handler.py"
         ),
-        Path("src/buddyswitch/launcher/task_goal_handler.py"),
+        Path(
+            "src/buddyswitch/modules/task/private/adapters/goal/handler.py"
+        ),
         Path(
             "src/buddyswitch/modules/demand/private/adapters/daemon/"
             "demand_orchestration_handler.py"
@@ -160,8 +168,14 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
         REPO_ROOT / "src" / "buddyswitch" / "application" / "composition.py"
     )
     assert _imported_modules(composition) == {
+        "buddyswitch.modules.demand",
+        "buddyswitch.modules.demand.public",
         "buddyswitch.modules.demand.module",
         "buddyswitch.modules.demand.module.DEMAND",
+        "buddyswitch.modules.task",
+        "buddyswitch.modules.task.public",
+        "buddyswitch.modules.task.module",
+        "buddyswitch.modules.task.module.build_task_module",
     }
 
 
@@ -172,6 +186,7 @@ def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
         REPO_ROOT / "src" / "buddyswitch" / "env" / "domain",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "repos",
         REPO_ROOT / "src" / "buddyswitch" / "modules" / "demand",
+        REPO_ROOT / "src" / "buddyswitch" / "modules" / "task",
     )
     violations: list[str] = []
     for root in roots:

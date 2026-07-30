@@ -18,7 +18,7 @@ from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.repos import track_comments as track_comment_repo
 from buddyswitch.env.repos import tracks as track_repo
 from tests.support import object_builders
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
@@ -84,7 +84,7 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
 
     def _ensure_active_task(self, *, role: str, actor_id: str) -> None:
         task_id = f"task-0001-{role}-feedback"
-        task_sys.create(
+        task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": f"demand-feedback-{role}",

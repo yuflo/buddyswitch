@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 from typing import Any, Mapping
 
 
 from buddyswitch.launcher import app_server  # noqa: E402
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
-from buddyswitch.env.tool_runtime import task_goal_runtime_protocol as protocol  # noqa: E402
+from buddyswitch.modules.task.private.adapters.goal import protocol  # noqa: E402
+from buddyswitch.modules.task.private.domain import task_sys  # noqa: E402
 
 _NONCOMPLETE_GOAL_STATUSES = frozenset(
     {"active", "paused", "blocked", "usageLimited", "budgetLimited"}

@@ -1,6 +1,18 @@
-"""The one explicit current product-module selection."""
+"""The one explicit current product-module selection and concrete wiring."""
 
+from buddyswitch.modules.demand import public as demand_public
 from buddyswitch.modules.demand.module import DEMAND
+from buddyswitch.modules.task import public as task_public
+from buddyswitch.modules.task.module import build_task_module
 
 
-COMPONENTS = (DEMAND,)
+TASK = build_task_module(
+    demand_selection_resolver=demand_public.resolve_demand_ref,
+)
+COMPONENTS = (DEMAND, TASK)
+DAEMON_HANDLER_ORDER = (
+    "demand_triage",
+    "task_goal",
+    "demand_orchestration",
+)
+ACTIVE_TASK_PROBE = task_public.has_active_task

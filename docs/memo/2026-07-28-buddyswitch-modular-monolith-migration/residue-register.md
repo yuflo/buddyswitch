@@ -37,7 +37,7 @@ Statuses:
 | ID | Current semantic surface after S1 | Owner | Closure proof |
 |---|---|---|---|
 | R-DEMAND-001 | CLOSED — Demand domain/state/adapters/assets/Skills/tests physically aggregated under one Demand root and selected once by application composition | S2 | `02-demand-component-pilot-plan/S2-ACCEPTANCE.md`; one owner/Public/state path and retired Demand paths absent |
-| R-TASK-001 | REMOVING — one unaccepted partial Task/Goal candidate exists; initial packet scope was incomplete and R1 owns completion/proof | S3 | `03-task-goal-boundary-cutover-plan/S3-R1-*.md`; one Task root, complete consumer replacement and exact acyclic Demand collaboration |
+| R-TASK-001 | CLOSED — Task state, Tool, Goal adapters, CLI/Web/cleanup contributions and owning tests are physically aggregated under one Task root and selected once by application composition | S3 | `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`; one owner/Public/state path, exact acyclic Demand collaboration and retired Task paths absent |
 | R-TRACK-001 | scattered Track/comment/repo/Tool/inbound/Skill/tests | S4 Track | one Track root/assembly |
 | R-ARTIFACT-001 | scattered Artifact/relation/visibility/config/Tool/Skill/tests | S4 Artifact | one Artifact root/assembly |
 | R-COMM-001 | scattered Message/IM/service/Tool/inbound/session/channel/worker/tests | S4 Communication | one Communication root and worker contribution |
@@ -49,18 +49,18 @@ Statuses:
 
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
-| R-FND-001 | Demand portion CLOSED; fine-grained imports for unmigrated products remain in host entrypoints | S2–S5 | S2 acceptance for Demand; later component registrations only and no product import |
-| R-FND-002 | Demand portion CLOSED through explicit fail-closed registration; global scanner remains for unmigrated Tools | S2–S5 | S2 acceptance for Demand; final explicit Tool registrations in S5 |
-| R-FND-003 | Demand portion CLOSED; broad product-aware ToolContext remains for unmigrated products | S2–S5 | S2 acceptance for Demand; final host facts/injected Public capabilities in S5 |
-| R-FND-004 | product routes/projections and retry coupling in Web implementation | S2–S5 | WebHost plus owner contributions |
+| R-FND-001 | Demand and Task portions CLOSED; fine-grained imports for unmigrated products remain in host entrypoints | S2–S5 | S2/S3 acceptance; later component registrations only and no product import |
+| R-FND-002 | Demand and Task portions CLOSED through explicit fail-closed registration; global scanner remains for unmigrated Tools | S2–S5 | S2/S3 acceptance; final explicit Tool registrations in S5 |
+| R-FND-003 | Demand and Task-private portions CLOSED; broad product-aware ToolContext remains for unmigrated products | S2–S5 | S2/S3 acceptance; final host facts/injected Public capabilities in S5 |
+| R-FND-004 | Task Actor Console portion CLOSED through one typed section contribution; other product routes/projections and retry coupling remain in Web implementation | S2–S5 | S3 acceptance for Task; WebHost plus remaining owner contributions |
 | R-FND-005 | iMessage worker lifetime hidden in WebHost | S4 Communication | Communication lifecycle contribution |
-| R-FND-006 | Demand portion CLOSED through owner CLI contribution; switches for unmigrated products remain | S2–S5 | S2 acceptance for Demand; remaining owner command contributions |
+| R-FND-006 | Demand and Task portions CLOSED through owner CLI contributions; switches for unmigrated products remain | S2–S5 | S2/S3 acceptance; remaining owner command contributions |
 | R-FND-007 | Browser ownership fragmented across lifecycle/Daemon/Broker/proxy | S1/S5 | one Actor browser-runtime owner |
-| R-FND-008 | Demand portion CLOSED through typed cleanup contribution; attribution for unmigrated products remains | S2–S5 | S2 acceptance for Demand; remaining module cleanup contributions |
+| R-FND-008 | Demand and Task portions CLOSED through typed cleanup contributions; attribution for unmigrated products remains | S2–S5 | S2/S3 acceptance; remaining module cleanup contributions |
 | R-FND-009 | Identity spread across product/daemon/Web/IM | S1/S5 | foundation Identity owner |
 | R-FND-010 | Actor-private/source-reference primitives mixed into product ToolContext | S1/S5 | exact foundation value/capability boundaries |
-| R-FND-011 | Demand portion CLOSED with module-boundary proof; old technical-root enumeration remains for unmigrated components | S1–S5 | S2 acceptance for Demand; generic final dependency/topology proofs |
-| R-FND-012 | Demand obsolete paths CLOSED; empty/obsolete technical paths for unmigrated components remain | owning stage/S5 | S2 acceptance for Demand; later owner-stage absence proof |
+| R-FND-011 | Demand and Task portions CLOSED with module-boundary proof; old technical-root enumeration remains for unmigrated components | S1–S5 | S2/S3 acceptance; generic final dependency/topology proofs |
+| R-FND-012 | Demand and Task obsolete paths CLOSED; empty/obsolete technical paths for unmigrated components remain | owning stage/S5 | S2/S3 acceptance; later owner-stage absence proof |
 
 ## Role residue
 
@@ -78,8 +78,8 @@ Statuses:
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
 | R-DOC-001 | CLOSED — current architecture paths match accepted S1 installed-package truth | S1 | `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md` |
-| R-DOC-002 | Demand paths CLOSED; Task and other current component paths remain | S2–S4 | S2 acceptance for Demand; later owner cutovers |
-| R-DOC-003 | Demand contribution wording CLOSED; remaining Daemon/Web/foundation composition wording awaits final host truth | S5 | S2 acceptance for Demand portion; S5 final host truth |
+| R-DOC-002 | Demand and Task paths CLOSED; other current component paths remain | S2–S4 | S2/S3 acceptance; later owner cutovers |
+| R-DOC-003 | Demand and Task contribution wording CLOSED; remaining Daemon/Web/foundation composition wording awaits final host truth | S5 | S2/S3 acceptance portions; S5 final host truth |
 | R-DOC-004 | root stable Role/manifest paths | S6 | final RoleHost paths |
 | R-DOC-005 | migration instructions presented as current policy after completion | S7 | historical-only state |
 

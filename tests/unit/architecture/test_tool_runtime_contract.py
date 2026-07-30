@@ -10,6 +10,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from buddyswitch.application.build import build_application
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
@@ -43,7 +44,13 @@ SHIPPED_TOOLS: dict[str, set[str]] = {
         "update_status",
     },
 }
-DISCOVERED_TOOL_PACKAGES = frozenset(SHIPPED_TOOLS) - {"demand_sys"}
+EXPLICIT_COMPONENT_TOOL_IDS = frozenset(
+    registration.definition.id
+    for registration in build_application().tools
+)
+DISCOVERED_TOOL_PACKAGES = (
+    frozenset(SHIPPED_TOOLS) - EXPLICIT_COMPONENT_TOOL_IDS
+)
 
 LEGACY_SHARED_RUNTIME_FILES = {
     "catalog.py",
@@ -110,20 +117,30 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                     else:
                         self.assertEqual(output_schema.get("type"), "object", msg=action)
 
-    def test_demand_tool_is_explicitly_contributed_outside_discovered_packages(self) -> None:
+    def test_demand_and_task_tools_are_explicitly_contributed_outside_discovered_packages(self) -> None:
         from buddyswitch.env.tool_runtime import registry
         from buddyswitch.modules.demand.module import DEMAND
+        from buddyswitch.modules.task.module import build_task_module
 
         self.assertNotIn("demand_sys", registry.discover_tool_ids())
+        self.assertNotIn("task_sys", registry.discover_tool_ids())
         self.assertFalse(self._tool_dir("demand_sys").exists())
+        self.assertFalse(self._tool_dir("task_sys").exists())
         self.assertEqual(len(DEMAND.tools), 1)
-        registration = DEMAND.tools[0]
-        self.assertEqual(registration.definition.id, "demand_sys")
-        self.assertTrue(callable(registration.invoke))
-        self.assertEqual(
-            {action.name for action in registration.definition.actions},
-            SHIPPED_TOOLS["demand_sys"],
+        task = build_task_module(
+            demand_selection_resolver=lambda **_kwargs: {},
         )
+        self.assertEqual(len(task.tools), 1)
+        for registration, tool_id in (
+            (DEMAND.tools[0], "demand_sys"),
+            (task.tools[0], "task_sys"),
+        ):
+            self.assertEqual(registration.definition.id, tool_id)
+            self.assertTrue(callable(registration.invoke))
+            self.assertEqual(
+                {action.name for action in registration.definition.actions},
+                SHIPPED_TOOLS[tool_id],
+            )
 
     def test_tool_packages_import_only_runtime_sdk_and_local_modules(self) -> None:
         violations: list[str] = []

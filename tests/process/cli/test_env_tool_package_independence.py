@@ -20,14 +20,13 @@ ROOT = REPO_ROOT
 from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
+ENV_TOOL_ROOT = ROOT / "src" / "buddyswitch" / "env" / "tools"
 DISCOVERED_TOOL_PACKAGES = {
-    "task_sys",
-    "track",
-    "artifact",
-    "context",
-    "evidence",
-    "message",
-    "search",
+    path.name
+    for path in ENV_TOOL_ROOT.iterdir()
+    if path.is_dir()
+    and not path.name.startswith("_")
+    and (path / "__init__.py").is_file()
 }
 REQUIRED_TOOL_FILES = {"__init__.py", "tool.py", "_impl.py"}
 RETIRED_TOOL_FILES = {"contract.py", "semantics.py", "cli.py", "handlers.py", "service.py"}
@@ -36,7 +35,7 @@ RETIRED_SHARED_RUNTIME_FILES = {"catalog.py", "cli_helpers.py", "discovery.py", 
 
 class EnvToolPackageIndependenceTests(unittest.TestCase):
     def _tool_dir(self, tool: str) -> Path:
-        return ROOT / "src" / "buddyswitch" / "env" / "tools" / tool
+        return ENV_TOOL_ROOT / tool
 
     def _run_python(self, script: str) -> subprocess.CompletedProcess[str]:
         return run_process(
@@ -58,9 +57,8 @@ class EnvToolPackageIndependenceTests(unittest.TestCase):
                     self.assertFalse((package_dir / retired).exists(), msg=f"retired file still exists: {package_dir / retired}")
 
     def test_no_legacy_shared_runtime_files_remain(self) -> None:
-        shared_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
         for name in sorted(RETIRED_SHARED_RUNTIME_FILES):
-            self.assertFalse((shared_root / name).exists(), msg=f"retired shared runtime file exists: {name}")
+            self.assertFalse((ENV_TOOL_ROOT / name).exists(), msg=f"retired shared runtime file exists: {name}")
 
     def test_tool_packages_do_not_import_sibling_tools_or_host_forbidden_modules(self) -> None:
         violations: list[str] = []

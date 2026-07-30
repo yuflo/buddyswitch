@@ -26,12 +26,13 @@ from buddyswitch.launcher import im_http_router
 from buddyswitch.launcher import imessage_channel
 from buddyswitch.launcher import host_control as host_control_module
 from buddyswitch.launcher import cli_contract
-from buddyswitch.env.domain import task_read, track_read
+from buddyswitch.env.domain import track_read
 from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
 from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.tool_runtime import daemon_client
 from buddyswitch.env.tool_runtime import im_actor_delivery
 from buddyswitch.launcher import external_im_session
+from buddyswitch.launcher.web_contracts import ActorConsoleSectionRegistration
 
 
 STATIC_ROOT = HELPER_DIR / "assets" / "web-management"
@@ -44,6 +45,41 @@ STATIC_CONTENT_TYPES = {
     ".txt": "text/plain; charset=utf-8",
 }
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
+_ACTOR_CONSOLE_SECTIONS: tuple[ActorConsoleSectionRegistration, ...] = ()
+
+
+def _validated_actor_console_sections(
+    registrations: tuple[ActorConsoleSectionRegistration, ...],
+) -> tuple[ActorConsoleSectionRegistration, ...]:
+    if not isinstance(registrations, tuple):
+        raise ValueError("Actor Console registrations must be a tuple")
+    names: set[str] = set()
+    validated: list[ActorConsoleSectionRegistration] = []
+    for registration in registrations:
+        if not isinstance(registration, ActorConsoleSectionRegistration):
+            raise ValueError(
+                "Actor Console contribution must be "
+                "ActorConsoleSectionRegistration"
+            )
+        if not isinstance(registration.name, str) or not registration.name.strip():
+            raise ValueError("Actor Console section name must be a non-empty string")
+        name = registration.name.strip()
+        if name in names:
+            raise ValueError(f"duplicate Actor Console section: {name}")
+        if not callable(registration.project):
+            raise ValueError(
+                f"Actor Console projector for '{name}' must be callable"
+            )
+        names.add(name)
+        validated.append(registration)
+    return tuple(validated)
+
+
+def configure_actor_console_sections(
+    registrations: tuple[ActorConsoleSectionRegistration, ...],
+) -> None:
+    global _ACTOR_CONSOLE_SECTIONS
+    _ACTOR_CONSOLE_SECTIONS = _validated_actor_console_sections(registrations)
 
 
 @dataclass(frozen=True)
@@ -295,11 +331,19 @@ class WebManagementService:
         im_session: external_im_session.ExternalImSession | None = None,
         platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
+        actor_console_sections: tuple[
+            ActorConsoleSectionRegistration, ...
+        ] | None = None,
     ) -> None:
         self._host_control = host_control or host_control_module.HostControl()
         self._terminal_opener = terminal_opener or open_macos_terminal_app
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
+        self._actor_console_sections = _validated_actor_console_sections(
+            _ACTOR_CONSOLE_SECTIONS
+            if actor_console_sections is None
+            else actor_console_sections
+        )
         self._operation_lock = threading.Lock()
         self._operations: dict[str, WebLifecycleOperation] = {}
         self._operation_commands: dict[str, Callable[[], dict[str, Any]]] = {}
@@ -852,22 +896,14 @@ class WebManagementService:
         if not isinstance(role, str) or not role:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status payload for {actor_id}.")
         current_identity = {"id": actor_id, "type": "actor"}
-        task_projection = task_read.actor_external_task_projection(
-            actor_profile=ActorIdentityProfile(
-                identity=IdentityRef(id=actor_id, type="actor"),
-                role_id=role,
-            )
+        actor_profile = ActorIdentityProfile(
+            identity=IdentityRef(id=actor_id, type="actor"),
+            role_id=role,
         )
 
-        return {
+        console: dict[str, Any] = {
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
-            "task_sys": {
-                "active_count": task_projection["active_count"],
-                "terminal_count": task_projection["terminal_count"],
-                "active_tasks": task_projection["active_tasks"][:10],
-                "terminal_tasks": task_projection["terminal_tasks"][:5],
-            },
             "tracks": {
                 "items": track_read.list_external_tracks(owner_identity=current_identity),
                 "source": "web-track-summary",
@@ -881,6 +917,15 @@ class WebManagementService:
             },
             "capabilities": self._read_actor_capabilities(actor_id)["capabilities"],
         }
+        for registration in self._actor_console_sections:
+            section = registration.project(actor_profile)
+            if not isinstance(section, Mapping):
+                raise ValueError(
+                    f"Actor Console projector '{registration.name}' "
+                    "must return a mapping"
+                )
+            console[registration.name] = dict(section)
+        return console
 
     def _shared_root(self) -> Path:
         raw_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")

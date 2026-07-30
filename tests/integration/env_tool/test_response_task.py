@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
-
-from buddyswitch.env.domain import task_sys
-from buddyswitch.env.tool_runtime import context as runtime_context
+from tests.support import task_fixtures
 from buddyswitch.modules.demand.private.domain import demand_sys
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 
@@ -69,10 +66,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         demand_ref = self._demand_ref(actor_id=actor_id, label="goal-task-create")
         args = self._create_args(demand_ref)
 
-        with patch.object(
-            runtime_context.TaskGoalRuntimeAccess,
-            "reconcile_task",
-            autospec=True,
+        with task_fixtures.patch_goal_reconcile(
             return_value={"status": "active", "binding_changed": False},
         ) as reconcile:
             created = self._dispatch(
@@ -97,7 +91,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self.assertEqual(created["outcome"], "created")
         self.assertEqual(replay["outcome"], "existing")
         self.assertEqual(replay["task_id"], created["task_id"])
-        self.assertEqual(created["task_status"], task_sys.ACTIVE)
+        self.assertEqual(created["task_status"], task_fixtures.ACTIVE)
         self.assertEqual(created["goal_reconciliation"]["status"], "reconciled")
         self.assertIn("Created one Demand-bound Task", created["effect_summary"])
         self.assertIn("The referenced Demand was not changed", created["effect_summary"])
@@ -111,10 +105,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         demand_ref = self._demand_ref(actor_id=actor_id, label="goal-task-runtime-failure")
 
-        with patch.object(
-            runtime_context.TaskGoalRuntimeAccess,
-            "reconcile_task",
-            autospec=True,
+        with task_fixtures.patch_goal_reconcile(
             side_effect=RuntimeError("daemon unavailable"),
         ):
             result = self._dispatch(
@@ -127,8 +118,8 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
             )
 
         self._assert_write_success_contract(result)
-        task = task_sys.get_task(result["task_id"])
-        self.assertEqual(task["status"], task_sys.ACTIVE)
+        task = task_fixtures.get_task_record(result["task_id"])
+        self.assertEqual(task["status"], task_fixtures.ACTIVE)
         self.assertIsNone(task["goal_binding"])
         self.assertEqual(result["goal_reconciliation"]["status"], "pending")
         self.assertIn("daemon unavailable", result["goal_reconciliation"]["error"])
@@ -146,18 +137,15 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
             actor_target={"actor_id": actor_id, "role_id": "dev"},
             demand_ref=demand_ref,
         )
-        created = task_sys.create(
+        created = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
             demand_ref=resolved_ref,
             objective=args["objective"],
             selection_reason=args["selection_reason"],
         )
-        task_sys.record_task_cancel(created["task_id"], "Terminal replay fixture.")
+        task_fixtures.record_task_cancel(created["task_id"], "Terminal replay fixture.")
 
-        with patch.object(
-            runtime_context.TaskGoalRuntimeAccess,
-            "reconcile_task",
-            autospec=True,
+        with task_fixtures.patch_goal_reconcile(
             return_value={"status": "goal_absent"},
         ):
             replay = self._dispatch(
@@ -172,7 +160,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         self._assert_success_contract(replay)
         self.assertFalse(replay["state_changed"])
         self.assertEqual(replay["outcome"], "existing")
-        self.assertEqual(replay["task_status"], task_sys.CANCELED)
+        self.assertEqual(replay["task_status"], task_fixtures.CANCELED)
         self.assertIn("no new Task was created", replay["effect_summary"])
         next_actions = " ".join(replay["allowed_next_actions"])
         self.assertNotIn("while this Task remains active", next_actions)
@@ -184,10 +172,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
         demand_ref = self._demand_ref(actor_id=actor_id, label="goal-task-conflict")
 
-        with patch.object(
-            runtime_context.TaskGoalRuntimeAccess,
-            "reconcile_task",
-            autospec=True,
+        with task_fixtures.patch_goal_reconcile(
             return_value={"status": "active"},
         ) as reconcile:
             created = self._dispatch(
@@ -216,7 +201,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-goal-task-cancel"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        created = task_sys.create(
+        created = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
             demand_ref={
                 "demand_id": "demand-goal-task-cancel-response",
@@ -227,10 +212,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
             selection_reason="Cancellation response fixture.",
         )
 
-        with patch.object(
-            runtime_context.TaskGoalRuntimeAccess,
-            "reconcile_task",
-            autospec=True,
+        with task_fixtures.patch_goal_reconcile(
             return_value={"status": "goal_absent"},
         ) as reconcile:
             canceled = self._dispatch(
@@ -243,8 +225,8 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
             )
 
         self._assert_write_success_contract(canceled)
-        self.assertEqual(canceled["task_status"], task_sys.CANCELED)
-        self.assertEqual(task_sys.get_task(created["task_id"])["result"]["type"], "actor_canceled")
+        self.assertEqual(canceled["task_status"], task_fixtures.CANCELED)
+        self.assertEqual(task_fixtures.get_task_record(created["task_id"])["result"]["type"], "actor_canceled")
         self.assertIn("Terminalized the Task as canceled", canceled["effect_summary"])
         self.assertIn("The referenced Demand was not changed", canceled["effect_summary"])
         reconcile.assert_called_once()
@@ -253,7 +235,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-goal-task-read"
         actor_id = self._runtime_actor_id(role="dev", label=actor_label)
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
-        created = task_sys.create(
+        created = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": "dev"},
             demand_ref={
                 "demand_id": "demand-goal-task-read-response",
@@ -295,7 +277,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_a = self._runtime_actor_id(role="dev", label=actor_a_label)
         instance_a = self._instance_json(role="dev", actor_id=actor_a_label)
         instance_b = self._instance_json(role="dev", actor_id=actor_b_label)
-        created = task_sys.create(
+        created = task_fixtures.create_task(
             actor_target={"actor_id": actor_a, "role_id": "dev"},
             demand_ref={
                 "demand_id": "demand-task-rejection-a",
@@ -336,9 +318,7 @@ class EnvToolTaskResponseTests(EnvToolResponseCase):
         actor_label = "act-dev-task-storage-failure"
         instance_json = self._instance_json(role="dev", actor_id=actor_label)
 
-        with patch.object(
-            task_sys,
-            "actor_task_projection",
+        with task_fixtures.patch_actor_task_projection(
             side_effect=ValueError("retired or invalid Task record"),
         ):
             result = self._dispatch(

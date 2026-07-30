@@ -9,6 +9,7 @@ from typing import Any, Callable
 from buddyswitch.env.tool_runtime import results as tool_results
 from buddyswitch.modules.demand.private.adapters.daemon import demand_triage_runtime
 from buddyswitch.modules.demand.private.domain import demand_sys
+import buddyswitch.modules.task.public as task_public
 from .tool import DEFINITION
 
 
@@ -52,13 +53,6 @@ def _actor_target(context: Any) -> dict[str, str]:
 def _domain(context: Any) -> Any:
     del context
     return demand_sys
-
-
-def _task_domain(context: Any) -> Any:
-    domain = getattr(getattr(context, "rules", None), "task_sys", None)
-    if domain is None:
-        raise RuntimeError("Task Sys domain access is unavailable")
-    return domain
 
 
 class _CompletionEvidenceError(ValueError):
@@ -361,7 +355,6 @@ def _completion_task_ids(evidence_refs: Any) -> list[str]:
 def _complete(
     *,
     domain: Any,
-    task_domain: Any,
     target: dict[str, str],
     args: dict[str, Any],
 ) -> dict[str, Any]:
@@ -371,7 +364,7 @@ def _complete(
         demand_ref=args.get("demand_ref"),
     )
     for task_id in task_ids:
-        task_domain.require_completed_task_for_demand(
+        task_public.require_completed_task_for_demand(
             task_id=task_id,
             actor_target=target,
             demand_id=resolved["demand_id"],
@@ -386,7 +379,6 @@ def _complete(
 
 def _handlers(
     domain: Any,
-    task_domain: Any,
     target: dict[str, str],
     context: Any,
 ) -> dict[str, Callable[[dict[str, Any]], Any]]:
@@ -405,7 +397,6 @@ def _handlers(
         ),
         "complete": lambda args: _complete(
             domain=domain,
-            task_domain=task_domain,
             target=target,
             args=args,
         ),
@@ -417,10 +408,8 @@ def invoke(*, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]
     if rejection is not None:
         return rejection
     domain = _domain(context)
-    task_domain = _task_domain(context)
     handler = _handlers(
         domain,
-        task_domain,
         _actor_target(context),
         context,
     ).get(action)
@@ -443,7 +432,7 @@ def invoke(*, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]
             message=str(exc.message),
             retryable=bool(exc.retriable),
         )
-    except task_domain.TaskCompletionEvidenceError as exc:
+    except task_public.TaskCompletionEvidenceError as exc:
         return _rejection(
             action=action,
             context=context,

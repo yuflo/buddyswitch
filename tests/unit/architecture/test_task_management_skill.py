@@ -204,7 +204,7 @@ def test_current_actor_surfaces_contain_no_retired_or_future_task_architecture()
         TRIAGE_HANDLER,
         ORCHESTRATION_HANDLER,
         ROOT / "src/buddyswitch/modules/demand/private/adapters/tool/tool.py",
-        ROOT / "src/buddyswitch/env/tools/task_sys/tool.py",
+        ROOT / "src/buddyswitch/modules/task/private/adapters/tool/tool.py",
         *ROLE_AGENTS,
     )
     forbidden = (
@@ -227,7 +227,7 @@ def test_actor_task_tool_surface_is_exactly_minimal() -> None:
 
     assert set(tool_registry.supported_actions("task_sys")) == expected
     assert set(tool_registry.env_tools_description()["task_sys"]["operations"]) == expected
-    assert not hasattr(__import__("buddyswitch.env.domain.task_sys", fromlist=["record_task_close"]), "record_task_close")
+    assert not (ROOT / "src/buddyswitch/env/domain/task_sys.py").exists()
 
 
 def test_retired_task_skill_is_not_treated_as_current_policy() -> None:

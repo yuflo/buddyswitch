@@ -24,9 +24,13 @@ Web owns browser routes and browser DTO composition. It may combine Host
 Control facts with external-safe product reads, but it does not own lifecycle
 mechanics, Actor input, Demand/Task mutation, or IM semantics.
 
-`/api/actors/{id}/console` composes one Actor Console read model. Its Task
-projection contains active and terminal Tasks only and uses the exact
-external-safe Task DTO. It has no raw repository fallback and no Task mutation
+`/api/actors/{id}/console` composes one Actor Console read model. The generic
+Web host owns the surrounding Actor, runtime, Track, IM, and capability DTO.
+It invokes typed `ActorConsoleSectionRegistration` projectors selected by
+application composition. Task contributes the single `task_sys` projector;
+that projection contains active and terminal Tasks only and uses the exact
+external-safe Task DTO. Web imports no Task-private package, contains no Task
+lifecycle rule, has no raw repository fallback, and exposes no Task mutation
 subroute.
 
 ## Web Message
@@ -64,8 +68,8 @@ or Task state.
 - Central IM owns Message state and delivery results.
 
 Actor runtime Task tools expose exactly `list`, `get`, `create`, and `cancel`.
-Successful Task completion is host-recorded from the matching native Goal, not
-an external mutation.
+Successful Task completion is recorded by Task's native-Goal adapter from the
+matching native Goal, not by Web, CLI, or another external mutation.
 
 External Task rows contain exactly:
 
@@ -91,12 +95,12 @@ Valid paths:
 ```text
 Browser -> Web -> private Host Control
 Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session
-Browser -> Web -> external-safe product projections
+Browser -> Web -> typed Actor Console section projectors
 Browser -> Web -> IM API
 
 Public CLI -> private Host Control
 Public CLI -> Actor Session
-Public CLI -> external-safe product projections
+Public CLI -> typed product command registrations
 
 Actor tools -> product owners
 Product owners -> repositories
@@ -106,6 +110,7 @@ Forbidden paths:
 
 - Web to CLI subprocess execution as an internal product API;
 - Web to raw product repository rows;
+- generic Web host to Task private code or Task lifecycle rules;
 - Web to Actor runtime mutation tools for console reads;
 - Web or CLI to native Goal mutation;
 - Actor Session to Demand or Task mutation;

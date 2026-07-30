@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import importlib
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import Any
 from unittest import mock
 
 from tests.support.runtime import RuntimeWorkspaceTestCase
+from tests.support import task_fixtures
 
 
 from tests.support.paths import REPO_ROOT
@@ -49,10 +49,7 @@ TRACK_DETAIL_KEYS = TRACK_LIST_KEYS + ("materials", "proofs", "updates", "commen
 
 
 def _task_read_module() -> Any:
-    try:
-        return importlib.import_module("buddyswitch.env.domain.task_read")
-    except ModuleNotFoundError as exc:
-        raise AssertionError("buddyswitch.env.domain.task_read should provide external Task read projections") from exc
+    return task_fixtures.task_read_model()
 
 
 class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):

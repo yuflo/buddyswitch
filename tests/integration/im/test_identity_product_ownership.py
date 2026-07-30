@@ -11,7 +11,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
 from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
@@ -58,7 +58,7 @@ class ProductOwnershipIdentityTests(RuntimeWorkspaceTestCase):
     def test_task_new_writes_persist_owner_identity_id(self) -> None:
         actor = self._actor(role="pm", actor_id="act-pm-task-owner")
 
-        result = task_sys.create(
+        result = task_fixtures.create_task(
             actor_target={"actor_id": actor["actor_id"], "role_id": actor["role_id"]},
             demand_ref={
                 "demand_id": "demand-identity-owned-task",

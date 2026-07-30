@@ -157,9 +157,10 @@ is satisfied.
   or verified `im.message.reply`.
 
 Task Sys owns Task identity, Actor binding, Demand binding, and terminal-status
-validation through a narrow read contract. The Demand adapter validates all
-Task and delivery evidence before calling the Demand domain owner. A stale
-Demand reference or invalid evidence leaves Demand state unchanged.
+validation through Task Public. The Demand Tool adapter imports Task Public,
+validates all Task and delivery evidence, and only then calls the Demand domain
+owner. A stale Demand reference or invalid evidence leaves Demand state
+unchanged. Demand never imports Task private code.
 
 For an IM-origin Demand, Parent verifies the exact durable reply content and
 `reply_to` binding and cites both the completed Task and reply. If the latest
@@ -193,12 +194,20 @@ Tool, CLI, Daemon adapters, Skills, and owning tests live there. The module
 exports one passive `ModuleAssembly`; it starts no process and performs no
 registration side effect.
 
-`src/buddyswitch/application/composition.py` selects `(DEMAND,)` once.
-`application/build.py` validates and flattens two Daemon handlers, one explicit
-Tool, one CLI command, two Skill exports, and one cleanup contribution before
-any host starts. Generic hosts receive only their typed registrations. The
-legacy central owner, adapter, Tool-package, Skill-path, and owning-test paths
-do not exist.
+`src/buddyswitch/application/composition.py` selects Demand and constructs Task
+with Demand Public's resolver capability, producing `(DEMAND, TASK)` once.
+Demand's assembly still contributes exactly two Daemon handlers, one explicit
+Tool, one CLI command, two Skill exports, and one cleanup contribution.
+Application build validates and flattens both component assemblies and applies
+the explicit interleaved daemon order
+`demand_triage -> task_goal -> demand_orchestration` before any host starts.
+Generic hosts receive only their typed registrations.
+
+Demand's orchestration handler and Tool adapter import Task Public for
+attention and evidence reads. Task private code depends on its own resolver
+port and imports no Demand source; the application root owns the single
+concrete Demand Public binding. The legacy central Demand owner, adapter,
+Tool-package, Skill-path, and owning-test paths do not exist.
 
 Canonical receipts, Demand pool revision, Task state, native Goal state, and
 handler checkpoints are recovery truth. Notifications accelerate attention

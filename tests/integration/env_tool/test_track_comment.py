@@ -17,7 +17,7 @@ from tests.support.runtime import RuntimeWorkspaceTestCase
 ROOT = REPO_ROOT
 
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.tool_runtime import context as context_module  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
@@ -64,7 +64,7 @@ class TrackCommentEnvToolTests(RuntimeWorkspaceTestCase):
 
     def _seed_active_task(self, *, instance_root: Path, actor_id: str, role: str) -> None:
         task_id = f"task-0001-{role}-track-comment"
-        task_sys.create(
+        task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": f"demand-track-comment-{role}",

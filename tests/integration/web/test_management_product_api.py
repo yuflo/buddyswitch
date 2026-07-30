@@ -1,3 +1,5 @@
+import ast
+
 from tests.integration.web.management_harness import *  # noqa: F401,F403
 
 
@@ -474,7 +476,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("target_" + "role_id", deliver_im_actor.call_args.args[0])
 
     def test_actor_console_api_composes_runtime_task_sys_track_and_im_projection(self) -> None:
-        from buddyswitch.env.domain import task_sys
+        from tests.support import task_fixtures
 
         shared_root = self._use_capability_shared_root()
         write_web_capability_instance(
@@ -493,7 +495,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         terminal_task_ids = []
         for index in range(6):
             objective = f"Deliver Web console terminal fixture {index} through its native Goal."
-            terminal_result = task_sys.create(
+            terminal_result = task_fixtures.create_task(
                 actor_target={"actor_id": "act-pm-demo", "role_id": "pm"},
                 demand_ref={
                     "demand_id": f"demand-web-console-terminal-{index}",
@@ -505,7 +507,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
             )
             terminal_task_ids.append(terminal_result["task_id"])
             if index % 2:
-                task_sys.record_task_cancel(terminal_result["task_id"], "Fixture cancellation.")
+                task_fixtures.record_task_cancel(terminal_result["task_id"], "Fixture cancellation.")
             else:
                 goal = {
                     "threadId": "thread-main",
@@ -517,11 +519,11 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                     "createdAt": 100 + index,
                     "updatedAt": 200 + index,
                 }
-                task_sys.bind_goal(terminal_result["task_id"], goal)
-                task_sys.record_goal_complete(terminal_result["task_id"], goal)
+                task_fixtures.bind_goal(terminal_result["task_id"], goal)
+                task_fixtures.record_goal_complete(terminal_result["task_id"], goal)
 
         active_objective = "Deliver the current Web console fixture through its native Goal."
-        task_result = task_sys.create(
+        task_result = task_fixtures.create_task(
             actor_target={"actor_id": "act-pm-demo", "role_id": "pm"},
             demand_ref={
                 "demand_id": "demand-web-console",
@@ -531,7 +533,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
             objective=active_objective,
             selection_reason="The Task slot is empty and this Demand is the current priority.",
         )
-        task_sys.bind_goal(
+        task_fixtures.bind_goal(
             task_result["task_id"],
             {
                 "threadId": "thread-main",
@@ -546,11 +548,40 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         )
 
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
-        self.assertNotIn("task_sys.actor_task_projection", source)
-        self.assertNotIn("task_sys.COMPLETED", source)
-        self.assertNotIn("task_sys.CANCELED", source)
-        self.assertTrue(hasattr(WEB_MANAGEMENT, "task_read"), "Web console should use external Task read projections.")
-        task_read_module = WEB_MANAGEMENT.task_read
+        tree = ast.parse(source, filename=str(WEB_MANAGEMENT_PATH))
+        task_private_imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                task_private_imports.extend(
+                    alias.name
+                    for alias in node.names
+                    if alias.name.startswith("buddyswitch.modules.task.private")
+                )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module.startswith("buddyswitch.modules.task.private"):
+                    task_private_imports.append(module)
+        task_lifecycle_names = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+            and node.id
+            in {
+                "TASK_STATUSES",
+                "ACTIVE_TASK_STATUSES",
+                "TERMINAL_TASK_STATUSES",
+            }
+        }
+        task_terminal_literals = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and node.value in {"completed", "canceled"}
+        }
+        self.assertEqual(task_private_imports, [])
+        self.assertEqual(task_lifecycle_names, set())
+        self.assertEqual(task_terminal_literals, set())
+        task_read_module = task_fixtures.task_read_model()
         with mock.patch.object(
             task_read_module,
             "actor_external_task_projection",

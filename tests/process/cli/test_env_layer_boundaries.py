@@ -34,7 +34,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         "actor_private_workspace",
         "identity",
     }
-    _SHIPPED_TOOLS = {"task_sys", "track", "artifact", "context", "evidence", "message", "search"}
+    _SHIPPED_TOOLS = {"track", "artifact", "context", "evidence", "message", "search"}
 
     def _legacy_store_import_violations(self, roots: list[Path]) -> list[str]:
         violations: list[str] = []

@@ -13,7 +13,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as catalog  # noqa: E402
 from buddyswitch.env.tool_runtime import role_auth  # noqa: E402
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
@@ -48,7 +48,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
 
     def _seed_active_task(self, *, instance_json: Path, role: str, actor_id: str) -> None:
         task_id = f"task-0001-{role}-payload-contract"
-        task_sys.create(
+        task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": f"demand-payload-contract-{role}",
@@ -145,7 +145,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             "src/buddyswitch/env/tool_runtime/role_auth.py",
             "src/buddyswitch/launcher/external_im_session.py",
             "src/buddyswitch/launcher/im_http_router.py",
-            "src/buddyswitch/launcher/task_goal_handler.py",
+            "src/buddyswitch/modules/task/private/adapters/goal/handler.py",
             "src/buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md",
             "docs/arch/web-interface-call-architecture.md",
         )

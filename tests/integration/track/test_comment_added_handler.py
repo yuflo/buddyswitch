@@ -19,7 +19,7 @@ ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
 from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
@@ -478,7 +478,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
     def test_track_comment_handler_schedules_intake_while_another_task_is_active(self) -> None:
         instance = self._instance()
         runtime = FakeDaemonRuntime(result={"action": "steer", "turn_id": "turn-demand-track-active"})
-        active = task_sys.create(
+        active = task_fixtures.create_task(
             actor_target={"actor_id": "act-dev-track-handler", "role_id": "dev"},
             demand_ref={
                 "demand_id": "demand-existing-active",

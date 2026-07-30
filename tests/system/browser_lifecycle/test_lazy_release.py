@@ -31,7 +31,7 @@ ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.env.domain import task_sys  # noqa: E402
+from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.runtime_kernel import protocol  # noqa: E402
 
@@ -888,7 +888,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
         self.fail(f"timed out waiting for proxy response; code={proc.poll()}; stderr:\n{stderr}")
 
     def _seed_active_task(self, *, actor_id: str, role: str) -> None:
-        task_sys.create(
+        task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
                 "demand_id": "demand-browser-lazy-release",

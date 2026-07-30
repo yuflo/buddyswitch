@@ -11,10 +11,13 @@ from unittest import mock
 
 
 from tests.support.paths import REPO_ROOT
+from tests.support import task_fixtures
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.domain import task_read, track_read  # noqa: E402
+from buddyswitch.env.domain import track_read  # noqa: E402
+
+task_read = task_fixtures.task_read_model()
 
 
 def _source(relative: str) -> str:
@@ -466,8 +469,14 @@ class ExternalControlArchitectureTests(unittest.TestCase):
                 self.assertFalse(_contains_mapping_key(payload, private_key))
 
         web_source = _source("src/buddyswitch/launcher/web_management.py")
-        self.assertIn("task_read.actor_external_task_projection", web_source)
-        self.assertNotIn("task_" + "sys.actor_task_projection", web_source)
+        task_web_source = _source(
+            "src/buddyswitch/modules/task/private/adapters/web.py"
+        )
+        self.assertNotIn("modules.task.private", web_source)
+        self.assertIn(
+            "read_model.actor_external_task_projection",
+            task_web_source,
+        )
 
     def test_durable_architecture_names_the_final_single_track_boundaries(self) -> None:
         document = _source("docs/arch/web-interface-call-architecture.md")

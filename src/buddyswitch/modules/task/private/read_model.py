@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from buddyswitch.env.domain import task_sys
 from buddyswitch.env.domain.identity import ActorIdentityProfile
 from buddyswitch.env.repos import runtime_files
+from buddyswitch.modules.task.private.domain import task_sys
 
 
 def _resolve_actor_target(

@@ -157,14 +157,22 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         ):
             self.assertNotIn(token, core_source)
 
-    def test_instance_daemon_is_only_generic_daemon_goal_handler_composition_root(self) -> None:
-        candidates = sorted((ROOT / "src" / "buddyswitch" / "launcher").glob("*.py"))
-        combined = []
-        for path in candidates:
-            imports = _imported_modules(path)
-            if "buddyswitch.launcher.daemon_core" in imports and "buddyswitch.launcher.task_goal_handler" in imports:
-                combined.append(path.name)
-        self.assertEqual(combined, ["instance_daemon.py"])
+    def test_instance_daemon_is_generic_and_application_owns_task_goal_composition(self) -> None:
+        instance_imports = _imported_modules(INSTANCE_DAEMON_PATH)
+        self.assertIn("buddyswitch.launcher.daemon_core", instance_imports)
+        self.assertFalse(
+            [
+                name
+                for name in instance_imports
+                if name.startswith("buddyswitch.modules.task")
+                or name == "buddyswitch.launcher.task_goal_handler"
+            ]
+        )
+        composition_source = (
+            ROOT / "src/buddyswitch/application/composition.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("build_task_module(", composition_source)
+        self.assertIn('"task_goal"', composition_source)
 
     def test_current_state_is_owned_outside_daemon_core(self) -> None:
         self.assertTrue(DAEMON_STATE_PATH.exists(), DAEMON_STATE_PATH)

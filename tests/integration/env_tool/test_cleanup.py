@@ -409,6 +409,82 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertFalse(invalid_utf8_path.exists())
         self.assertFalse(malformed_path.exists())
 
+    def test_task_cleanup_contribution_attributes_role_and_guards_unknown_records(self) -> None:
+        module_path = ROOT / "src" / "buddyswitch" / "modules" / "task" / "module.py"
+        self.assertTrue(module_path.is_file(), msg=module_path)
+
+        from buddyswitch.application.composition import TASK
+
+        pm_path = self._path("buddyswitch/objects/task-sys/tasks/task-demand-pm.json")
+        dev_path = self._path("buddyswitch/objects/task-sys/tasks/task-demand-dev.json")
+        malformed_path = self._path("buddyswitch/objects/task-sys/tasks/malformed.json")
+        self._write_json(
+            "buddyswitch/objects/task-sys/tasks/task-demand-pm.json",
+            {
+                "schema_version": 1,
+                "id": "task-demand-pm",
+                "actor_target": {"actor_id": "act-pm-clean", "role_id": "pm"},
+            },
+        )
+        self._write_json(
+            "buddyswitch/objects/task-sys/tasks/task-demand-dev.json",
+            {
+                "schema_version": 1,
+                "id": "task-demand-dev",
+                "actor_target": {"actor_id": "act-dev-clean", "role_id": "dev"},
+            },
+        )
+        malformed_path.parent.mkdir(parents=True, exist_ok=True)
+        malformed_path.write_text("{", encoding="utf-8")
+
+        role_plan = env_cleanup.build_cleanup_plan(
+            scope="role",
+            role="pm",
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            contributions=TASK.cleanup,
+        )
+        self.assertEqual(
+            {
+                path
+                for path, category in role_plan["path_categories"].items()
+                if category == "task_records"
+            },
+            {"buddyswitch/objects/task-sys/tasks/task-demand-pm.json"},
+        )
+        self.assertTrue(
+            any("cannot be safely attributed" in warning for warning in role_plan["warnings"]),
+            msg=role_plan,
+        )
+        role_result = env_cleanup.execute_cleanup_plan(role_plan)
+        self.assertTrue(role_result["ok"], msg=role_result)
+        self.assertFalse(pm_path.exists())
+        self.assertTrue(dev_path.exists())
+        self.assertTrue(malformed_path.exists())
+
+        all_data_plan = env_cleanup.build_cleanup_plan(
+            scope="all-data",
+            role=None,
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            contributions=TASK.cleanup,
+        )
+        self.assertEqual(
+            {
+                path
+                for path, category in all_data_plan["path_categories"].items()
+                if category == "task_records"
+            },
+            {
+                "buddyswitch/objects/task-sys/tasks/task-demand-dev.json",
+                "buddyswitch/objects/task-sys/tasks/malformed.json",
+            },
+        )
+        all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
+        self.assertTrue(all_data_result["ok"], msg=all_data_result)
+        self.assertFalse(dev_path.exists())
+        self.assertFalse(malformed_path.exists())
+
     def test_cleanup_host_rejects_escaping_and_symlink_owned_state_paths(self) -> None:
         self.assertTrue(
             (ROOT / "src" / "buddyswitch" / "runtime_support" / "env_cleanup.py").is_file()

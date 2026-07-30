@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S2 ACCEPTED; S3 READY — R1 COMPLETION
-> Runtime authorization: S3 only through `BS-MM-S3-R1-20260730-01`
+> Current state: S0–S3 ACCEPTED; S4 PROPOSED — PREPARATION ONLY
+> Runtime authorization: none; no S4 lane packet is READY
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -21,8 +21,8 @@ Read:
 | S0 | `00-program-readiness.md` | ACCEPTED |
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
-| S3 | `03-task-goal-boundary-cutover.md` | READY — R1 COMPLETION |
-| S4 | `04-independent-component-waves.md` | BLOCKED |
+| S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
+| S4 | `04-independent-component-waves.md` | PROPOSED — PREPARATION ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -82,7 +82,16 @@ manifest. Hub review found the missing representation class, a neighboring
 generated router expectation and three candidate proof-quality drifts. The
 initial packet is consumed. D-049 and the reviewed R1 audit replace
 Task-specific test exceptions with owner/composition-derived generic proof.
-`BS-MM-S3-R1-20260730-01` is the sole current execution authority.
+R1 was the sole successor execution authority.
+
+S3 R1 then completed the preserved Task/Goal candidate, corrected the generic
+package/router proof owners, passed the complete affected path and one frozen
+FINAL, and returned with clean runtime and resource state. The coordinating
+hub reproduced its complete source, untracked and activation identities,
+reviewed the one-owner/Public/contribution boundaries and accepted S3 in
+`03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`. Both S3 packets are
+consumed. S4 source refresh and READY preparation are unlocked, but no S4
+implementation or lane packet is authorized yet.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

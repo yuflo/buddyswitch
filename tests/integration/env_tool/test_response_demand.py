@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from buddyswitch.launcher import side_thread_registry
-from buddyswitch.env.domain import task_sys
+from tests.support import task_fixtures
 from buddyswitch.env.services import messages as message_service
 from buddyswitch.modules.demand.private.adapters.daemon import (
     demand_triage_runtime,
@@ -128,7 +128,7 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
         status: str,
         label: str,
     ) -> dict[str, Any]:
-        created = task_sys.create(
+        created = task_fixtures.create_task(
             actor_target=actor_target,
             demand_ref=demand_sys.resolve_demand_ref(
                 actor_target=actor_target,
@@ -138,9 +138,9 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
             selection_reason=f"{label} is the selected live Demand.",
         )
         task_id = str(created["task_id"])
-        if status == task_sys.CANCELED:
-            task_sys.record_task_cancel(task_id, "Fixture canceled.")
-        elif status == task_sys.COMPLETED:
+        if status == task_fixtures.CANCELED:
+            task_fixtures.record_task_cancel(task_id, "Fixture canceled.")
+        elif status == task_fixtures.COMPLETED:
             goal = {
                 "threadId": f"thr-goal-{label}",
                 "objective": created["task"]["objective"],
@@ -151,9 +151,9 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
                 "createdAt": 100,
                 "updatedAt": 120,
             }
-            task_sys.bind_goal(task_id, goal)
-            task_sys.record_goal_complete(task_id, goal)
-        return task_sys.get_task(task_id)
+            task_fixtures.bind_goal(task_id, goal)
+            task_fixtures.record_goal_complete(task_id, goal)
+        return task_fixtures.get_task_record(task_id)
 
     @staticmethod
     def _completion_evidence(task_id: str) -> list[dict[str, Any]]:
@@ -472,7 +472,7 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
                     task = self._task_for(
                         actor_target=other_target,
                         demand=other_demand,
-                        status=task_sys.COMPLETED,
+                        status=task_fixtures.COMPLETED,
                         label=label,
                     )
                     evidence = self._completion_evidence(task["id"])
@@ -484,17 +484,17 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
                     task = self._task_for(
                         actor_target=actor_target,
                         demand=other_demand,
-                        status=task_sys.COMPLETED,
+                        status=task_fixtures.COMPLETED,
                         label=label,
                     )
                     evidence = self._completion_evidence(task["id"])
                 else:
                     status = (
-                        task_sys.ACTIVE
+                        task_fixtures.ACTIVE
                         if label == "active-task"
-                        else task_sys.CANCELED
+                        else task_fixtures.CANCELED
                         if label == "canceled-task"
-                        else task_sys.COMPLETED
+                        else task_fixtures.COMPLETED
                     )
                     task = self._task_for(
                         actor_target=actor_target,
@@ -554,7 +554,7 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
         task = self._task_for(
             actor_target=actor_target,
             demand=demand,
-            status=task_sys.COMPLETED,
+            status=task_fixtures.COMPLETED,
             label="completion-valid",
         )
         task_before = self._task_snapshot()
@@ -593,7 +593,7 @@ class EnvToolResponseDemandTests(EnvToolResponseCase):
         task = self._task_for(
             actor_target=actor_target,
             demand=demand,
-            status=task_sys.COMPLETED,
+            status=task_fixtures.COMPLETED,
             label="completion-stale",
         )
         source_key = "track.comment.added:completion-stale-revise"

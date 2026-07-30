@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import importlib
+from pathlib import Path
 from typing import Any, Mapping
 
 from buddyswitch.env.tool_runtime import results as tool_results
-from buddyswitch.modules.demand import public as demand_public
+from buddyswitch.modules.task.private.adapters.goal import client as goal_client
+from buddyswitch.modules.task.private.domain import task_sys
+from buddyswitch.modules.task.public.contracts import DemandSelectionResolver
 from .tool import DEFINITION
 
 _ACTION_ALLOWED_FIELDS = {
@@ -47,13 +49,8 @@ def _actor_target(context: Any) -> dict[str, str]:
 
 
 def _task_domain(context: Any) -> Any:
-    rules = context.get("rules") if isinstance(context, dict) else getattr(context, "rules", None)
-    domain = getattr(rules, "task_sys", None)
-    return (
-        domain
-        if domain is not None
-        else importlib.import_module("buddyswitch.env.domain.task_sys")
-    )
+    del context
+    return task_sys
 
 
 def _reject_unknown_fields(*, action: str, args: dict[str, Any], context: Any) -> dict[str, Any] | None:
@@ -136,17 +133,22 @@ def _actor_owned_task(domain: Any, context: Any, task_id: str) -> dict[str, Any]
 
 
 def _reconcile(context: Any, task_id: str) -> dict[str, Any]:
-    access = context.get("task_goal_runtime") if isinstance(context, dict) else getattr(context, "task_goal_runtime", None)
-    reconcile = getattr(access, "reconcile_task", None)
-    if not callable(reconcile):
+    instance_json = (
+        context.get("instance_json")
+        if isinstance(context, dict)
+        else getattr(context, "instance_json", None)
+    )
+    if not isinstance(instance_json, Path):
         return {
             "status": "pending",
             "task_id": task_id,
             "error_code": "task_goal_runtime_unavailable",
-            "error": "Task Goal runtime reconciliation is unavailable",
+            "error": "Task Goal runtime requires instance_json",
         }
     try:
-        result = reconcile(task_id)
+        result = goal_client.TaskGoalClient(
+            instance_root=instance_json.parent,
+        ).reconcile_task(task_id)
     except Exception as exc:
         return {
             "status": "pending",
@@ -289,10 +291,15 @@ def _write_success(
     )
 
 
-def create(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
+def create(
+    *,
+    args: dict[str, Any],
+    context: Any,
+    demand_selection_resolver: DemandSelectionResolver,
+) -> dict[str, Any]:
     domain = _task_domain(context)
     try:
-        resolved_ref = demand_public.resolve_demand_ref(
+        resolved_ref = demand_selection_resolver(
             actor_target=_actor_target(context),
             demand_ref=args.get("demand_ref"),
         )
@@ -399,18 +406,33 @@ def cancel(*, args: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 _ACTION_HANDLERS = {
-    "create": create,
     "list": list_tasks,
     "get": get,
     "cancel": cancel,
 }
 
 
-def invoke(*, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]:
-    handler = _ACTION_HANDLERS.get(action)
-    if handler is None:
+def invoke(
+    *,
+    action: str,
+    args: dict[str, Any],
+    context: Any,
+    demand_selection_resolver: DemandSelectionResolver,
+) -> dict[str, Any]:
+    if action == "create":
+        handler = None
+    else:
+        handler = _ACTION_HANDLERS.get(action)
+    if handler is None and action != "create":
         raise ValueError(f"unsupported action: {action}")
     rejection = _reject_unknown_fields(action=action, args=args, context=context)
     if rejection is not None:
         return rejection
+    if action == "create":
+        return create(
+            args=args,
+            context=context,
+            demand_selection_resolver=demand_selection_resolver,
+        )
+    assert handler is not None
     return handler(args=args, context=context)

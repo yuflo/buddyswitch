@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.env.domain import task_sys
 from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.tools.task_sys.tool import DEFINITION
+from buddyswitch.modules.task.private.adapters.tool.tool import DEFINITION
+from buddyswitch.modules.task.private.domain import task_sys
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 
@@ -353,9 +353,9 @@ class TaskGoalBindingContractTests(RuntimeWorkspaceTestCase):
         self.assertFalse(hasattr(task_sys, "record_task_close"))
         self.assertFalse(hasattr(task_sys, "record_side_need_parent"))
 
-        from buddyswitch.env.tool_runtime import task_goal_runtime_protocol
+        from buddyswitch.modules.task.private.adapters.goal import protocol
 
         self.assertEqual(
-            task_goal_runtime_protocol.COMMAND_KEYS,
+            protocol.COMMAND_KEYS,
             frozenset({"task_goal.reconcile_task"}),
         )
