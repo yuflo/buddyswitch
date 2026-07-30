@@ -1,14 +1,16 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY`
-> Executable packet: `NONE`
+> Stage state: `TRACK–ARTIFACT READY`
+> Executable packet: `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01`
 > Other lanes: `PREPARATION ONLY`
 > Merge unit: one accepted lane at a time
 
 S4 is not one mechanical directory migration. Its six lanes share the same
 physical-aggregation goal but not the same host or dependency boundary.
-Accordingly, this plan admits only Search. Track, Artifact, Communication,
-Evidence and Context require their own refreshed packet and READY review.
+Accordingly, Search was accepted independently. Current-source review then
+proved that Track and Artifact must cut over as one atomic migration candidate
+while remaining two independent final modules. Communication, Evidence and
+Context still require later refreshed packets and READY reviews.
 
 ## Read order for the current lane
 
@@ -22,7 +24,12 @@ Evidence and Context require their own refreshed packet and READY review.
 7. `search/S4-SEARCH-OWNER-CONSUMER-MANIFEST.md`;
 8. `search/S4-SEARCH-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
 9. `search/S4-SEARCH-ACCEPTANCE.md`;
-10. the next lane source refresh, when prepared.
+10. `track-artifact/S4-TRACK-ARTIFACT-BOUNDARY-DESIGN.md`;
+11. `track-artifact/S4-TRACK-ARTIFACT-SOURCE-SNAPSHOT.md`;
+12. `track-artifact/S4-TRACK-ARTIFACT-OWNER-CONSUMER-MANIFEST.md`;
+13. `track-artifact/S4-TRACK-ARTIFACT-IMPLEMENTATION-PLAN.md`;
+14. `track-artifact/S4-TRACK-ARTIFACT-READY-REVIEW.md`;
+15. `track-artifact/S4-TRACK-ARTIFACT-GOAL-PACKET.md`.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -32,8 +39,8 @@ adds current-source execution facts; it does not broaden S4.
 | Lane | Current state | Blocking or selected boundary |
 |---|---|---|
 | Search | ACCEPTED | `search/S4-SEARCH-ACCEPTANCE.md` |
-| Track | PREPARATION ONLY | real Web projection and inbound/Daemon contribution |
-| Artifact | PREPARATION ONLY | exact Track/Artifact Public dependency direction |
+| Track | READY WITH ARTIFACT | owns relations; consumes two injected Artifact Public callables |
+| Artifact | READY WITH TRACK | owns content/read policy; reads Track Public |
 | Communication | PREPARATION ONLY | iMessage worker lifecycle contribution |
 | Evidence | PREPARATION ONLY | accepted Artifact Public and Browser foundation input |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
@@ -46,15 +53,17 @@ proof. All Search packets are consumed. No later lane may reuse a Search
 packet; the coordinating hub refreshes source and issues a new packet after
 accepting each lane.
 
-## Search acceptance sentence
+## Current atomic lane acceptance sentence
 
-> Search is physically aggregated under one capability root, selected exactly
-> once by application composition through the existing Tool contribution,
-> preserves its non-opening URL-planning behavior, and leaves no Search
-> implementation or Search-specific placeholder in the generic Tool host.
+> Track and Artifact become two physically independent product modules selected
+> once by application composition. Track remains the sole owner of Track state,
+> comments, updates, Artifact relations and lifecycle invariants. Artifact
+> remains the sole owner of Artifact content, revisions, attachments, templates
+> and read policy. Existing product behavior, durable object formats, external
+> interfaces, failure effects and operational results remain unchanged.
 
 ## Checkpoint protocol
 
-No next-lane executor is authorized. The hub first checkpoints Search,
-refreshes remaining owners and shared boundaries from that accepted HEAD, and
-READY-reviews one new lane.
+Only `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01` is authorized. It does not
+authorize Communication, Evidence or Context component migration, S5, Git
+integration or master-truth closure.

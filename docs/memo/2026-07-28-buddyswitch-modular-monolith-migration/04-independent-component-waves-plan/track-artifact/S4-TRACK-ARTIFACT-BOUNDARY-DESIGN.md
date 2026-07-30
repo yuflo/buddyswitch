@@ -1,8 +1,9 @@
 # S4 Track–Artifact Boundary Design
 
-> Status: approved conversational design; awaiting written-spec review
+> Status: `APPROVED`
 > Design source: `25916f58fbce46c4ad28d7359b61340ead59d986`
 > Date: 2026-07-30
+> Written approval: 2026-07-30
 > Scope: final Track and Artifact ownership, cross-component contracts, host
 > contributions, atomic cutover, behavioral protection and execution authority
 
