@@ -89,7 +89,7 @@ def test_application_selects_task_once_and_declares_exact_daemon_order() -> None
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import COMPONENTS
 
-    assert [component.name for component in COMPONENTS] == ["demand", "task"]
+    assert [component.name for component in COMPONENTS].count("task") == 1
     application = build_application()
     assert [registration.name for registration in application.daemon_handlers] == [
         "demand_triage",

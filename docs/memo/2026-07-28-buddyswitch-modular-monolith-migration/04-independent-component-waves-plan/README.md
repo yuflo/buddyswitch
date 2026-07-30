@@ -1,7 +1,7 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `READY — SEARCH R2 CONTINUATION ONLY`
-> Executable packet: `BS-MM-S4-SEARCH-R2-20260730-01`
+> Stage state: `SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY`
+> Executable packet: `NONE`
 > Other lanes: `PREPARATION ONLY`
 > Merge unit: one accepted lane at a time
 
@@ -21,10 +21,8 @@ Evidence and Context require their own refreshed packet and READY review.
 6. `search/S4-SEARCH-SOURCE-SNAPSHOT.md`;
 7. `search/S4-SEARCH-OWNER-CONSUMER-MANIFEST.md`;
 8. `search/S4-SEARCH-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
-9. `search/S4-SEARCH-R1-RETURN-REVIEW.md`;
-10. `search/S4-SEARCH-R2-CONTINUATION-PLAN.md`;
-11. `search/S4-SEARCH-R2-GOAL-PACKET.md`;
-12. `search/S4-SEARCH-R2-READY-REVIEW.md`.
+9. `search/S4-SEARCH-ACCEPTANCE.md`;
+10. the next lane source refresh, when prepared.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -33,7 +31,7 @@ adds current-source execution facts; it does not broaden S4.
 
 | Lane | Current state | Blocking or selected boundary |
 |---|---|---|
-| Search | READY — R2 CONTINUATION | preserved cutover candidate awaits direct, affected and FINAL proof |
+| Search | ACCEPTED | `search/S4-SEARCH-ACCEPTANCE.md` |
 | Track | PREPARATION ONLY | real Web projection and inbound/Daemon contribution |
 | Artifact | PREPARATION ONLY | exact Track/Artifact Public dependency direction |
 | Communication | PREPARATION ONLY | iMessage worker lifecycle contribution |
@@ -41,12 +39,12 @@ adds current-source execution facts; it does not broaden S4.
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
 
 The initial Search packet was rejected before execution by the pre-handoff
-review. R1 then produced a coherent candidate but stopped before test
-collection because its immutable command named the module test parent rather
-than one runner tier. Both predecessors are consumed. Only R2 may continue
-the preserved candidate. No later lane may reuse a Search packet; the
-coordinating hub refreshes source and issues a new packet after accepting each
-lane.
+review. R1 produced a coherent candidate but stopped before collection on an
+invalid immutable target. R2 preserved that candidate, applied D-051's
+execution authority, and passed direct, affected and single frozen FINAL
+proof. All Search packets are consumed. No later lane may reuse a Search
+packet; the coordinating hub refreshes source and issues a new packet after
+accepting each lane.
 
 ## Search acceptance sentence
 
@@ -57,7 +55,6 @@ lane.
 
 ## Checkpoint protocol
 
-The independent executor owns bounded execution judgment under D-051 and
-returns one complete result packet. It does not commit, push, update master
-migration truth or start another S4 lane. The coordinating hub alone reviews,
-accepts, checkpoints and unlocks the next lane.
+No next-lane executor is authorized. The hub first checkpoints Search,
+refreshes remaining owners and shared boundaries from that accepted HEAD, and
+READY-reviews one new lane.

@@ -1,6 +1,6 @@
 # S4 Search R2 READY Review
 
-> Review result: `READY — CONTINUATION ONLY`
+> Review result: `HISTORICAL — R2 ACCEPTED`
 > Packet: `BS-MM-S4-SEARCH-R2-20260730-01`
 > Candidate: preserved R1 Search cutover
 
@@ -55,8 +55,9 @@ directory is not reused.
 
 ## Determination
 
-`BS-MM-S4-SEARCH-R2-20260730-01` is READY after the hub commits the
-coordinating documents and supplies that checkpoint identity.
+`BS-MM-S4-SEARCH-R2-20260730-01` became READY after the hub committed the
+coordinating documents and supplied that checkpoint identity. It has since
+completed and is accepted in `S4-SEARCH-ACCEPTANCE.md`.
 
-R1 is consumed. R2 is the sole Search execution authority. Other S4 lanes
+R1 and R2 are consumed. No Search execution authority remains. Other S4 lanes
 remain preparation-only.

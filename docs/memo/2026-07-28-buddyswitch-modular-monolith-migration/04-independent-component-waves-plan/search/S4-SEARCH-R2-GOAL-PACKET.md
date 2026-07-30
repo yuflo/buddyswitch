@@ -1,6 +1,6 @@
 # S4 Search R2 Continuation Goal Packet
 
-> Packet state: `READY`
+> Packet state: `CONSUMED — ACCEPTED`
 > Packet ID: `BS-MM-S4-SEARCH-R2-20260730-01`
 > Predecessor: `BS-MM-S4-SEARCH-R1-20260730-01` rejected and consumed
 

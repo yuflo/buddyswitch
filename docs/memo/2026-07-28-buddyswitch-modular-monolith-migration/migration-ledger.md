@@ -4,15 +4,15 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | R1 preserved Search candidate; pre-cutover affected `b96f488146524dbc97eb14463aea7780`, mutable-consumer `978b8137549e47bf9542e69b2045e2d6`, representation `c50a7fce15e94e0b902f7478abccf6ca` and shared-response `d0414c37f2a64ca7a1aa0c1c5de1866c`; no candidate GREEN yet |
-| Active stage | S4 — Independent Component Waves / Search lane |
-| State | READY — SEARCH R2 CONTINUATION ONLY |
-| Runtime migration authorized | `BS-MM-S4-SEARCH-R2-20260730-01` only |
+| Evidence baseline | Search direct `6701c80ce5444a80bfd91b448d082d2b`, affected `d1d75714466b4bf390812aaeb60ff526`, frozen FINAL `7ecfb65c5e0643c6b112cc8af3c7e98b` |
+| Active stage | S4 — Independent Component Waves / next lane preparation |
+| State | SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY |
+| Runtime migration authorized | none |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | execute and hub-review Search; other lanes remain preparation-only |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand and Task modules |
+| Next gate | checkpoint Search, refresh remaining lane boundaries, READY-review one next lane |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task and Search modules |
 
 ## Stage ledger
 
@@ -22,7 +22,7 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | READY — SEARCH R2 CONTINUATION ONLY | S3 | Search executor; hub accepts | exact Search R2 return and hub acceptance |
+| S4 Component waves | SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY | S3 | coordinating hub | source refresh and one next-lane READY review |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -273,9 +273,12 @@ once after the last initial source mutation, derives generic proof from
 composition and permits at most one fully classified FIX_AFTER_FINAL cycle.
 R1 completed that coherent candidate but its frozen focused command named the
 module test parent, which the runner rejected before collection. R1 is
-consumed; no candidate GREEN or FINAL exists. D-051 corrects the
-coordinator/executor authority boundary, and only
-`BS-MM-S4-SEARCH-R2-20260730-01` may continue the preserved candidate.
+consumed. D-051 corrects the coordinator/executor authority boundary. R2
+continued the unchanged candidate, passed direct
+`6701c80ce5444a80bfd91b448d082d2b`, affected
+`d1d75714466b4bf390812aaeb60ff526` and frozen FINAL
+`7ecfb65c5e0643c6b112cc8af3c7e98b`. Search is accepted in
+`S4-SEARCH-ACCEPTANCE.md`; all Search packets are consumed.
 
 ## Transition record
 
@@ -310,6 +313,7 @@ coordinator/executor authority boundary, and only
 | 2026-07-30 | S4 Search | READY — SEARCH LANE ONLY | REPLANNING | coordinating hub pre-handoff review | initial packet manufactured refactor RED, omitted two generated/enumerated consumers, scheduled avoidable double reprovision and forced an avoidable hub return for any FINAL defect |
 | 2026-07-30 | S4 Search | REPLANNING | READY — SEARCH R1 LANE ONLY | coordinating hub | representation audit completed, missing baseline passed, GREEN refactor entry, one initial activation boundary and one bounded classified FIX_AFTER_FINAL policy frozen |
 | 2026-07-30 | S4 Search | READY — SEARCH R1 LANE ONLY | READY — SEARCH R2 CONTINUATION ONLY | coordinating hub | R1 coherent candidate preserved; invalid immutable parent-directory command diagnosed before collection; D-051 assigns bounded execution mechanics to the executor and R2 resumes at proof |
+| 2026-07-30 | S4 Search | READY — SEARCH R2 CONTINUATION ONLY | ACCEPTED | coordinating hub | exact candidate/runtime identity reproduced; direct, affected and single frozen FINAL passed; one physical owner, one explicit registration, retired package and host placeholder absence accepted |
 
 ## Checkpoint record
 
@@ -342,6 +346,7 @@ coordinator/executor authority boundary, and only
 | 2026-07-30 | S4 initial Search handoff | REJECTED BEFORE EXECUTION | `04-independent-component-waves-plan/search/S4-SEARCH-PRE-HANDOFF-REVIEW.md`; packet `BS-MM-S4-SEARCH-20260730-01` consumed | use R1 only |
 | 2026-07-30 | S4 Search R1 handoff | READY | affected `b96f488146524dbc97eb14463aea7780`; mutable-consumer `978b8137549e47bf9542e69b2045e2d6`; representation `c50a7fce15e94e0b902f7478abccf6ca`; shared response `d0414c37f2a64ca7a1aa0c1c5de1866c`; preflight `S4SEARCHP-20260730-02`; packet `BS-MM-S4-SEARCH-R1-20260730-01` | user starts one independent Search task; hub pauses without polling |
 | 2026-07-30 | S4 Search R1 return / R2 handoff | READY — CONTINUATION ONLY | `S4-SEARCH-R1-RETURN-REVIEW.md`; preserved tracked patch `144a55b0…`; no-collection run `69e82249c86343c19bf4bf792b2bb151`; D-051; packet `BS-MM-S4-SEARCH-R2-20260730-01` | preserve candidate and resume at executor-selected direct/affected proof, then frozen FINAL |
+| 2026-07-30 | S4 Search acceptance | ACCEPTED | `S4-SEARCH-ACCEPTANCE.md`; direct `6701c80ce5444a80bfd91b448d082d2b`; affected `d1d75714466b4bf390812aaeb60ff526`; FINAL `7ecfb65c5e0643c6b112cc8af3c7e98b` | checkpoint Search, then refresh remaining S4 lanes; do not resume Search packets |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -364,10 +369,10 @@ Stop/replan condition:
 
 ```text
 Stage: S4
-Master state: READY — SEARCH R2 CONTINUATION ONLY
-Goal Packet: BS-MM-S4-SEARCH-R2-20260730-01
+Master state: SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY
+Goal Packet: none
 Execution session: none
-Last hub checkpoint: R1 no-collection stop reviewed; D-051 and R2 continuation prepared
-Next action: commit/push R2 coordinating checkpoint, then hand off only Search R2
-No-polling state: PAUSED_AFTER_HANDOFF once user starts the independent task
+Last hub checkpoint: Search R2 accepted with one frozen FINAL
+Next action: commit/push Search acceptance checkpoint, then refresh remaining lane boundaries
+No-polling state: not entered; no next-lane packet exists
 ```

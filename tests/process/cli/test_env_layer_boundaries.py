@@ -11,6 +11,7 @@ import unittest
 import uuid
 from pathlib import Path
 
+from buddyswitch.application.build import build_application
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
@@ -26,6 +27,28 @@ PROTOCOL = "buddyswitch-runtime-broker/v2"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
 
+def _tool_roots() -> dict[str, Path]:
+    application = build_application()
+    explicit_tool_roots = {
+        registration.definition.id: (
+            ROOT
+            / "src"
+            / Path(*registration.invoke.__module__.split(".")).parent
+        )
+        for registration in application.tools
+    }
+    dynamic_tool_roots = {
+        path.name: path
+        for path in (ROOT / "src/buddyswitch/env/tools").iterdir()
+        if path.is_dir()
+        and not path.name.startswith("_")
+        and (path / "__init__.py").is_file()
+    }
+    assert not (explicit_tool_roots.keys() & dynamic_tool_roots.keys())
+    tool_roots = {**dynamic_tool_roots, **explicit_tool_roots}
+    return tool_roots
+
+
 class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
     _DOMAIN_CROSS_OBJECT_ALLOWLIST = {
         "publication",
@@ -34,8 +57,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         "actor_private_workspace",
         "identity",
     }
-    _SHIPPED_TOOLS = {"track", "artifact", "context", "evidence", "message", "search"}
-
     def _legacy_store_import_violations(self, roots: list[Path]) -> list[str]:
         violations: list[str] = []
         for root in roots:
@@ -56,10 +77,10 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         return violations
 
     def test_tool_package_cross_imports_are_forbidden(self) -> None:
-        tool_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
+        tool_roots = _tool_roots()
+        tool_ids = set(tool_roots)
         violations: list[str] = []
-        for tool in sorted(self._SHIPPED_TOOLS):
-            package_dir = tool_root / tool
+        for tool, package_dir in sorted(tool_roots.items()):
             if not package_dir.is_dir():
                 violations.append(f"missing package: {package_dir.relative_to(ROOT)}")
                 continue
@@ -73,13 +94,13 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                                 parts = alias.name.split(".")
                                 if len(parts) >= 3:
                                     target = parts[2]
-                                    if target in self._SHIPPED_TOOLS and target != tool:
+                                    if target in tool_ids and target != tool:
                                         violations.append(f"{rel}:{node.lineno}: import {alias.name}")
                     elif isinstance(node, ast.ImportFrom):
                         module = node.module or ""
                         if module == "buddyswitch.env.tools":
                             for alias in node.names:
-                                if alias.name in self._SHIPPED_TOOLS and alias.name != tool:
+                                if alias.name in tool_ids and alias.name != tool:
                                     violations.append(
                                         f"{rel}:{node.lineno}: from buddyswitch.env.tools import {alias.name}"
                                     )
@@ -87,7 +108,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                             parts = module.split(".")
                             if len(parts) >= 3:
                                 target = parts[2]
-                                if target in self._SHIPPED_TOOLS and target != tool:
+                                if target in tool_ids and target != tool:
                                     violations.append(f"{rel}:{node.lineno}: from {module} import ...")
 
         self.assertEqual(violations, [], msg="\n".join(violations))

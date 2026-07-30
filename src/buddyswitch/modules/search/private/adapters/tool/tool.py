@@ -1,4 +1,4 @@
-"""Black-box protocol entrypoint for env.tools.search."""
+"""Black-box Tool entrypoint for the Search capability."""
 
 from __future__ import annotations
 

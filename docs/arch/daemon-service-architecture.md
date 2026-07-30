@@ -94,9 +94,10 @@ does not add a product switch to daemon core.
 ## Composition root
 
 `src/buddyswitch/application/composition.py` is the production component
-selection root. It selects the passive Demand assembly, constructs the passive
-Task assembly with Demand's resolver capability, and selects
-`(DEMAND, TASK)` once. It also owns the exact current component order:
+selection root and the only owner of the complete current component list. It
+selects each passive `ModuleAssembly` once and owns concrete cross-component
+wiring such as Task's Demand resolver. Search contributes no daemon handler,
+so the exact daemon order remains:
 
 ```text
 demand_triage -> task_goal -> demand_orchestration

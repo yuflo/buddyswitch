@@ -181,9 +181,10 @@ Tool, one Goal daemon handler and mailbox command factory, one CLI command, one
 Actor Console section, and one cleanup contribution. It starts no process and
 performs no registration side effect.
 
-`src/buddyswitch/application/composition.py` constructs Task with the Demand
-resolver, selects `(DEMAND, TASK)`, supplies Task's active predicate to the
-generic Tool gate, and declares the exact daemon order:
+`src/buddyswitch/application/composition.py` constructs and selects Task
+exactly once with the Demand resolver, owns the complete current component
+list, supplies Task's active predicate to the generic Tool gate, and declares
+the exact daemon order:
 
 ```text
 demand_triage -> task_goal -> demand_orchestration

@@ -74,12 +74,10 @@ def test_demand_is_one_passive_module_selected_once_by_application_composition()
     from buddyswitch.application.composition import COMPONENTS
     from buddyswitch.foundation.composition import ModuleAssembly
     from buddyswitch.modules.demand.module import DEMAND
-    from buddyswitch.modules.task.module import build_task_module
 
     assert COMPONENTS[0] is DEMAND
-    assert [module.name for module in COMPONENTS] == ["demand", "task"]
+    assert sum(module is DEMAND for module in COMPONENTS) == 1
     assert isinstance(DEMAND, ModuleAssembly)
-    assert callable(build_task_module)
     assert [field.name for field in fields(ModuleAssembly)] == [
         "name",
         "daemon_handlers",
@@ -91,16 +89,17 @@ def test_demand_is_one_passive_module_selected_once_by_application_composition()
     ]
 
     composition_imports = _imports(APPLICATION_COMPOSITION)
-    assert composition_imports == {
+    assert {
         "buddyswitch.modules.demand",
         "buddyswitch.modules.demand.public",
         "buddyswitch.modules.demand.module",
         "buddyswitch.modules.demand.module.DEMAND",
-        "buddyswitch.modules.task",
-        "buddyswitch.modules.task.public",
-        "buddyswitch.modules.task.module",
-        "buddyswitch.modules.task.module.build_task_module",
-    }
+    }.issubset(composition_imports)
+    assert not [
+        imported
+        for imported in composition_imports
+        if imported.startswith("buddyswitch.modules.demand.private")
+    ]
     composition_source = (REPO_ROOT / APPLICATION_COMPOSITION).read_text(encoding="utf-8")
     for private_name in (
         "DemandTriageHandler",
@@ -465,10 +464,11 @@ def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
     tool_root = REPO_ROOT / "src" / "buddyswitch" / "env" / "tools"
     assert not (tool_root / "demand_sys").exists()
     assert "demand_sys" not in registry.discover_tool_ids()
-    assert [
+    tool_ids = [
         registration.definition.id
         for registration in build_application().tools
-    ] == ["demand_sys", "task_sys"]
+    ]
+    assert tool_ids.count("demand_sys") == 1
 
     read_imports = _imports(FINAL_READ_MODEL)
     cli_imports = _imports(CLI)

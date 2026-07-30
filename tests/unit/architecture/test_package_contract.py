@@ -211,8 +211,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/env/tool_runtime/context.py",
             "src/buddyswitch/env/tool_runtime/results.py",
             "src/buddyswitch/env/tool_runtime/registry.py",
-            "src/buddyswitch/env/tools/<tool>/tool.py",
-            "src/buddyswitch/env/tools/<tool>/_impl.py",
+            "src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}",
+            "src/buddyswitch/env/tools/<tool>/{tool.py,_impl.py}",
             "src/buddyswitch/runtime_kernel/protocol.py",
             "src/buddyswitch/runtime_kernel/dispatcher.py",
             "src/buddyswitch/contracts/prepare-turn-context.json",
@@ -234,6 +234,12 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         REPO_ROOT / "docs" / "arch" / "task-sys-architecture.md": (
             "src/buddyswitch/modules/task/private/domain/task_sys.py",
             "src/buddyswitch/modules/task/private/adapters/goal/handler.py",
+        ),
+        REPO_ROOT / "docs" / "arch" / "search-capability-architecture.md": (
+            "src/buddyswitch/modules/search/module.py",
+            "src/buddyswitch/modules/search/private/adapters/tool/tool.py",
+            "src/buddyswitch/modules/search/private/adapters/tool/_impl.py",
+            "src/buddyswitch/modules/search/tests/integration",
         ),
     }
     missing_required_paths = sorted(

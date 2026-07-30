@@ -297,10 +297,6 @@ class BrowserAccess:
         port = self._instance_payload.get("browser_port")
         return {"active_role": self._active_role, "browser_port": port}
 
-    def request(self, query: str, backend: str | None = None, engine: str | None = None) -> dict[str, Any]:
-        del backend, engine
-        return {"query": query, "requested": True}
-
     def issue_evidence_token(self, target_type: str, target_id: str, mode: str | None = None) -> dict[str, Any]:
         return {
             "target_type": target_type,

@@ -117,24 +117,22 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                     else:
                         self.assertEqual(output_schema.get("type"), "object", msg=action)
 
-    def test_demand_and_task_tools_are_explicitly_contributed_outside_discovered_packages(self) -> None:
+    def test_component_tools_are_explicitly_contributed_outside_discovered_packages(self) -> None:
         from buddyswitch.env.tool_runtime import registry
-        from buddyswitch.modules.demand.module import DEMAND
-        from buddyswitch.modules.task.module import build_task_module
 
-        self.assertNotIn("demand_sys", registry.discover_tool_ids())
-        self.assertNotIn("task_sys", registry.discover_tool_ids())
-        self.assertFalse(self._tool_dir("demand_sys").exists())
-        self.assertFalse(self._tool_dir("task_sys").exists())
-        self.assertEqual(len(DEMAND.tools), 1)
-        task = build_task_module(
-            demand_selection_resolver=lambda **_kwargs: {},
+        application = build_application()
+        component_registrations = {
+            registration.definition.id: registration
+            for module in application.modules
+            for registration in module.tools
+        }
+        self.assertEqual(
+            set(component_registrations),
+            set(EXPLICIT_COMPONENT_TOOL_IDS),
         )
-        self.assertEqual(len(task.tools), 1)
-        for registration, tool_id in (
-            (DEMAND.tools[0], "demand_sys"),
-            (task.tools[0], "task_sys"),
-        ):
+        for tool_id, registration in sorted(component_registrations.items()):
+            self.assertNotIn(tool_id, registry.discover_tool_ids())
+            self.assertFalse(self._tool_dir(tool_id).exists())
             self.assertEqual(registration.definition.id, tool_id)
             self.assertTrue(callable(registration.invoke))
             self.assertEqual(

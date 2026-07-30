@@ -2,129 +2,20 @@
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-import os
-import sys
-import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from tests.support.paths import REPO_ROOT
-from tests.support.fake_cdp import (
-    read_client_text_frame as _read_client_text_frame,
-    websocket_accept_value as _websocket_accept_value,
-    write_server_text_frame as _write_server_text_frame,
-)
 
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-import buddyswitch.env.tools.search._impl as search_impl  # noqa: E402
+import buddyswitch.modules.search.private.adapters.tool._impl as search_impl  # noqa: E402
 from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            state.setdefault("requests", []).append({"method": "GET", "path": self.path})
-            parsed = urlparse(self.path)
-            if parsed.path == "/json/list":
-                if state.get("list_fail"):
-                    self.send_response(500)
-                    self.end_headers()
-                    return
-                payload = state.get("list_payload", state.get("targets", []))
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
-                return
-
-            if parsed.path == "/json/version":
-                if state.get("version_fail"):
-                    self.send_response(500)
-                    self.end_headers()
-                    return
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                payload = {
-                    "Browser": "test",
-                    "webSocketDebuggerUrl": (
-                        f"ws://127.0.0.1:{self.server.server_port}/devtools/browser/test"  # type: ignore[attr-defined]
-                    ),
-                }
-                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
-                return
-
-            if parsed.path == "/devtools/browser/test":
-                key = self.headers.get("Sec-WebSocket-Key")
-                if not key:
-                    self.send_response(400)
-                    self.end_headers()
-                    return
-                self.send_response(101)
-                self.send_header("Upgrade", "websocket")
-                self.send_header("Connection", "Upgrade")
-                self.send_header("Sec-WebSocket-Accept", _websocket_accept_value(key))
-                self.end_headers()
-
-                raw_message = _read_client_text_frame(self.rfile)
-                message = json.loads(raw_message)
-                state.setdefault("rpc_requests", []).append(message)
-                if state.get("fail"):
-                    response = {
-                        "id": message.get("id"),
-                        "error": {"code": -32000, "message": "simulated cdp create target failure"},
-                    }
-                else:
-                    params = message.get("params") if isinstance(message.get("params"), dict) else {}
-                    targets = state.setdefault("targets", [])
-                    if isinstance(targets, list):
-                        targets.append(
-                            {
-                                "id": "target-search",
-                                "type": "page",
-                                "url": params.get("url") if isinstance(params.get("url"), str) else "",
-                            }
-                        )
-                    response = {"id": message.get("id"), "result": {"targetId": "target-search"}}
-                _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
-                return
-
-            self.send_response(404)
-            self.end_headers()
-
-        def do_PUT(self) -> None:  # noqa: N802
-            state.setdefault("requests", []).append({"method": "PUT", "path": self.path})
-            self.send_response(500)
-            self.end_headers()
-
-        def log_message(self, _format: str, *_args: object) -> None:
-            return
-
-    return Handler
-
-
-SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening many more."
-HARD_PAGE_BLOCK = (
-    "Blocked: browser page limit reached (10/10). Close or reuse existing pages, then retry opening this URL."
-)
-
-
-def _page_targets(count: int, *, start: int = 0) -> list[dict[str, object]]:
-    return [
-        {
-            "id": f"target-{index}",
-            "type": "page",
-            "url": f"https://example.com/page-{index}",
-        }
-        for index in range(start, start + count)
-    ]
 
 
 class SearchEnvToolTests(RuntimeWorkspaceTestCase):
@@ -416,7 +307,12 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
         self._assert_cockpit_search_page_guidance(response)
 
     def test_search_source_has_no_direct_json_new_page_open(self) -> None:
-        text = (ROOT / "src" / "buddyswitch" / "env" / "tools" / "search" / "_impl.py").read_text(encoding="utf-8")
+        source_path = (
+            ROOT
+            / "src"
+            / Path(*search_impl.__name__.split(".")).with_suffix(".py")
+        )
+        text = source_path.read_text(encoding="utf-8")
         self.assertNotIn("/json/new", text)
         self.assertNotIn('"tools"', text)
         self.assertNotIn('"launcher"', text)

@@ -98,8 +98,8 @@ package/build declaration.
 - `src/buddyswitch/env/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
 - `src/buddyswitch/env/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
 - `src/buddyswitch/env/tool_runtime/registry.py` for runtime discovery, catalog/semantics projection, and selected tool dispatch.
-- `src/buddyswitch/env/tools/<tool>/tool.py` as each tool's only public runtime entrypoint (`DEFINITION` + `invoke`).
-- `src/buddyswitch/env/tools/<tool>/_impl.py` for selected private implementation invoked by `tool.py`.
+- `src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}` for a component-owned Tool entrypoint and private implementation.
+- `src/buddyswitch/env/tools/<tool>/{tool.py,_impl.py}` for a not-yet-migrated dynamically discovered Tool entrypoint and private implementation.
 - `src/buddyswitch/runtime_kernel/protocol.py` for the runtime broker protocol envelope.
 - `src/buddyswitch/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
 - `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.

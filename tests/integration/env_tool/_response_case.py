@@ -2,24 +2,16 @@
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 import sys
-import threading
 import unittest
 import uuid
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
-from urllib.parse import urlparse
 
 from tests.support.paths import REPO_ROOT
-from tests.support.fake_cdp import (
-    read_client_text_frame as _read_client_text_frame,
-    websocket_accept_value as _websocket_accept_value,
-    write_server_text_frame as _write_server_text_frame,
-)
 
 ROOT = REPO_ROOT
 
@@ -30,64 +22,11 @@ from buddyswitch.env.services import messages as message_service  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
 from buddyswitch.env.tool_runtime import results as tool_results  # noqa: E402
 from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
-import buddyswitch.env.tools.search._impl as search_impl  # noqa: E402
 from buddyswitch.runtime_support import turn_runtime  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-def _make_cdp_handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            state.setdefault("requests", []).append({"method": "GET", "path": self.path})
-            parsed = urlparse(self.path)
-            if parsed.path == "/json/list":
-                payload = state.get("targets", [])
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
-                return
-            if parsed.path == "/json/version":
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                payload = {
-                    "Browser": "test",
-                    "webSocketDebuggerUrl": (
-                        f"ws://127.0.0.1:{self.server.server_port}/devtools/browser/test"  # type: ignore[attr-defined]
-                    ),
-                }
-                self.wfile.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
-                return
-            if parsed.path == "/devtools/browser/test":
-                key = self.headers.get("Sec-WebSocket-Key")
-                if not key:
-                    self.send_response(400)
-                    self.end_headers()
-                    return
-                self.send_response(101)
-                self.send_header("Upgrade", "websocket")
-                self.send_header("Connection", "Upgrade")
-                self.send_header("Sec-WebSocket-Accept", _websocket_accept_value(key))
-                self.end_headers()
-                message = json.loads(_read_client_text_frame(self.rfile))
-                state.setdefault("rpc_requests", []).append(message)
-                response = {"id": message.get("id"), "result": {"targetId": "target-search"}}
-                _write_server_text_frame(self.wfile, json.dumps(response, ensure_ascii=True))
-                return
-            self.send_response(404)
-            self.end_headers()
-
-        def do_PUT(self) -> None:  # noqa: N802
-            state.setdefault("requests", []).append({"method": "PUT", "path": self.path})
-            self.send_response(500)
-            self.end_headers()
-
-        def log_message(self, _format: str, *_args: object) -> None:
-            return
-
-    return Handler
 
 
 class EnvToolResponseCase(RuntimeWorkspaceTestCase):
@@ -100,42 +39,6 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
         "unknown",
         "placeholder",
     }
-
-    def setUp(self) -> None:
-        super().setUp()
-        self._browser_open_results: list[dict[str, object]] = []
-        had_browser_client = hasattr(search_impl, "browser_client")
-        original_browser_client = getattr(search_impl, "browser_client", None)
-
-        test_case = self
-
-        class FakeBrowserClient:
-            @staticmethod
-            def open_url(**kwargs: object) -> dict[str, object]:
-                if test_case._browser_open_results:
-                    return dict(test_case._browser_open_results.pop(0))
-                target_url = kwargs.get("target_url")
-                return {
-                    "ok": True,
-                    "kind": "opened",
-                    "target_url": target_url if isinstance(target_url, str) else "",
-                    "page_count": 0,
-                    "projected_page_count": 1,
-                    "browser_page_count": 1,
-                    "target_id": "target-search-contract",
-                    "page_opened": True,
-                    "page_reused": False,
-                    "idle_refreshed": True,
-                    "idle_seconds": 40,
-                    "idle_expires_at": "2026-06-24T00:00:40Z",
-                    "message": "opened",
-                    "state_changed": True,
-                    "durability": "runtime",
-                }
-
-        if had_browser_client:
-            search_impl.browser_client = FakeBrowserClient
-            self.addCleanup(setattr, search_impl, "browser_client", original_browser_client)
 
     @classmethod
     def _meaningful_text_entries(cls, value: object) -> list[str]:
@@ -261,15 +164,6 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
                 continue
             payload[key] = value
         return payload
-
-    def _start_cdp_server(self, state: dict[str, object]) -> tuple[HTTPServer, threading.Thread, int]:
-        server = HTTPServer(("127.0.0.1", 0), _make_cdp_handler(state))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(thread.join, 5)
-        self.addCleanup(server.shutdown)
-        return server, thread, int(server.server_port)
 
     def _assert_rejection_contract(self, payload: dict[str, object]) -> None:
         self.assertFalse(payload.get("ok"), msg=payload)

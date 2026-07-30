@@ -30,7 +30,6 @@ from buddyswitch.env.services import messages as message_service  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
 from buddyswitch.env.tool_runtime import results as tool_results  # noqa: E402
 from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
-import buddyswitch.env.tools.search._impl as search_impl  # noqa: E402
 from buddyswitch.runtime_support import turn_runtime  # noqa: E402
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 

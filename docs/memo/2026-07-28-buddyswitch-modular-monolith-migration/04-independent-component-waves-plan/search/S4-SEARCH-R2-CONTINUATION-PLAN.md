@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use
 > `superpowers:executing-plans` and `$buddyswitch-testing`.
+>
+> Plan state: `CONSUMED — ACCEPTED`
 
 **Goal:** Prove and, only when evidence requires it, repair the preserved
 Search cutover candidate without replaying its implementation.

@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Current state: READY — SEARCH R2 CONTINUATION ONLY
+> Current state: SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: `BS-MM-S4-SEARCH-R2-20260730-01` only
+> Execution authority: none
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -23,9 +23,10 @@
 
 Browser is not a product lane. It remains an Actor foundation capability.
 
-Current source review has admitted Search only. See
-`04-independent-component-waves-plan/README.md`. The other five lanes remain
-preparation-only and may not reuse the Search packet.
+Search is accepted. See
+`04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md`.
+The other five lanes remain preparation-only and may not reuse a Search
+packet.
 
 ## Lane protocol
 

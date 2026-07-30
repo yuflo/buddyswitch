@@ -194,12 +194,13 @@ Tool, CLI, Daemon adapters, Skills, and owning tests live there. The module
 exports one passive `ModuleAssembly`; it starts no process and performs no
 registration side effect.
 
-`src/buddyswitch/application/composition.py` selects Demand and constructs Task
-with Demand Public's resolver capability, producing `(DEMAND, TASK)` once.
-Demand's assembly still contributes exactly two Daemon handlers, one explicit
-Tool, one CLI command, two Skill exports, and one cleanup contribution.
-Application build validates and flattens both component assemblies and applies
-the explicit interleaved daemon order
+`src/buddyswitch/application/composition.py` selects Demand exactly once and
+owns the complete current component list. It also wires Demand Public's
+resolver capability into Task without exposing Demand private code. Demand's
+assembly contributes exactly two Daemon handlers, one explicit Tool, one CLI
+command, two Skill exports, and one cleanup contribution. Application build
+validates and flattens all selected component assemblies and applies the
+explicit interleaved daemon order
 `demand_triage -> task_goal -> demand_orchestration` before any host starts.
 Generic hosts receive only their typed registrations.
 

@@ -167,16 +167,18 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
     composition = (
         REPO_ROOT / "src" / "buddyswitch" / "application" / "composition.py"
     )
-    assert _imported_modules(composition) == {
-        "buddyswitch.modules.demand",
-        "buddyswitch.modules.demand.public",
-        "buddyswitch.modules.demand.module",
-        "buddyswitch.modules.demand.module.DEMAND",
-        "buddyswitch.modules.task",
-        "buddyswitch.modules.task.public",
-        "buddyswitch.modules.task.module",
-        "buddyswitch.modules.task.module.build_task_module",
-    }
+    from buddyswitch.application.composition import COMPONENTS
+
+    selected_names = {component.name for component in COMPONENTS}
+    composition_imports = _imported_modules(composition)
+    for name in selected_names:
+        assert f"buddyswitch.modules.{name}.module" in composition_imports
+    assert not [
+        imported
+        for imported in composition_imports
+        if imported.startswith("buddyswitch.modules.")
+        and ".private" in imported.split("buddyswitch.modules.", 1)[1]
+    ]
 
 
 def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:

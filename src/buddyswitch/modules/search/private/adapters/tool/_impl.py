@@ -1,4 +1,4 @@
-"""Search capability service for broker-routed env.tool operations."""
+"""Search-private service for broker-routed env.tool operations."""
 
 from __future__ import annotations
 

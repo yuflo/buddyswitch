@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 READY — SEARCH R2 CONTINUATION ONLY
-> Runtime authorization: `BS-MM-S4-SEARCH-R2-20260730-01`
+> Current state: S0–S3 ACCEPTED; S4 SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY
+> Runtime authorization: `NONE`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | READY — SEARCH R2 CONTINUATION ONLY |
+| S4 | `04-independent-component-waves.md` | SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -106,11 +106,12 @@ refactor RED, two omitted generated/enumerated consumers and an avoidable
 second reprovision boundary. R1 then completed the coherent Search candidate
 and runtime activation, but stopped before collection because its frozen
 command named `modules/search/tests` instead of a runner-recognized tier.
-R1 is consumed and the candidate is preserved. D-051 now keeps outcomes and
+R1 was consumed and its candidate preserved. D-051 keeps outcomes and
 boundaries hub-owned while assigning target discovery and bounded execution
-judgment to the executor. Only
-`BS-MM-S4-SEARCH-R2-20260730-01` may continue Search proof; unclassified,
-semantic, protected-contract or cross-lane change still stops.
+judgment to the executor. R2 then passed direct, affected and one frozen FINAL
+on the preserved identity. Search is accepted in
+`04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md`; all
+Search packets are consumed and no next lane is executable yet.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant
