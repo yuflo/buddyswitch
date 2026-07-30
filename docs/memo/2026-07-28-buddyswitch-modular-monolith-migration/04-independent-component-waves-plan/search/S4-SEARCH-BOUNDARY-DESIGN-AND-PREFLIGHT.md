@@ -69,9 +69,9 @@ tool 'search' is both explicitly registered and package-discovered
 ```
 
 Therefore source movement, explicit assembly selection and retired package
-deletion form one coherent BUILD/REPLACE block. The executor may create a RED
-test before that block, but may not publish or verify an intermediate
-dual-registration topology.
+deletion form one coherent BUILD/REPLACE block. The executor writes the final
+architecture proof within that block, but may not run or publish an
+intermediate dual-registration topology.
 
 ## 5. No host-contract upgrade
 
@@ -85,24 +85,26 @@ and dispatched Search through the existing Tool contract. Therefore changing
 `ModuleAssembly`, registry discovery semantics or a Browser contract is a
 replan condition, not ordinary implementation.
 
-## 6. Exact architecture RED
+## 6. Refactor proof entry
 
-Create:
+This is a behavior-preserving refactor. Do not manufacture RED.
+
+Reuse the four identity-valid current GREEN baselines in the source snapshot.
+During the coherent cutover, create:
 
 ```text
 tests/unit/architecture/test_search_component_boundaries.py
 ```
 
-with an exact test:
+with final-topology tests that prove:
 
-```text
-test_search_is_one_explicit_component_and_old_tool_package_is_absent
-```
+- Search physical owner and explicit composition;
+- one Tool registration;
+- allowed dependencies;
+- absence of old paths;
+- absence of `BrowserAccess.request`;
+- no Search private import in generic hosts.
 
-Before product mutation it must fail because the Search component/final owner
-does not exist and the retired package does. If it passes or fails for another
-reason, stop before BUILD.
-
-The same file must ultimately prove physical owner, explicit composition,
-allowed dependencies, absence of old paths and absence of
-`BrowserAccess.request`.
+Run these tests only after the final source topology has been reprovisioned and
+activation verifies. A collection/import/setup failure is not architectural
+evidence.

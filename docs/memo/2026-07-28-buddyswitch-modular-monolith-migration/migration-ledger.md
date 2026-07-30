@@ -4,10 +4,10 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | Search affected preservation `b96f488146524dbc97eb14463aea7780` plus mutable-consumer baseline `978b8137549e47bf9542e69b2045e2d6` on accepted S3 source |
+| Evidence baseline | Search affected `b96f488146524dbc97eb14463aea7780`, mutable-consumer `978b8137549e47bf9542e69b2045e2d6`, representation `c50a7fce15e94e0b902f7478abccf6ca` and shared-response `d0414c37f2a64ca7a1aa0c1c5de1866c` baselines |
 | Active stage | S4 — Independent Component Waves / Search lane |
-| State | READY — SEARCH LANE ONLY |
-| Runtime migration authorized | `BS-MM-S4-SEARCH-20260730-01` only |
+| State | READY — SEARCH R1 LANE ONLY |
+| Runtime migration authorized | `BS-MM-S4-SEARCH-R1-20260730-01` only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
@@ -22,7 +22,7 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | READY — SEARCH LANE ONLY | S3 | Search executor; hub accepts | exact Search return and hub acceptance |
+| S4 Component waves | READY — SEARCH R1 LANE ONLY | S3 | Search executor; hub accepts | exact Search R1 return and hub acceptance |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -257,7 +257,21 @@ The complete affected pre-mutation baseline passed as
 order, duplicate-module rejection and fail-closed old/new Tool registration.
 D-050 freezes one-lane sequencing and the non-opening Search/Browser boundary.
 The source/consumer manifest, implementation plan, Goal Packet and READY
-review authorize only `BS-MM-S4-SEARCH-20260730-01`.
+review initially authorized `BS-MM-S4-SEARCH-20260730-01`.
+
+Before execution, the maintainer-requested S2/S3 lesson review found four
+packet defects: it manufactured RED for a behavior-preserving refactor, missed
+the env-layer directory and repository exact-composition consumers, and
+scheduled module-local test movement after an earlier source reprovision. It
+also returned every FINAL failure to the hub, even for a fully classified,
+owner-correct repair.
+The initial packet is rejected and consumed. Additional preservation run
+`c50a7fce15e94e0b902f7478abccf6ca` passed 55 tests and 17 subtests.
+`S4-SEARCH-PRE-HANDOFF-REVIEW.md` records the corrections. The successor
+reuses current GREEN, performs one coherent no-test edit block, reprovisions
+once after the last initial source mutation, derives generic proof from
+composition and permits at most one fully classified FIX_AFTER_FINAL cycle.
+Only `BS-MM-S4-SEARCH-R1-20260730-01` is executable.
 
 ## Transition record
 
@@ -289,6 +303,8 @@ review authorize only `BS-MM-S4-SEARCH-20260730-01`.
 | 2026-07-30 | S3 | READY — R1 COMPLETION | ACCEPTED | coordinating hub | exact source/activation identity, focused/affected/single FINAL evidence, one-owner/Public/contribution boundaries and replacement absence accepted |
 | 2026-07-30 | S4 | BLOCKED | PROPOSED — PREPARATION ONLY | coordinating hub | S3 accepted; source-bound lane preparation unlocked with no execution authority |
 | 2026-07-30 | S4 | PROPOSED — PREPARATION ONLY | READY — SEARCH LANE ONLY | coordinating hub | six-lane dependency audit, Search preservation baseline, final-topology preflight, exact manifest, plan and Goal Packet passed READY review |
+| 2026-07-30 | S4 Search | READY — SEARCH LANE ONLY | REPLANNING | coordinating hub pre-handoff review | initial packet manufactured refactor RED, omitted two generated/enumerated consumers, scheduled avoidable double reprovision and forced an avoidable hub return for any FINAL defect |
+| 2026-07-30 | S4 Search | REPLANNING | READY — SEARCH R1 LANE ONLY | coordinating hub | representation audit completed, missing baseline passed, GREEN refactor entry, one initial activation boundary and one bounded classified FIX_AFTER_FINAL policy frozen |
 
 ## Checkpoint record
 
@@ -318,7 +334,8 @@ review authorize only `BS-MM-S4-SEARCH-20260730-01`.
 | 2026-07-30 | S3 initial return review | REPLANNING | `03-task-goal-boundary-cutover-plan/S3-INITIAL-RETURN-REVIEW.md`; exact preserved dirty identity; no valid candidate test run | consume `BS-MM-S3-20260729-01`; audit all consumer representations before new authority |
 | 2026-07-30 | S3 R1 handoff | READY | `S3-R1-CONSUMER-AUDIT.md`, `S3-R1-SOURCE-SNAPSHOT.md`, `S3-R1-READY-REVIEW.md`; packet `BS-MM-S3-R1-20260730-01` | verify dirty candidate, reprovision before RED, fix generic proof owners, complete focused/affected/single FINAL |
 | 2026-07-30 | S3 stage acceptance | ACCEPTED | `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`; generic proof GREEN `cc5a797cd76943f9a256a9027b23d435`; affected `addf01ca26e24149b9f0b7b2e1d99301`, `5d07ed065a98413da4b77ed8125045ba`, `38ad62540de645a6b8c08a1903dc53db`; FINAL `79c7f25e1c03484d9b600a85bd503712` | checkpoint S3, then refresh and READY-review S4 lane boundaries; do not resume either S3 packet |
-| 2026-07-30 | S4 Search handoff | READY | `04-independent-component-waves-plan/search/S4-SEARCH-READY-REVIEW.md`; affected preservation `b96f488146524dbc97eb14463aea7780`; mutable-consumer baseline `978b8137549e47bf9542e69b2045e2d6`; preflight `S4SEARCHP-20260730-02`; packet `BS-MM-S4-SEARCH-20260730-01` | user starts one independent Search task; hub pauses without polling |
+| 2026-07-30 | S4 initial Search handoff | REJECTED BEFORE EXECUTION | `04-independent-component-waves-plan/search/S4-SEARCH-PRE-HANDOFF-REVIEW.md`; packet `BS-MM-S4-SEARCH-20260730-01` consumed | use R1 only |
+| 2026-07-30 | S4 Search R1 handoff | READY | affected `b96f488146524dbc97eb14463aea7780`; mutable-consumer `978b8137549e47bf9542e69b2045e2d6`; representation `c50a7fce15e94e0b902f7478abccf6ca`; shared response `d0414c37f2a64ca7a1aa0c1c5de1866c`; preflight `S4SEARCHP-20260730-02`; packet `BS-MM-S4-SEARCH-R1-20260730-01` | user starts one independent Search task; hub pauses without polling |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -341,10 +358,10 @@ Stop/replan condition:
 
 ```text
 Stage: S4
-Master state: READY — SEARCH LANE ONLY
-Goal Packet: BS-MM-S4-SEARCH-20260730-01
+Master state: READY — SEARCH R1 LANE ONLY
+Goal Packet: BS-MM-S4-SEARCH-R1-20260730-01
 Execution session: none
-Last hub checkpoint: Search source/consumer audit, preservation, preflight and READY review complete
-Next action: commit/push the S4 preparation checkpoint, then hand off the exact Search packet
+Last hub checkpoint: pre-handoff S2/S3 lesson review corrected the initial Search packet
+Next action: commit/push the R1 preparation checkpoint, then hand off only Search R1
 No-polling state: PAUSED_AFTER_HANDOFF once user starts the independent task
 ```

@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 READY — SEARCH LANE ONLY
-> Runtime authorization: `BS-MM-S4-SEARCH-20260730-01`
+> Current state: S0–S3 ACCEPTED; S4 READY — SEARCH R1 LANE ONLY
+> Runtime authorization: `BS-MM-S4-SEARCH-R1-20260730-01`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | READY — SEARCH LANE ONLY |
+| S4 | `04-independent-component-waves.md` | READY — SEARCH R1 LANE ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -101,7 +101,12 @@ representative final-topology probe `S4SEARCHP-20260730-02` proved explicit
 dispatch, atomic old/new registration failure, duplicate-module rejection and
 unchanged Daemon order. The structured Search plan is at
 `04-independent-component-waves-plan/README.md`; only packet
-`BS-MM-S4-SEARCH-20260730-01` is READY.
+`BS-MM-S4-SEARCH-R1-20260730-01` is READY. The initial Search packet was
+rejected before execution after pre-handoff review found a manufactured
+refactor RED, two omitted generated/enumerated consumers and an avoidable
+second reprovision boundary. The review also replaced an over-rigid
+FINAL-failure return with one bounded, fully classified FIX_AFTER_FINAL
+authority; unclassified or unexplained failure still returns immediately.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

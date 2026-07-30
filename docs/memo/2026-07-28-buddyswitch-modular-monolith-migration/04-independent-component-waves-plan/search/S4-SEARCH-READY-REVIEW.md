@@ -1,7 +1,8 @@
 # S4 Search READY Review
 
 > Review result: `READY`
-> Packet: `BS-MM-S4-SEARCH-20260730-01`
+> Packet: `BS-MM-S4-SEARCH-R1-20260730-01`
+> Predecessor: rejected before execution
 > Scope: Search lane only
 
 ## FRAME
@@ -26,6 +27,8 @@ The hub classified:
 - the literal retired source path;
 - Tool ID/action and generated package/module consumers;
 - dynamic directory discovery;
+- the hard-coded env-layer Tool-directory set;
+- the exact Demand/Task-only repository composition import set;
 - installed-package and co-located-test projection;
 - activation-dependent process tests;
 - current README/architecture guidance;
@@ -41,11 +44,15 @@ The exact existing mutable-consumer set additionally passed run
 `978b8137549e47bf9542e69b2045e2d6` (60 tests, 27 subtests), covering Search,
 shared response fixtures and Demand/Task/Tool/package architecture assertions
 before they change.
+Pre-handoff representation run `c50a7fce15e94e0b902f7478abccf6ca`
+passed 55 tests and 17 subtests. Complete shared response-base run
+`d0414c37f2a64ca7a1aa0c1c5de1866c` passed 29 tests and 18 subtests.
 
-The selected RED directly distinguishes:
-
-- current retired package present/final owner absent; from
-- target final owner present/retired package absent.
+Because this is a behavior-preserving refactor, no RED is manufactured.
+The four current GREEN baselines establish Search behavior, mutable consumer
+behavior and the newly discovered representation consumers before mutation.
+The final Search architecture proof is run only on the re-provisioned target
+topology.
 
 Representative final-topology probe `S4SEARCHP-20260730-02` proves positive
 explicit dispatch, duplicate fail-closed behavior, old/new atomicity and
@@ -67,30 +74,35 @@ explicit composition.
 | Tool/action IDs | generic root consumers preserved |
 | generated module/path names | package/router consumers classified |
 | directory discovery | old/new duplicate and final absence proved |
+| generic Tool-root enumeration | env-layer test derives dynamic and explicit roots |
+| exact composition enumeration | repository and owner tests become composition-derived/local |
 | activation-dependent subprocess | D-044 ordering explicit |
 | package/test projection | installed owner and test exclusion proved |
 | current guidance | exact docs classified |
 | state/lifecycle | inapplicable to Search; test cleanup retained |
 
-No known executable write remains unclassified.
+No known executable write remains unclassified after the pre-handoff review.
 
 ## Prior delivery ratchet
 
 The packet:
 
 - resolves boundary and sequencing questions before handoff;
+- rejects the initial packet rather than asking the executor to reconcile it;
+- uses refactor GREEN rather than a manufactured structural RED;
 - uses one lane, not all of S4;
 - names proof-only files separately from mutable files;
 - derives generic Tool expectations from composition;
-- orders reprovision immediately after source mutation;
-- authorizes one FINAL only;
+- orders one reprovision after the coherent source block and before proof;
+- authorizes one FINAL per frozen candidate and at most one fully classified
+  FIX_AFTER_FINAL cycle, rather than another coordination round-trip;
 - makes a stopped executor return once;
 - assigns acceptance, Git and next-lane authority to the hub.
 
 ## Determination
 
-`READY — SEARCH LANE ONLY`.
+`READY — SEARCH R1 LANE ONLY`.
 
-Only `BS-MM-S4-SEARCH-20260730-01` may execute. Search acceptance does not
+Only `BS-MM-S4-SEARCH-R1-20260730-01` may execute. Search acceptance does not
 accept S4 or unlock implementation of any other lane without another
 source-bound READY review.

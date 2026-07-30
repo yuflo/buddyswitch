@@ -1,7 +1,7 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `READY — SEARCH LANE ONLY`
-> Executable packet: `BS-MM-S4-SEARCH-20260730-01`
+> Stage state: `READY — SEARCH R1 LANE ONLY`
+> Executable packet: `BS-MM-S4-SEARCH-R1-20260730-01`
 > Other lanes: `PREPARATION ONLY`
 > Merge unit: one accepted lane at a time
 
@@ -21,9 +21,10 @@ Evidence and Context require their own refreshed packet and READY review.
 6. `search/S4-SEARCH-SOURCE-SNAPSHOT.md`;
 7. `search/S4-SEARCH-OWNER-CONSUMER-MANIFEST.md`;
 8. `search/S4-SEARCH-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
-9. `search/S4-SEARCH-IMPLEMENTATION-PLAN.md`;
-10. `search/S4-SEARCH-GOAL-PACKET.md`;
-11. `search/S4-SEARCH-READY-REVIEW.md`.
+9. `search/S4-SEARCH-PRE-HANDOFF-REVIEW.md`;
+10. `search/S4-SEARCH-IMPLEMENTATION-PLAN.md`;
+11. `search/S4-SEARCH-GOAL-PACKET.md`;
+12. `search/S4-SEARCH-READY-REVIEW.md`.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -39,8 +40,10 @@ adds current-source execution facts; it does not broaden S4.
 | Evidence | PREPARATION ONLY | accepted Artifact Public and Browser foundation input |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
 
-No lane may reuse the Search packet. The coordinating hub refreshes source and
-issues a new exact packet after accepting each lane.
+The initial Search packet was rejected before execution by the pre-handoff
+review and must never run. Only the R1 packet may execute Search. No later lane
+may reuse a Search packet; the coordinating hub refreshes source and issues a
+new exact packet after accepting each lane.
 
 ## Search acceptance sentence
 

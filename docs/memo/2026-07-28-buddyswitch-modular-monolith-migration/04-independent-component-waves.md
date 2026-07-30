@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Current state: READY — SEARCH LANE ONLY
+> Current state: READY — SEARCH R1 LANE ONLY
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: `BS-MM-S4-SEARCH-20260730-01` only
+> Execution authority: `BS-MM-S4-SEARCH-R1-20260730-01` only
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -33,7 +33,8 @@ Each lane receives its own current-source trace, implementation plan, branch,
 residue rows and acceptance record:
 
 ```text
-TRACE -> RED -> BUILD -> consumer cutover -> old-path deletion -> VERIFY
+TRACE -> PROVE (RED or preservation baseline) -> BUILD
+      -> consumer cutover -> old-path deletion -> VERIFY
 ```
 
 ## Parallelism

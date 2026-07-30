@@ -1,6 +1,6 @@
 # S4 Search Owner and Consumer Manifest
 
-> Packet scope owner: `BS-MM-S4-SEARCH-20260730-01`
+> Packet scope owner: `BS-MM-S4-SEARCH-R1-20260730-01`
 > Rule: an unclassified required write stops execution.
 
 ## 1. Final owner paths
@@ -60,12 +60,17 @@ No forwarding package, import alias or discovery exception may remain.
 
 - delete/move `tests/integration/env_tool/test_search.py`;
 - delete/move `tests/integration/env_tool/test_response_search.py`;
+  - update the moved files to module-local Search imports;
+  - remove both files' now-unused Browser/CDP imports and fixture code,
+    including the response test's shared `_make_cdp_handler` import and the
+    Search behavior test's local handler/server helpers;
 - create `tests/unit/architecture/test_search_component_boundaries.py`.
 
 ### PROOF — root consumers
 
 - `tests/integration/env_tool/_response_case.py`
-  - remove the stale Search-private import and dead browser-client setup;
+  - remove the stale Search-private import, dead browser-client setup,
+    `_make_cdp_handler` and `_start_cdp_server`;
 - `tests/integration/env_tool/test_response_artifact.py`
   - remove its unused Search-private import;
 - `tests/integration/env_tool/test_response_registry.py`
@@ -79,8 +84,19 @@ No forwarding package, import alias or discovery exception may remain.
   - derive explicit component Tool registrations from application composition
     rather than adding a Search exception;
 - `tests/unit/architecture/test_package_contract.py`
-  - update current-guidance proof for component-owned versus not-yet-migrated
-    Tool paths.
+  - require both component-owned and not-yet-migrated Tool guidance;
+  - require the Search owner/architecture paths and remove the universal
+    `env/tools/<tool>` ownership claim;
+- `tests/process/cli/test_env_layer_boundaries.py`
+  - replace the hard-coded dynamic Tool package set with current dynamic
+    packages plus explicit component Tool roots derived from application
+    composition;
+  - map `registration.invoke.__module__` to the checkout's `src/` path; do not
+    use the installed module `__file__`, subtract or special-case Search;
+- `tests/unit/architecture/test_repo_contracts.py`
+  - replace the exact Demand/Task-only composition import set with a generic
+    selected-component/no-private-import proof; retain owner-specific
+    Demand/Task assertions in their owner tests.
 
 ### CURRENT DOC
 
@@ -100,13 +116,18 @@ These files are exercised but are not authorized writes unless the hub issues
 new scope:
 
 - `tests/integration/env_tool/test_layer_end_to_end.py`;
+- `tests/integration/env_tool/test_response_demand.py`;
+- `tests/integration/env_tool/test_response_task.py`;
 - `tests/integration/env_tool/test_response_registry.py` beyond the classified
   import cleanup;
 - `tests/integration/env_tool/test_host_decision_surface.py`;
 - `tests/integration/env_tool/test_context_binding.py`;
 - `tests/integration/runtime/test_runless_contract.py`;
+- `tests/integration/runtime/test_tool_feedback.py`;
 - `tests/unit/env_tool/test_semantic_contract.py`;
+- `tests/unit/env_tool/test_schema_contract.py`;
 - `tests/unit/env_tool/test_active_task_gate.py`;
+- `tests/unit/daemon/test_decoupling.py`;
 - `tests/process/cli/test_search_cli.py`;
 - `tests/process/cli/test_env_tool_package_independence.py`;
 - `tests/process/cli/test_env_tool_router.py`;
@@ -126,7 +147,8 @@ ownership. Do not expand scope in place.
 | literal old source path | update moved Search source-absence test |
 | Tool ID/action tables | generic tables remain root proof; composition-derived explicit ownership |
 | generated module/path names | process package/router tests remain proof-only and must pass |
-| directory discovery | old Search package deleted atomically with explicit contribution |
+| directory discovery | old Search package deleted atomically; generic env-layer proof derives dynamic and explicit roots |
+| exact composition enumeration | Demand/Task/repo tests become local or composition-derived; no Search exception |
 | activation-dependent subprocess | reprovision after source mutation before all candidate tests |
 | wheel/test projection | co-located tests excluded by existing package contract; distribution test proves it |
 | current guidance | root README and current architecture docs updated |

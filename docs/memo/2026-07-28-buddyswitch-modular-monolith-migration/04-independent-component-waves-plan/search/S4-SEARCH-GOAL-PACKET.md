@@ -1,14 +1,15 @@
 # S4 Search Capability Cutover Goal Packet
 
-> Packet state: `READY`
-> Packet ID: `BS-MM-S4-SEARCH-20260730-01`
+> Packet state: `READY — R1`
+> Packet ID: `BS-MM-S4-SEARCH-R1-20260730-01`
+> Predecessor: `BS-MM-S4-SEARCH-20260730-01` rejected and consumed
 
 ## 0. Copy-paste independent-task request
 
 ```text
 Create and pursue this goal:
 
-Execute BuddySwitch packet BS-MM-S4-SEARCH-20260730-01 from the exact
+Execute BuddySwitch packet BS-MM-S4-SEARCH-R1-20260730-01 from the exact
 preparation checkpoint supplied by the coordinating hub.
 
 Read root AGENTS.md, the complete $buddyswitch-testing skill and routed
@@ -17,28 +18,37 @@ docs/memo/2026-07-28-buddyswitch-modular-monolith-migration/
 04-independent-component-waves-plan/README.md in its exact order.
 
 First verify the preparation commit, clean product state, current Search
-source/test manifests, installed runtime and resource state. Add and capture
-the one specified architecture RED. Then perform one atomic Search cutover:
+source/test manifests, installed runtime and resource state. Reuse the four
+identity-valid behavior-preserving GREEN baselines; do not manufacture RED.
+Then perform one coherent no-test Search cutover:
 physically aggregate Search and its owned tests, contribute its Tool through
 the existing ModuleAssembly, select it exactly once in application
 composition, delete the old dynamic Search package and unused
 BrowserAccess.request placeholder, update only the classified consumers and
-current docs, reprovision immediately after package-source mutation, prove
-the complete affected path, run one single frozen full suite, return the
-exact result packet, and stop.
+current docs, including the generic env-layer and repository-composition
+consumers found by pre-handoff review. Reprovision once after the last
+package-source mutation, prove the complete affected path, and run FINAL once
+on the frozen candidate. If that FINAL finds a failure with one clearly
+diagnosed owning cause whose every required write is already classified, one
+bounded FIX_AFTER_FINAL cycle is authorized: retain the failed result, make
+the owner-correct repair, rerun exact and affected focused proof, reprovision
+first if package source changed, freeze, and run one replacement FINAL.
+Otherwise return the exact result packet and stop.
 
 Do not start another S4 lane, edit migration master truth, commit, push,
 change branches, alter ModuleAssembly/registry/Browser/profile contracts, add
 Search Public without a current consumer, add compatibility, or create a
 plugin, DI, bus, route or lifecycle framework. Stop once on any unclassified
-write, unexpected RED, architecture/public-contract change, data migration,
-unexplained failure, environment mutation, cleanup residue or FINAL failure.
+write, invalid refactor baseline, architecture/public-contract change, data
+migration, unexplained failure, environment mutation, cleanup residue or
+replacement FINAL failure. Never blind-rerun, exceed two total FINAL commands,
+or enter repeated blocked turns.
 ```
 
 ## 1. Identity
 
 ```text
-Packet: BS-MM-S4-SEARCH-20260730-01
+Packet: BS-MM-S4-SEARCH-R1-20260730-01
 Stage/lane: S4 / Search
 Prepared date: 2026-07-30
 Product base HEAD: e4fe342144febc023d1d635012e7e8a5e645138d
@@ -72,17 +82,24 @@ Forbidden:
 
 ## 3. Action-time rules
 
-- Verify activation before RED.
-- The exact RED test file is the only allowed pre-cutover mutation.
+- Verify activation and source equivalence before reusing or rerunning
+  baseline proof.
+- Reuse identity-valid refactor baselines; do not manufacture RED.
 - Search owner move, explicit contribution and old dynamic package deletion
   are one atomic replacement.
 - After any `src/buddyswitch/**` mutation, reprovision and verify before the
   next public test.
 - Generic proof derives from application composition; never add a Search
   exception.
+- Source-structure proof maps dotted invoke modules back to checkout `src/`;
+  installed `__file__` is not a source-path authority.
 - An ordinary defect is fixable only inside classified scope.
 - A new required path or contract stops execution.
-- One FINAL is authorized only after candidate and activation freeze.
+- No public test may run inside the coherent source/test edit block.
+- One FINAL is authorized per frozen candidate.
+- At most one FIX_AFTER_FINAL cycle and one replacement FINAL are authorized,
+  only for a clearly diagnosed defect entirely inside classified write scope.
+- A failed FINAL remains evidence; it is never hidden by the replacement.
 - Return once on stop; do not enter repeated blocked turns.
 
 ## 4. Verification authority

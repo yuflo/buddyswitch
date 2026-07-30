@@ -104,8 +104,8 @@ duration: 11.43s
 cleanup: run root absent; no attributable process/resource residue
 ```
 
-The exact command is frozen in the implementation plan. This is preservation
-evidence, not candidate GREEN.
+The exact commands appear below. This is preservation evidence, not candidate
+GREEN.
 
 Every existing mutable test consumer also passed before product mutation:
 
@@ -117,6 +117,85 @@ result: 60 passed, 27 subtests
 duration: 1.16s
 cleanup: run root absent; zero instances; Browser inactive
 ```
+
+Pre-handoff representation review added the previously omitted generic
+directory/composition consumers and direct Search contract neighbors:
+
+```text
+run: c50a7fce15e94e0b902f7478abccf6ca
+result: 55 passed, 17 subtests
+duration: 1.22s
+cleanup: run root absent; zero instances; Browser inactive
+```
+
+The exact targets and reason are recorded in
+`S4-SEARCH-PRE-HANDOFF-REVIEW.md`.
+
+The complete shared response-fixture consumer set additionally passed
+`d0414c37f2a64ca7a1aa0c1c5de1866c` (29 tests, 18 subtests) with clean
+cleanup.
+
+### Exact baseline commands
+
+Affected Search path:
+
+```bash
+./buddyswitch-test focused \
+  tests/integration/env_tool/test_search.py \
+  tests/integration/env_tool/test_response_search.py \
+  tests/integration/env_tool/test_response_registry.py \
+  tests/integration/env_tool/test_layer_end_to_end.py \
+  tests/unit/env_tool/test_semantic_contract.py \
+  tests/unit/env_tool/test_active_task_gate.py \
+  tests/integration/runtime/test_runless_contract.py \
+  tests/process/cli/test_env_tool_package_independence.py \
+  tests/process/cli/test_env_tool_router.py \
+  tests/process/cli/test_black_box_tool_runtime.py \
+  tests/process/cli/test_env_native_mcp_projection.py \
+  tests/process/cli/test_buddy_env_profiles.py \
+  tests/process/package/test_distribution_install.py
+```
+
+Mutable consumers known by the initial review:
+
+```bash
+./buddyswitch-test focused \
+  tests/integration/env_tool/test_search.py \
+  tests/integration/env_tool/test_response_search.py \
+  tests/integration/env_tool/test_response_artifact.py \
+  tests/integration/env_tool/test_response_registry.py \
+  tests/unit/architecture/test_demand_sys_boundaries.py \
+  tests/unit/architecture/test_task_sys_boundaries.py \
+  tests/unit/architecture/test_tool_runtime_contract.py \
+  tests/unit/architecture/test_package_contract.py
+```
+
+Additional representation and direct-contract consumers:
+
+```bash
+./buddyswitch-test focused \
+  tests/process/cli/test_env_layer_boundaries.py \
+  tests/unit/architecture/test_repo_contracts.py \
+  tests/unit/daemon/test_decoupling.py \
+  tests/unit/env_tool/test_schema_contract.py \
+  tests/integration/runtime/test_tool_feedback.py
+```
+
+Every shared response-base subclass:
+
+```bash
+./buddyswitch-test focused \
+  tests/integration/env_tool/test_response_artifact.py \
+  tests/integration/env_tool/test_response_demand.py \
+  tests/integration/env_tool/test_response_registry.py \
+  tests/integration/env_tool/test_response_search.py \
+  tests/integration/env_tool/test_response_task.py
+```
+
+All four commands used the verified installed runtime identity recorded in
+section 1. There was no ad hoc dependency or environment mutation. Every run
+root was absent afterward; zero BuddySwitch instances and inactive Browser
+state were re-observed.
 
 ## 5. Current defect to remove
 
