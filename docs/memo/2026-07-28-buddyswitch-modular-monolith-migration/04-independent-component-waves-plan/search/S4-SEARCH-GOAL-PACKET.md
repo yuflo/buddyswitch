@@ -1,8 +1,9 @@
 # S4 Search Capability Cutover Goal Packet
 
-> Packet state: `READY — R1`
+> Packet state: `CONSUMED — REJECTED BEFORE COLLECTION`
 > Packet ID: `BS-MM-S4-SEARCH-R1-20260730-01`
 > Predecessor: `BS-MM-S4-SEARCH-20260730-01` rejected and consumed
+> Successor: `BS-MM-S4-SEARCH-R2-20260730-01`
 
 ## 0. Copy-paste independent-task request
 

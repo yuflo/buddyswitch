@@ -118,15 +118,20 @@ Cleanup:
 
 ## 8. Execution sequence
 
-Link exact checkpoint documents and state the order. For each checkpoint name:
+Link checkpoint documents and state the required dependency order. For each
+checkpoint name:
 
 - first RED or preservation proof;
 - exact files/disposition;
 - declared environment and, after any `src/buddyswitch/**` mutation, the
   rebuild/install/activate/verify gate before another public-runner command;
-- focused verification;
+- focused verification claim and known current direct targets;
 - required checkpoint return;
 - stop condition.
+
+The packet fixes outcomes, boundaries, protected contracts, evidence classes
+and required ordering. The executor owns exact target discovery, compatible
+grouping and local command construction under `$buddyswitch-testing`.
 
 ## 9. Residue and replacement
 
@@ -142,12 +147,16 @@ Absence checks:
 Use only:
 
 ```bash
-./buddyswitch-test focused <exact targets>
+./buddyswitch-test focused <executor-selected current targets>
 ./buddyswitch-test full
 ```
 
-The packet states when `full` is authorized. It also names manual/real-Actor
-proof and resource cleanup where material.
+The packet states when `full` is authorized. Known targets may be supplied as
+review input, not as an unchangeable command transcript. The executor may
+correct a mechanically invalid suggested target when the runner proves one
+equivalent and proof breadth is unchanged; record the correction and
+authority. It also names manual/real-Actor proof and resource cleanup where
+material.
 
 ## 11. Stop and return early
 
@@ -162,10 +171,12 @@ Stop without broadening scope when:
 - unrelated dirty work overlaps required writes;
 - direct proof cannot detect the claimed outcome.
 
-Return the evidence and proposed replan. Do not repair the packet locally.
-The stopped packet is permanently retired. If this is the second
-specification invalidation at the same boundary, state that another
-patch-on-patch packet is forbidden and request architecture review.
+Return the evidence and proposed replan. Do not repair outcome, architecture,
+protected-contract, scope or ambiguous proof changes locally. A single
+mechanically provable execution correction inside the accepted boundary is
+executor-owned and does not retire the packet. If this is the second
+substantive specification invalidation at the same boundary, state that
+another patch-on-patch packet is forbidden and request architecture review.
 
 ## 12. Checkpoint update
 

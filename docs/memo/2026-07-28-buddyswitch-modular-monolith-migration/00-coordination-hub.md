@@ -34,6 +34,8 @@ An execution session receives exactly one READY Goal Packet. It may:
 
 - create the packet's stated active goal;
 - modify only its classified owner, consumer, proof and current-doc scope;
+- select and correct exact execution commands from current repository and
+  runner facts when the acceptance claim and proof breadth do not change;
 - execute the packet's RED/GREEN/refactor tasks;
 - commit coherent checkpoints if the packet authorizes commits;
 - record test/run evidence and cleanup;
@@ -71,9 +73,9 @@ source and includes:
 7. read order and governing decisions;
 8. exact allowed, shared and forbidden scope;
 9. frozen behavior and protected contracts;
-10. task/checkpoint order and first direct proof;
+10. task/checkpoint order, first direct proof claim and known current targets;
 11. residue and current-guidance obligations;
-12. verification commands, complete contrary-evidence reporting and
+12. verification responsibilities, complete contrary-evidence reporting and
     identity-safe cleanup;
 13. stop/replan conditions;
 14. exact asynchronous return packet.
@@ -84,6 +86,12 @@ package completeness, correspondence, ownership or another architecture
 question to implementation is not READY. Stop conditions cannot substitute
 for missing preflight evidence. Only then does the hub transition the stage to
 `READY`.
+
+The hub does not freeze local shell spelling, test grouping or mechanically
+equivalent target paths as architectural truth. The capable executor owns
+those decisions through the current runner and `$buddyswitch-testing`; it
+records material deviations and stops only when equivalence or scope is
+uncertain.
 
 ## 5. Stage-session lifecycle
 

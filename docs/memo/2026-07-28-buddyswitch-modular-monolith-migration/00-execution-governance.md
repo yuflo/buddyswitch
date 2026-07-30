@@ -26,6 +26,8 @@ Owns:
 
 - roadmap and stage boundaries;
 - stage readiness;
+- stage outcome, architecture boundary, protected contracts and classified
+  write scope;
 - shared write-surface allocation;
 - architecture decisions;
 - residue ownership;
@@ -46,9 +48,12 @@ Does not:
 Owns:
 
 - current-source trace;
-- exact stage implementation plan;
+- the bounded local implementation plan and execution order;
+- dynamic test-target discovery and command construction through the current
+  public runner;
 - RED/GREEN/refactor loop;
 - allowed stage files;
+- diagnosis and owner-correct repair inside classified scope;
 - evidence and cleanup;
 - progress updates and restart point.
 
@@ -62,6 +67,10 @@ Does not:
 
 The executor submits proposed finding/residue/acceptance changes; it never
 edits their master status.
+
+The executor is not a command transcription worker. A packet may provide
+known targets and a suggested sequence, but repository facts, the current
+runner and `$buddyswitch-testing` own target validity and exact execution.
 
 ### Integration owner
 
@@ -117,7 +126,7 @@ Source commit and local diff:
 Allowed write roots:
 Shared files requiring integration-owner approval:
 Protected consumer contracts:
-Exact first RED/preservation proof:
+First RED/preservation claim and known direct proof:
 Old paths that must disappear:
 Forbidden scope:
 Stop conditions:
@@ -143,7 +152,7 @@ Required evidence:
 | Declared environment | the build, test and runtime environment is reproducible from committed declarations; no ad hoc package or hidden local mutation is required |
 | Execution order | every environment-consuming proof follows the source mutation and rebuild/install/activate/verify step that makes its runtime current |
 | Identity | every proof records source/diff, fixture, exact probe, result, cleanup and residual risk |
-| Handoff | no semantic owner, public/foundation contract, state identity or boundary decision remains for the executor to infer |
+| Handoff | no semantic owner, public/foundation contract, state identity or boundary decision remains for the executor to infer; suggested commands are checked against current runner semantics or explicitly left to executor discovery |
 
 The ordinary READY questions still apply:
 
@@ -222,15 +231,30 @@ An unclassified touched file stops work until classified.
 
 ### Local implementation discovery
 
-The executor may resolve private implementation details without replanning
-when:
+The executor may resolve implementation and execution details without
+replanning when:
 
 - the owner and public effect do not change;
 - no new dependency direction appears;
 - no shared host contract changes;
-- no additional old path is created.
+- no additional old path is created;
+- every write remains inside classified scope;
+- proof breadth is preserved or increased.
 
 Record the choice in the stage plan.
+
+This authority includes correcting a mechanically invalid packet instruction
+when there is one repository-proved equivalent. Examples include replacing a
+test-parent directory with its one valid tier root, correcting an obsolete
+file path after an authorized move, or reordering a verification command
+behind an already accepted activation gate. The executor records the original
+instruction, repository authority, correction and unchanged claim. It does
+not stop merely because the coordinating packet contained the invalid local
+instruction.
+
+Stop and request replanning when equivalence is ambiguous, the correction
+narrows proof, changes product semantics, requires a new write class, changes
+a protected contract or state, or crosses a stage/lane boundary.
 
 ### Stage-affecting discovery
 
@@ -250,7 +274,11 @@ The migration lead updates the charter or roadmap before code resumes.
 
 Stop conditions contain damage; they do not make a packet READY.
 
-When execution contradicts a READY specification:
+An invalid local instruction with one mechanically provable equivalent is not
+a specification invalidation; use the local execution authority above.
+
+When execution contradicts the READY outcome, boundary, protected contract,
+classified write scope or accepted mechanism:
 
 1. stop and permanently retire that packet;
 2. move the stage to `REPLANNING`;

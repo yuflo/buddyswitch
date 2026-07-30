@@ -1,6 +1,7 @@
 # S4 Search Owner and Consumer Manifest
 
-> Packet scope owner: `BS-MM-S4-SEARCH-R1-20260730-01`
+> Original scope owner: `BS-MM-S4-SEARCH-R1-20260730-01`
+> Current continuation: `BS-MM-S4-SEARCH-R2-20260730-01` reuses this scope unchanged
 > Rule: an unclassified required write stops execution.
 
 ## 1. Final owner paths

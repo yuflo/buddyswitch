@@ -2,8 +2,9 @@
 
 > Use `superpowers:executing-plans`, root `AGENTS.md` and
 > `$buddyswitch-testing`.
-> Plan state: `READY`
+> Plan state: `HISTORICAL — R1 CONSUMED`
 > Packet: `BS-MM-S4-SEARCH-R1-20260730-01`
+> Current continuation: `S4-SEARCH-R2-CONTINUATION-PLAN.md`
 
 ## 1. Goal
 

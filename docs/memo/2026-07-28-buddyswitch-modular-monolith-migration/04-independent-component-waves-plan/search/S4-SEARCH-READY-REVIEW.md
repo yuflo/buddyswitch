@@ -1,6 +1,6 @@
 # S4 Search READY Review
 
-> Review result: `READY`
+> Review result: `HISTORICAL — R1 CONSUMED`
 > Packet: `BS-MM-S4-SEARCH-R1-20260730-01`
 > Predecessor: rejected before execution
 > Scope: Search lane only
