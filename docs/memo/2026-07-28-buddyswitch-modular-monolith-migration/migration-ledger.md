@@ -4,14 +4,14 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | accepted S3 candidate and frozen FINAL recorded in `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md` |
-| Active stage | S4 — Independent Component Waves preparation |
-| State | PROPOSED — PREPARATION ONLY |
-| Runtime migration authorized | none; no S4 lane packet is READY |
+| Evidence baseline | Search affected preservation `b96f488146524dbc97eb14463aea7780` plus mutable-consumer baseline `978b8137549e47bf9542e69b2045e2d6` on accepted S3 source |
+| Active stage | S4 — Independent Component Waves / Search lane |
+| State | READY — SEARCH LANE ONLY |
+| Runtime migration authorized | `BS-MM-S4-SEARCH-20260730-01` only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | refresh S4 source/consumer/state/test facts, freeze shared host contracts and lane dependencies, then READY-review lane-sized packets |
+| Next gate | execute and hub-review Search; other lanes remain preparation-only |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand and Task modules |
 
 ## Stage ledger
@@ -22,7 +22,7 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | PROPOSED — PREPARATION ONLY | S3 | coordinating hub preparing; lanes unassigned | source refresh, frozen host contracts and lane traces |
+| S4 Component waves | READY — SEARCH LANE ONLY | S3 | Search executor; hub accepts | exact Search return and hub acceptance |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -248,6 +248,17 @@ installed distribution, and accepted S3 in
 `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`. Both S3 packets are
 consumed. S4 preparation is unblocked; no S4 implementation packet exists.
 
+The S4 refresh classified all six lanes and rejected a mechanical/shared
+cutover packet. Search is the first admissible lane because it is stateless,
+performs no Browser action and requires only the accepted Tool contribution.
+The complete affected pre-mutation baseline passed as
+`b96f488146524dbc97eb14463aea7780` (93 tests, 543 subtests). Preflight
+`S4SEARCHP-20260730-02` proved real explicit Search dispatch, unchanged Daemon
+order, duplicate-module rejection and fail-closed old/new Tool registration.
+D-050 freezes one-lane sequencing and the non-opening Search/Browser boundary.
+The source/consumer manifest, implementation plan, Goal Packet and READY
+review authorize only `BS-MM-S4-SEARCH-20260730-01`.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -277,6 +288,7 @@ consumed. S4 preparation is unblocked; no S4 implementation packet exists.
 | 2026-07-30 | S3 | REPLANNING | READY — R1 COMPLETION | coordinating hub | complete representation audit, candidate architecture review, generic proof-boundary correction and activation-first R1 packet reviewed |
 | 2026-07-30 | S3 | READY — R1 COMPLETION | ACCEPTED | coordinating hub | exact source/activation identity, focused/affected/single FINAL evidence, one-owner/Public/contribution boundaries and replacement absence accepted |
 | 2026-07-30 | S4 | BLOCKED | PROPOSED — PREPARATION ONLY | coordinating hub | S3 accepted; source-bound lane preparation unlocked with no execution authority |
+| 2026-07-30 | S4 | PROPOSED — PREPARATION ONLY | READY — SEARCH LANE ONLY | coordinating hub | six-lane dependency audit, Search preservation baseline, final-topology preflight, exact manifest, plan and Goal Packet passed READY review |
 
 ## Checkpoint record
 
@@ -306,6 +318,7 @@ consumed. S4 preparation is unblocked; no S4 implementation packet exists.
 | 2026-07-30 | S3 initial return review | REPLANNING | `03-task-goal-boundary-cutover-plan/S3-INITIAL-RETURN-REVIEW.md`; exact preserved dirty identity; no valid candidate test run | consume `BS-MM-S3-20260729-01`; audit all consumer representations before new authority |
 | 2026-07-30 | S3 R1 handoff | READY | `S3-R1-CONSUMER-AUDIT.md`, `S3-R1-SOURCE-SNAPSHOT.md`, `S3-R1-READY-REVIEW.md`; packet `BS-MM-S3-R1-20260730-01` | verify dirty candidate, reprovision before RED, fix generic proof owners, complete focused/affected/single FINAL |
 | 2026-07-30 | S3 stage acceptance | ACCEPTED | `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`; generic proof GREEN `cc5a797cd76943f9a256a9027b23d435`; affected `addf01ca26e24149b9f0b7b2e1d99301`, `5d07ed065a98413da4b77ed8125045ba`, `38ad62540de645a6b8c08a1903dc53db`; FINAL `79c7f25e1c03484d9b600a85bd503712` | checkpoint S3, then refresh and READY-review S4 lane boundaries; do not resume either S3 packet |
+| 2026-07-30 | S4 Search handoff | READY | `04-independent-component-waves-plan/search/S4-SEARCH-READY-REVIEW.md`; affected preservation `b96f488146524dbc97eb14463aea7780`; mutable-consumer baseline `978b8137549e47bf9542e69b2045e2d6`; preflight `S4SEARCHP-20260730-02`; packet `BS-MM-S4-SEARCH-20260730-01` | user starts one independent Search task; hub pauses without polling |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -328,10 +341,10 @@ Stop/replan condition:
 
 ```text
 Stage: S4
-Master state: PROPOSED — PREPARATION ONLY
-Goal Packet: none
+Master state: READY — SEARCH LANE ONLY
+Goal Packet: BS-MM-S4-SEARCH-20260730-01
 Execution session: none
-Last hub checkpoint: S3 accepted; all S3 packets consumed
-Next action: commit/push the S3 checkpoint, then refresh S4 source and lane boundaries
-No-polling state: NOT_APPLICABLE
+Last hub checkpoint: Search source/consumer audit, preservation, preflight and READY review complete
+Next action: commit/push the S4 preparation checkpoint, then hand off the exact Search packet
+No-polling state: PAUSED_AFTER_HANDOFF once user starts the independent task
 ```

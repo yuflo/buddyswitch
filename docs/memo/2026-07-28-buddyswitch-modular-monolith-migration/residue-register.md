@@ -41,7 +41,7 @@ Statuses:
 | R-TRACK-001 | scattered Track/comment/repo/Tool/inbound/Skill/tests | S4 Track | one Track root/assembly |
 | R-ARTIFACT-001 | scattered Artifact/relation/visibility/config/Tool/Skill/tests | S4 Artifact | one Artifact root/assembly |
 | R-COMM-001 | scattered Message/IM/service/Tool/inbound/session/channel/worker/tests | S4 Communication | one Communication root and worker contribution |
-| R-SEARCH-001 | Search Tool/capability mixed into shared Tool context | S4 Search | one Search capability assembly |
+| R-SEARCH-001 | CONFIRMED — Search Tool is dynamically discovered under the shared Tool root and an unused Search-shaped request placeholder remains in generic Tool context | S4 Search | packet `BS-MM-S4-SEARCH-20260730-01`: one explicit Search assembly, old package and host placeholder absent |
 | R-EVIDENCE-001 | Evidence Tool/capability mixed with Artifact/browser context | S4 Evidence | one capability plus Artifact Public |
 | R-CONTEXT-001 | Context projection reading private repos/domains from broad ToolContext | S4 Context | public read composition and one Context Tool |
 

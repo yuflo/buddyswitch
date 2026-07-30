@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 PROPOSED — PREPARATION ONLY
-> Runtime authorization: none; no S4 lane packet is READY
+> Current state: S0–S3 ACCEPTED; S4 READY — SEARCH LANE ONLY
+> Runtime authorization: `BS-MM-S4-SEARCH-20260730-01`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | PROPOSED — PREPARATION ONLY |
+| S4 | `04-independent-component-waves.md` | READY — SEARCH LANE ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -90,8 +90,18 @@ FINAL, and returned with clean runtime and resource state. The coordinating
 hub reproduced its complete source, untracked and activation identities,
 reviewed the one-owner/Public/contribution boundaries and accepted S3 in
 `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`. Both S3 packets are
-consumed. S4 source refresh and READY preparation are unlocked, but no S4
-implementation or lane packet is authorized yet.
+consumed.
+
+The S4 source refresh then separated the six lanes by real host and dependency
+boundaries. Search is stateless and needs only the existing Tool contribution;
+Track, Artifact, Communication, Evidence and Context still require independent
+boundary decisions and remain preparation-only. The affected Search
+preservation group passed as `b96f488146524dbc97eb14463aea7780`, and
+representative final-topology probe `S4SEARCHP-20260730-02` proved explicit
+dispatch, atomic old/new registration failure, duplicate-module rejection and
+unchanged Daemon order. The structured Search plan is at
+`04-independent-component-waves-plan/README.md`; only packet
+`BS-MM-S4-SEARCH-20260730-01` is READY.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

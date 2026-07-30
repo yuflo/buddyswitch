@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Current state: PROPOSED — PREPARATION ONLY
+> Current state: READY — SEARCH LANE ONLY
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: none; source refresh and READY review required
+> Execution authority: `BS-MM-S4-SEARCH-20260730-01` only
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -14,14 +14,18 @@
 
 | Lane | Owned behavior | Ordering constraint |
 |---|---|---|
-| Track | Track/comments/state/inbound/Skill/projections | none after S3 |
-| Artifact | artifacts/relations/visibility/config/Skill | none after S3 |
-| Communication | Message/IM/delivery/external session/channel worker | Web worker contract frozen |
-| Search | bounded Actor search capability | Browser host contract frozen |
+| Track | Track/comments/state/inbound/Skill/projections | exact Artifact Public/input-port direction not yet frozen |
+| Artifact | artifacts/relations/visibility/config/Skill | exact Track Public/input-port direction not yet frozen |
+| Communication | Message/IM/delivery/external session/channel worker | worker lifecycle contribution not yet frozen |
+| Search | bounded non-opening Actor search capability | existing Tool contribution; Browser remains foundation |
 | Evidence | transient evidence/downgrade capability | Artifact Public accepted |
 | Context | application read projection and context Tool | last; consumes other Public reads |
 
 Browser is not a product lane. It remains an Actor foundation capability.
+
+Current source review has admitted Search only. See
+`04-independent-component-waves-plan/README.md`. The other five lanes remain
+preparation-only and may not reuse the Search packet.
 
 ## Lane protocol
 
