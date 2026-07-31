@@ -42,7 +42,7 @@ Statuses:
 | R-ARTIFACT-001 | CLOSED — Artifact state, domain, Tool, selection assets, Skill and owning tests have one module root and one explicit assembly | S4 Artifact | `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | R-COMM-001 | scattered Message/IM/service/Tool/inbound/session/channel/worker/tests | S4 Communication | one Communication root and worker contribution |
 | R-SEARCH-001 | CLOSED — Search Tool and owning tests are physically aggregated, explicitly composed once, and the dynamic package plus generic host placeholder are absent | S4 Search | `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` |
-| R-EVIDENCE-001 | Evidence Tool/capability mixed with Artifact/browser context | S4 Evidence | one capability plus Artifact Public |
+| R-EVIDENCE-001 | Evidence Tool and broker-backed command adapter remain in technical roots; two unused Evidence-shaped methods remain on generic `BrowserAccess` | S4 Evidence | one explicit capability root consuming Artifact Public; old roots and host placeholders absent |
 | R-CONTEXT-001 | Context projection reading private repos/domains from broad ToolContext | S4 Context | public read composition and one Context Tool |
 
 ## Foundation/composition residue

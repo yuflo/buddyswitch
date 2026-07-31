@@ -1,16 +1,18 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY`
-> Executable packet: none
-> Other lanes: `PREPARATION ONLY`
+> Stage state: `READY — EVIDENCE R1 ONLY`
+> Executable packet: `BS-MM-S4-EVIDENCE-R1-20260731-01`
+> Other lanes: Communication and Context remain `PREPARATION ONLY`
 > Merge unit: one accepted lane at a time
 
 S4 is not one mechanical directory migration. Its six lanes share the same
 physical-aggregation goal but not the same host or dependency boundary.
 Accordingly, Search was accepted independently. Current-source review then
 proved that Track and Artifact must cut over as one atomic migration candidate
-while remaining two independent final modules. Communication, Evidence and
-Context still require later refreshed packets and READY reviews.
+while remaining two independent final modules. The next refresh selected
+Evidence because it needs only the existing Tool contribution and accepted
+Artifact Public. Communication still lacks a worker-lifecycle contribution;
+Context remains last.
 
 ## Read order for the current lane
 
@@ -34,6 +36,7 @@ Context still require later refreshed packets and READY reviews.
 17. `track-artifact/S4-TRACK-ARTIFACT-R2-CONTINUATION-PLAN.md`;
 18. `track-artifact/S4-TRACK-ARTIFACT-R2-GOAL-PACKET.md`;
 19. `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
+20. `evidence/README.md` and its ordered Evidence lane documents.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -46,7 +49,7 @@ adds current-source execution facts; it does not broaden S4.
 | Track | ACCEPTED WITH ARTIFACT | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Communication | PREPARATION ONLY | iMessage worker lifecycle contribution |
-| Evidence | PREPARATION ONLY | accepted Artifact Public and Browser foundation input |
+| Evidence | READY — R1 ONLY | existing Tool contribution plus accepted Artifact Public |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
 
 The initial Search packet was rejected before execution by the pre-handoff
@@ -64,16 +67,24 @@ that the architecture proofs skipped module test roots. R2 corrected only that
 test topology, machine-enforced D-020, and passed exact, affected and one new
 frozen FINAL. Both packets are consumed.
 
-## Next-lane admission rule
+## Evidence admission
 
-The next lane is not selected from the old source snapshot. The coordinating
-hub first refreshes the committed Communication, Evidence and Context owners,
-representations, host contracts, tests and runtime identity. It then selects
-one lane whose boundary is complete and passes a new source-bound READY review.
+Current-source trace proved Evidence does not call Browser lifecycle. Its
+stable `browser_evidence` command is a Runtime Broker adapter; the capability
+itself issues transient metadata after Artifact Public scope validation.
+Direct baseline `244e12758d9f41bebe4bd3754ab1f163`, affected baseline
+`158f68a5d618496eb8444310f621162a`, and topology preflight
+`EVIDENCEP-20260731-01` passed. D-052 freezes the no-Public/no-Browser-port
+boundary.
+
+## Later-lane admission rule
+
+Communication and Context may not reuse this snapshot or packet. The
+coordinating hub refreshes their owners, representations, host contracts,
+tests and runtime identity only after Evidence acceptance.
 
 ## Checkpoint protocol
 
-No executable packet is currently authorized. Track–Artifact acceptance
-authorizes only its Git checkpoint and source refresh for the remaining S4
-lanes. It does not authorize Communication, Evidence or Context implementation,
-S5, S6 or S7.
+Only `BS-MM-S4-EVIDENCE-R1-20260731-01` is executable. It does not authorize
+Communication, Context, S5, S6, S7, Git integration, or migration-master
+acceptance.

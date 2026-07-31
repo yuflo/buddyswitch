@@ -1,6 +1,6 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY
+> Current state: S0–S3 ACCEPTED; S4 READY — EVIDENCE R1 ONLY
 > Runtime authorization: `NONE`
 > The prior Demand-first pack was replaced after the readiness audit.
 
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY |
+| S4 | `04-independent-component-waves.md` | READY — EVIDENCE R1 ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -122,8 +122,13 @@ tests to root tiers, retained three true module-local tests, enforced the
 cross-Private rule and passed exact, affected and one new frozen FINAL.
 Track–Artifact is accepted in
 `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
-Both packets are consumed. Communication, Evidence and Context remain
-preparation-only; no next lane is executable yet.
+Both packets are consumed. The committed-source refresh then selected
+Evidence as the shortest complete next lane: it reuses the existing Tool
+contribution and accepted Artifact Public, needs no Browser or Host contract,
+and persists no state. Direct and affected refactor baselines plus a
+representative explicit-registration preflight passed. Packet
+`BS-MM-S4-EVIDENCE-R1-20260731-01` is READY. Communication and Context remain
+preparation-only.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

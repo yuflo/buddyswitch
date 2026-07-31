@@ -1,7 +1,9 @@
 # S4 Wave Dependency and Host-Contract Audit
 
 > Audit source: `e4fe342144febc023d1d635012e7e8a5e645138d`
-> Audit result: Search may execute first; the other five lanes remain
+> Initial audit result: Search executed first.
+> 2026-07-31 refresh: Track–Artifact is accepted and Evidence is READY through
+> the existing Tool contribution; Communication and Context remain
 > preparation-only.
 
 ## 1. Why S4 is lane-sized
@@ -15,7 +17,7 @@ scattered:
 | Track | Tool, repo/domain, comments, inbound, Skill, UI projection | Artifact relations and identity | Tool, Daemon/inbound, Web, Skill, cleanup |
 | Artifact | Tool, repo/domain, visibility/relations, selection, Skill | Track relation semantics | Tool, Skill, cleanup |
 | Communication | Message Tool/repo plus IM routing/session/channel | identity, external session | Tool, inbound/Daemon, Web, worker lifecycle, cleanup |
-| Evidence | Tool plus Browser evidence helper | Artifact Public and Browser foundation | Tool |
+| Evidence | Tool plus broker-backed stable command adapter | Artifact Public and generic Runtime Broker | Tool |
 | Context | broad read projection in ToolContext and Context Tool | every accepted product Public read | Tool/application projection |
 
 Therefore one shared move template would either omit real boundaries or invent
@@ -33,7 +35,7 @@ Track <-> Artifact
 Communication
   requires one worker-lifecycle contribution contract
 
-Artifact accepted + Browser foundation unchanged
+Artifact accepted
   -> Evidence
 
 all preceding Public read surfaces accepted
@@ -67,7 +69,9 @@ Search behavior is intentionally narrower than Browser:
 
 The unused `BrowserAccess.request(...)` method is not a valid Search contract.
 It is a Search-specific placeholder in a generic host and must disappear with
-the Search move. Other Browser/Evidence methods remain outside this lane.
+the Search move. The later Evidence refresh proved the two Evidence-shaped
+methods were unused placeholders and assigns their removal to Evidence R1;
+`BrowserAccess.status` remains foundation truth.
 
 ## 4. Representative final-topology preflight
 
@@ -102,7 +106,9 @@ This proves:
 4. old package deletion and new contribution must be one atomic cutover;
 5. current duplicate guards fail closed.
 
-No preflight result authorizes another S4 lane.
+This Search preflight did not authorize another S4 lane. Evidence was admitted
+later by its own committed-source trace, preservation evidence, boundary
+decision, and `EVIDENCEP-20260731-01` topology preflight.
 
 ## 5. S4 sequencing rule
 

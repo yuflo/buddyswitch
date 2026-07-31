@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Current state: TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY
+> Current state: READY — EVIDENCE R1 ONLY
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: none
+> Execution authority: `BS-MM-S4-EVIDENCE-R1-20260731-01`
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -18,7 +18,7 @@
 | Artifact | artifacts/relations/visibility/config/Skill | ACCEPTED with read-only Track Public dependency |
 | Communication | Message/IM/delivery/external session/channel worker | worker lifecycle contribution not yet frozen |
 | Search | bounded non-opening Actor search capability | existing Tool contribution; Browser remains foundation |
-| Evidence | transient evidence/downgrade capability | Artifact Public accepted |
+| Evidence | transient evidence/downgrade capability | READY; existing Tool contribution and Artifact Public |
 | Context | application read projection and context Tool | last; consumes other Public reads |
 
 Browser is not a product lane. It remains an Actor foundation capability.
@@ -26,8 +26,9 @@ Browser is not a product lane. It remains an Actor foundation capability.
 Search and the atomic Track–Artifact pair are accepted. See
 `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` and
 `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
-Communication, Evidence and Context remain preparation-only and may not reuse
-an accepted lane's packet.
+Evidence R1 is the sole active lane at
+`04-independent-component-waves-plan/evidence/`. Communication and Context
+remain preparation-only and may not reuse an accepted or active lane's packet.
 
 ## Lane protocol
 

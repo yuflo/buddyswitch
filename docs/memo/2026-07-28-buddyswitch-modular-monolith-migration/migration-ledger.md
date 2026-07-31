@@ -4,14 +4,14 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | Track–Artifact product direct `70b6dff13d724f6183c1868718ac1fb5`, affected `5afac5b2466e4c759e1bafc00a4e2c14`; R2 architecture exact `65c9520b0b984c639cb49aa5bc18959b`, affected `034adb94a4fc43adb88ee73123909968`, frozen FINAL `83f35f08d4de4f4fb211314b936e5e3f` |
-| Active stage | S4 — Independent Component Waves / next lane preparation |
-| State | TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY |
+| Evidence baseline | Evidence direct `244e12758d9f41bebe4bd3754ab1f163`; affected `158f68a5d618496eb8444310f621162a`; topology `EVIDENCEP-20260731-01` |
+| Active stage | S4 — Independent Component Waves / Evidence |
+| State | READY — EVIDENCE R1 ONLY |
 | Runtime migration authorized | none |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | checkpoint Track–Artifact, refresh Communication/Evidence/Context boundaries, READY-review one next lane |
+| Next gate | independent Evidence R1 execution and coordinating-hub acceptance review |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track and Artifact modules |
 
 ## Stage ledger
@@ -22,7 +22,7 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY | S3 | coordinating hub | source refresh and one next-lane READY review |
+| S4 Component waves | READY — EVIDENCE R1 ONLY | S3 | coordinating hub | execute and review Evidence R1; Communication/Context blocked |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -347,6 +347,7 @@ state. Track–Artifact is accepted in
 | 2026-07-31 | S4 Track–Artifact | READY — TRACK–ARTIFACT R1 ONLY | REPLANNING — TEST BOUNDARY | coordinating hub | product candidate and FINAL passed, but hub review found cross-component tests under module roots and architecture proof excluding those roots; R1 packet consumed |
 | 2026-07-31 | S4 Track–Artifact | REPLANNING — TEST BOUNDARY | READY — TRACK–ARTIFACT R2 CONTINUATION ONLY | coordinating hub | product source frozen; exact ten-test root disposition, three module-local tests, architecture RED and topology-only FIX_AFTER_FINAL packet reviewed |
 | 2026-07-31 | S4 Track–Artifact | READY — TRACK–ARTIFACT R2 CONTINUATION ONLY | ACCEPTED | coordinating hub | candidate/runtime identities reproduced; architecture RED/GREEN, affected proof and one new frozen FINAL passed; product modules and test ownership accepted |
+| 2026-07-31 | S4 Evidence | TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY | READY — EVIDENCE R1 ONLY | coordinating hub | committed-source trace proved existing Tool/Artifact Public boundary, no Browser dependency, complete representation scope, direct/affected GREEN and atomic topology preflight |
 
 ## Checkpoint record
 
@@ -383,6 +384,7 @@ state. Track–Artifact is accepted in
 | 2026-07-30 | S4 Track–Artifact handoff | READY | `track-artifact/S4-TRACK-ARTIFACT-READY-REVIEW.md`; packet `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01` | user starts one independent atomic product-lane task; hub pauses without polling |
 | 2026-07-31 | S4 Track–Artifact R1 return / R2 handoff | READY — TEST-BOUNDARY CONTINUATION ONLY | preserved R1 product candidate; R1 FINAL `09d7540e94b24d06bcf7157a6ddc39af`; `S4-TRACK-ARTIFACT-R2-READY-REVIEW.md`; packet `BS-MM-S4-TRACK-ARTIFACT-R2-20260731-01` | preserve product source, correct test topology and architecture proof only, then one FIX_AFTER_FINAL cycle |
 | 2026-07-31 | S4 Track–Artifact acceptance | ACCEPTED | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`; product direct `70b6dff13d724f6183c1868718ac1fb5`; product affected `5afac5b2466e4c759e1bafc00a4e2c14`; R2 exact `65c9520b0b984c639cb49aa5bc18959b`; affected `034adb94a4fc43adb88ee73123909968`; FINAL `83f35f08d4de4f4fb211314b936e5e3f` | checkpoint Track–Artifact, then refresh Communication/Evidence/Context; do not resume either packet |
+| 2026-07-31 | S4 Evidence handoff | READY | `evidence/S4-EVIDENCE-READY-REVIEW.md`; direct `244e12758d9f41bebe4bd3754ab1f163`; affected `158f68a5d618496eb8444310f621162a`; topology `EVIDENCEP-20260731-01`; packet `BS-MM-S4-EVIDENCE-R1-20260731-01` | user starts one independent Evidence task; hub pauses without polling |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -404,11 +406,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S4
-Master state: TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY
-Goal Packet: none
+Stage: S4 / Evidence
+Master state: READY — EVIDENCE R1 ONLY
+Goal Packet: BS-MM-S4-EVIDENCE-R1-20260731-01
 Execution session: none
-Last hub checkpoint: Track–Artifact R2 accepted with one frozen FINAL
-Next action: commit/push Track–Artifact acceptance checkpoint, then refresh Communication/Evidence/Context boundaries
-No-polling state: not entered; no next-lane packet exists
+Last hub checkpoint: Evidence source refresh, baselines and topology preflight passed
+Next action: execute Evidence R1 in one independent task, then return result to hub
+No-polling state: enter after handoff
 ```
