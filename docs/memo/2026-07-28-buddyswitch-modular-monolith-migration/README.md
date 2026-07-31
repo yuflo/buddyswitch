@@ -1,6 +1,6 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 READY — EVIDENCE R1 ONLY
+> Current state: S0–S3 ACCEPTED; S4 READY — EVIDENCE R2 ONLY
 > Runtime authorization: `NONE`
 > The prior Demand-first pack was replaced after the readiness audit.
 
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | READY — EVIDENCE R1 ONLY |
+| S4 | `04-independent-component-waves.md` | READY — EVIDENCE R2 ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |

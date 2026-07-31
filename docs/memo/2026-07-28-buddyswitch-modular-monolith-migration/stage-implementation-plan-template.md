@@ -139,6 +139,17 @@ coherent. It does not replace the executor's source-bound RED/GREEN. An
 unresolved semantic owner, public/foundation contract, state identity or
 boundary mechanism is a plan failure, not an executor task.
 
+For every protected consumer interface, add an assertion inventory:
+
+| Observable result | Exact current assertion or hub probe | Can it fail when the terminal loop is broken? | Required write already classified? |
+|---|---|---|---|
+| success | `[REQUIRED]` | YES | YES / INAPPLICABLE |
+| business rejection | `[REQUIRED]` | YES | YES / INAPPLICABLE |
+| transport/runtime error | `[REQUIRED]` | YES | YES / INAPPLICABLE |
+
+Do not substitute a test filename, collected-test count or suite GREEN for
+this table. Finish the proof-gap audit before freezing the scope ledger.
+
 ## 8. Proof map
 
 | Claim | RED or preservation proof | Exact target | Expected initial result |

@@ -1,6 +1,6 @@
 # S4 Evidence Capability Cutover Goal Packet
 
-> Packet state: `READY`
+> Packet state: `CONSUMED — REJECTED`
 > Packet ID: `BS-MM-S4-EVIDENCE-R1-20260731-01`
 > Stage/lane: `S4 / Evidence`
 > Prepared date: 2026-07-31

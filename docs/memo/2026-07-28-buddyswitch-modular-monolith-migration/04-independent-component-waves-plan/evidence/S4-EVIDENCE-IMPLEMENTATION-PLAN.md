@@ -3,6 +3,8 @@
 > **For agentic workers:** use `superpowers:executing-plans` and the complete
 > `$buddyswitch-testing` skill. This plan produces one atomic dirty candidate
 > for coordinating-hub acceptance. Do not commit or push.
+>
+> Plan state: `CONSUMED — REJECTED`; do not resume.
 
 **Goal:** Physically aggregate Evidence, select it explicitly once, preserve
 its Tool and stable command behavior, and remove every retired live path.

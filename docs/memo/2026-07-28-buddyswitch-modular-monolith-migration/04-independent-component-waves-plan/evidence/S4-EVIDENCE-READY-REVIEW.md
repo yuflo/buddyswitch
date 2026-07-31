@@ -1,7 +1,9 @@
 # S4 Evidence READY Review
 
-> Determination: `READY — EVIDENCE R1 ONLY`
+> Determination: `CONSUMED — REJECTED`
 > Packet: `BS-MM-S4-EVIDENCE-R1-20260731-01`
+> Owning review:
+> `S4-EVIDENCE-R1-RETURN-AND-ROOT-CAUSE-REVIEW.md`
 
 ## 1. Bottleneck and shortest loop
 
@@ -75,6 +77,7 @@ architecture decision.
 
 ## 6. Decision
 
-`BS-MM-S4-EVIDENCE-R1-20260731-01` is the sole executable authority.
-Communication, Context, S5, Git integration, and migration master acceptance
-remain unauthorized.
+This determination was invalidated by the R1 return and is historical only.
+`BS-MM-S4-EVIDENCE-R1-20260731-01` is consumed and cannot be resumed. Current
+authority is defined only by `S4-EVIDENCE-R2-READY-REVIEW.md` and
+`S4-EVIDENCE-R2-GOAL-PACKET.md`.

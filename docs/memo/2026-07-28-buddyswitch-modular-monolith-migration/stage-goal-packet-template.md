@@ -48,6 +48,8 @@ Boundary positive proof:
 Boundary negative proof:
 Correspondence/mutation/cleanup proof or exact inapplicability:
 Representative final-topology probe:
+Protected consumer assertion inventory:
+Real entrypoint/transport success and material failure probe:
 Source/diff and material toolchain identity:
 Declared dependency/build/test/runtime inputs:
 Source-mutation -> rebuild/install/activate/verify -> proof order:
@@ -59,6 +61,12 @@ Every referenced proof must already exist. A planned executor RED does not
 replace hub-owned preflight. If any semantic owner, public/foundation contract,
 state identity, packaging boundary or selected mechanism remains undecided,
 the packet is not READY.
+
+For a protected CLI, process, socket or broker-backed contract, identify the
+exact assertions that observe one terminal success and each material
+rejection/error class. Test filenames, test counts and broad suite results are
+insufficient. If those assertions do not exist, classify the owning
+behavior-test write before freezing section 6.
 
 ## 5. Read order
 

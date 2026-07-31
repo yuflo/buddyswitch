@@ -154,6 +154,18 @@ Required evidence:
 | Identity | every proof records source/diff, fixture, exact probe, result, cleanup and residual risk |
 | Handoff | no semantic owner, public/foundation contract, state identity or boundary decision remains for the executor to infer; suggested commands are checked against current runner semantics or explicitly left to executor discovery |
 
+For every protected consumer interface, READY evidence is assertion-level:
+
+- a test filename, test count, suite label or prior GREEN is not proof unless
+  the reviewed assertions exercise the protected observable result;
+- a stable CLI/process/transport path requires at least one successful
+  terminal request and its material rejection/error mapping through the real
+  entrypoint and transport owner;
+- if the existing proof cannot detect that loop, the required behavior-test
+  write is classified before scope freezes;
+- the proof-gap audit precedes the final scope ledger. Scope completeness may
+  not be inferred from an architecture-only consumer inventory.
+
 The ordinary READY questions still apply:
 
 - Can the executor explain the product/host outcome in one sentence?

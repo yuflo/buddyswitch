@@ -1,7 +1,7 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `READY — EVIDENCE R1 ONLY`
-> Executable packet: `BS-MM-S4-EVIDENCE-R1-20260731-01`
+> Stage state: `READY — EVIDENCE R2 ONLY`
+> Executable packet: `BS-MM-S4-EVIDENCE-R2-20260731-01`
 > Other lanes: Communication and Context remain `PREPARATION ONLY`
 > Merge unit: one accepted lane at a time
 
@@ -49,7 +49,7 @@ adds current-source execution facts; it does not broaden S4.
 | Track | ACCEPTED WITH ARTIFACT | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Communication | PREPARATION ONLY | iMessage worker lifecycle contribution |
-| Evidence | READY — R1 ONLY | existing Tool contribution plus accepted Artifact Public |
+| Evidence | READY — R2 ONLY | preserved structural candidate plus stable-command terminal-loop repair |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
 
 The initial Search packet was rejected before execution by the pre-handoff
@@ -75,7 +75,12 @@ itself issues transient metadata after Artifact Public scope validation.
 Direct baseline `244e12758d9f41bebe4bd3754ab1f163`, affected baseline
 `158f68a5d618496eb8444310f621162a`, and topology preflight
 `EVIDENCEP-20260731-01` passed. D-052 freezes the no-Public/no-Browser-port
-boundary.
+boundary. R1 then produced the complete structural candidate, but correctly
+stopped before FINAL because the protected CLI had no terminal-loop proof.
+Hub preflight subsequently proved the preserved command rejects successful
+canonical ToolResult payloads by requiring a nonexistent `feedback` field.
+R1 is consumed; R2 owns only the command adapter repair and real-broker
+process proof on the preserved candidate.
 
 ## Later-lane admission rule
 
@@ -85,6 +90,6 @@ tests and runtime identity only after Evidence acceptance.
 
 ## Checkpoint protocol
 
-Only `BS-MM-S4-EVIDENCE-R1-20260731-01` is executable. It does not authorize
+Only `BS-MM-S4-EVIDENCE-R2-20260731-01` is executable. It does not authorize
 Communication, Context, S5, S6, S7, Git integration, or migration-master
 acceptance.

@@ -1,7 +1,7 @@
 # S4 Evidence Lane
 
-> Lane state: `READY — EVIDENCE R1 ONLY`
-> Executable packet: `BS-MM-S4-EVIDENCE-R1-20260731-01`
+> Lane state: `READY — EVIDENCE R2 ONLY`
+> Executable packet: `BS-MM-S4-EVIDENCE-R2-20260731-01`
 > Other lanes: Communication and Context remain `PREPARATION ONLY`
 
 This lane performs one behavior-preserving Forward cutover of the transient
@@ -16,9 +16,11 @@ Read in order:
 4. `../S4-WAVE-DEPENDENCY-AND-HOST-CONTRACT-AUDIT.md`;
 5. `S4-EVIDENCE-SOURCE-AND-CONSUMER-SNAPSHOT.md`;
 6. `S4-EVIDENCE-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
-7. `S4-EVIDENCE-IMPLEMENTATION-PLAN.md`;
-8. `S4-EVIDENCE-READY-REVIEW.md`;
-9. `S4-EVIDENCE-GOAL-PACKET.md`.
+7. `S4-EVIDENCE-R1-RETURN-AND-ROOT-CAUSE-REVIEW.md`;
+8. `S4-EVIDENCE-R2-CONTINUATION-PLAN.md`;
+9. `S4-EVIDENCE-R2-READY-REVIEW.md`;
+10. `S4-EVIDENCE-R2-GOAL-PACKET.md`.
 
 Search and Track–Artifact acceptance are predecessor truth, not executable
-instructions. No earlier S4 packet may be resumed.
+instructions. R1 produced the preserved structural candidate but is permanently
+consumed and may not be resumed. No earlier S4 packet may be resumed.
