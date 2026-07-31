@@ -1,6 +1,6 @@
 # S4 Independent Component Waves Charter
 
-> Current state: SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY
+> Current state: TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY
 > Entry prerequisite: S3 ACCEPTED
 > Execution authority: none
 > Merge unit: one accepted component lane at a time
@@ -14,8 +14,8 @@
 
 | Lane | Owned behavior | Ordering constraint |
 |---|---|---|
-| Track | Track/comments/state/inbound/Skill/projections | exact Artifact Public/input-port direction not yet frozen |
-| Artifact | artifacts/relations/visibility/config/Skill | exact Track Public/input-port direction not yet frozen |
+| Track | Track/comments/state/inbound/Skill/projections | ACCEPTED with two Artifact Public callables injected into Track-owned ports |
+| Artifact | artifacts/relations/visibility/config/Skill | ACCEPTED with read-only Track Public dependency |
 | Communication | Message/IM/delivery/external session/channel worker | worker lifecycle contribution not yet frozen |
 | Search | bounded non-opening Actor search capability | existing Tool contribution; Browser remains foundation |
 | Evidence | transient evidence/downgrade capability | Artifact Public accepted |
@@ -23,10 +23,11 @@
 
 Browser is not a product lane. It remains an Actor foundation capability.
 
-Search is accepted. See
-`04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md`.
-The other five lanes remain preparation-only and may not reuse a Search
-packet.
+Search and the atomic Track–Artifact pair are accepted. See
+`04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` and
+`04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
+Communication, Evidence and Context remain preparation-only and may not reuse
+an accepted lane's packet.
 
 ## Lane protocol
 

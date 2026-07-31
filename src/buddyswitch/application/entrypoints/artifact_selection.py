@@ -1,7 +1,7 @@
 """Verified Artifact selection entrypoint."""
 
 from buddyswitch.foundation.process_runtime.invocation import run_verified
-from buddyswitch.runtime_support.artifact_selection import main
+from buddyswitch.modules.artifact.entrypoints.artifact_selection import main
 
 
 if __name__ == "__main__":

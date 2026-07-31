@@ -16,6 +16,8 @@ from buddyswitch.env.tool_runtime.definition import (
 from buddyswitch.foundation.composition import ModuleAssembly
 from buddyswitch.launcher.cli_contract import CliCommandRegistration
 from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
+from buddyswitch.launcher import notification_center
+from buddyswitch.launcher.notification_center import InboundSourceRegistration
 from buddyswitch.launcher.web_contracts import ActorConsoleSectionRegistration
 from buddyswitch.runtime_support.env_cleanup import CleanupContribution
 from buddyswitch.runtime_support.skill_contracts import SkillExport
@@ -30,6 +32,7 @@ class ApplicationAssembly:
     skills: tuple[SkillExport, ...]
     cleanup: tuple[CleanupContribution, ...]
     actor_console_sections: tuple[ActorConsoleSectionRegistration, ...]
+    inbound_sources: tuple[InboundSourceRegistration, ...]
 
 
 def _text(value: object, *, label: str) -> str:
@@ -59,6 +62,7 @@ def build_application(
     skill_ids: set[str] = set()
     cleanup_categories: set[str] = set()
     actor_console_names: set[str] = set()
+    inbound_event_types: set[str] = set()
     command_factory_ids: set[int] = set()
     daemon_handlers: list[DaemonHandlerRegistration] = []
     tools: list[ToolRegistration] = []
@@ -66,6 +70,7 @@ def build_application(
     skills: list[SkillExport] = []
     cleanup: list[CleanupContribution] = []
     actor_console_sections: list[ActorConsoleSectionRegistration] = []
+    inbound_sources: list[InboundSourceRegistration] = []
 
     for module in modules:
         if not isinstance(module, ModuleAssembly):
@@ -157,6 +162,22 @@ def build_application(
             _unique(name, actor_console_names, label="Actor Console section")
             actor_console_sections.append(registration)
 
+        for registration in module.inbound_sources:
+            if not isinstance(registration, InboundSourceRegistration):
+                raise ValueError(
+                    "inbound source contribution must be "
+                    "InboundSourceRegistration"
+                )
+            normalized = notification_center.normalized_registrations(
+                (registration,)
+            )[0]
+            _unique(
+                normalized.event_type,
+                inbound_event_types,
+                label="inbound event type",
+            )
+            inbound_sources.append(normalized)
+
     if not isinstance(daemon_handler_order, tuple):
         raise ValueError("daemon handler order must be a tuple")
     normalized_order = tuple(
@@ -187,6 +208,7 @@ def build_application(
         skills=tuple(skills),
         cleanup=tuple(cleanup),
         actor_console_sections=tuple(actor_console_sections),
+        inbound_sources=tuple(inbound_sources),
     )
 
 

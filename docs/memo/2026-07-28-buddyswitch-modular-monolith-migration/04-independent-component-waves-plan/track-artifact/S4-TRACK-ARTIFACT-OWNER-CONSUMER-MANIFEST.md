@@ -1,6 +1,7 @@
 # S4 Track–Artifact Owner and Consumer Manifest
 
 > Packet: `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01`
+> R2 correction: `BS-MM-S4-TRACK-ARTIFACT-R2-20260731-01`
 > Rule: product writes stay inside the classes below; an unclassified semantic
 > or shared-host change stops execution.
 
@@ -159,19 +160,63 @@ old paths as history or negative residue assertions.
 
 ## 7. Owning-test relocation and proof writes
 
-The owner tests named in the source snapshot move beneath the corresponding
-module test root. Their current assertions and fixtures remain semantically
-equivalent while imports and literal owner paths change.
+Only tests whose behavior and fixtures stay inside one module move beneath that
+module's test root. Cross-component tests remain in the root test tiers even
+when one product capability dominates their name. Their assertions and
+fixtures remain semantically equivalent while imports and literal owner paths
+change.
+
+Final module-local tests:
+
+```text
+src/buddyswitch/modules/track/tests/integration/test_track_comment.py
+src/buddyswitch/modules/track/tests/unit/test_comments_repo.py
+src/buddyswitch/modules/artifact/tests/unit/test_artifact_selection.py
+```
+
+Final root-owned cross-component tests:
+
+```text
+tests/integration/env_tool/_artifact_env_tool_case.py
+tests/integration/env_tool/test_artifact_attachments.py
+tests/integration/env_tool/test_artifact_listing.py
+tests/integration/env_tool/test_artifact_publication.py
+tests/integration/env_tool/test_artifact_relations.py
+tests/integration/env_tool/test_artifact_validation.py
+tests/integration/env_tool/test_response_artifact.py
+tests/integration/env_tool/test_track.py
+tests/integration/track/test_comment_added_handler.py
+tests/integration/track/test_owner_actor_model.py
+```
+
+The classification rule is semantic:
+
+- a module-local test may import that module's Private implementation;
+- a module-local test may consume another module only through its Public
+  contract;
+- a test that needs another module's Private fixture or proves a multi-module
+  consumer path belongs in the root test tiers;
+- root Process, System and repository Architecture tests remain root-owned.
 
 Authorized root proof edits include these known direct consumers:
 
 ```text
 tests/support/object_builders.py
+tests/integration/env_tool/_artifact_env_tool_case.py
+tests/integration/env_tool/test_artifact_attachments.py
+tests/integration/env_tool/test_artifact_listing.py
+tests/integration/env_tool/test_artifact_publication.py
+tests/integration/env_tool/test_artifact_relations.py
+tests/integration/env_tool/test_artifact_validation.py
+tests/integration/env_tool/test_response_artifact.py
+tests/integration/env_tool/test_track.py
 tests/integration/env_tool/test_cleanup.py
 tests/integration/env_tool/test_context_binding.py
 tests/integration/env_tool/test_evidence.py
 tests/integration/env_tool/test_host_decision_surface.py
 tests/integration/env_tool/test_layer_end_to_end.py
+tests/integration/track/test_comment_added_handler.py
+tests/integration/track/test_owner_actor_model.py
 tests/integration/im/test_external_query.py
 tests/integration/im/test_identity_product_ownership.py
 tests/integration/runtime/test_runless_contract.py
@@ -234,7 +279,9 @@ discovery.
 
 | Representation | Required disposition |
 |---|---|
-| direct Python imports | final Public or same-module Private import |
+| production and module-local direct Python imports | final Public or same-module Private import |
+| module-local tests | own Private or another module's Public only |
+| cross-component tests | root tier; no false module-local ownership |
 | relative imports | remain inside one final owner |
 | literal old paths | absent outside history/negative guards |
 | Tool ID/action/schema | unchanged; one explicit registration each |

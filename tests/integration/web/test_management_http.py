@@ -697,7 +697,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
 
         for forbidden in (
-            "buddyswitch.env.tools.track" + "._impl",
+            "buddyswitch.modules.track.private.adapters.tool" + "._impl",
             "buddyswitch.env.services" + ".tracks",
             "dispatch_env_tool_request",
             "dispatch_runtime_request",

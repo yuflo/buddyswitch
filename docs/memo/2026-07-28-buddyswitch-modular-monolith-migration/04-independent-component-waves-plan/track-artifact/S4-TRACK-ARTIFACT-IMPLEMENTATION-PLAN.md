@@ -4,6 +4,11 @@
 > `superpowers:executing-plans` and `$buddyswitch-testing` to implement this
 > plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
+> **R2 correction:** Packet
+> `BS-MM-S4-TRACK-ARTIFACT-R2-20260731-01` overrides only the test-location
+> wording in Tasks 3 and 5. It preserves the complete R1 product candidate and
+> moves cross-component tests back to root tiers.
+>
 > **Execution rule:** This plan produces one atomic dirty candidate for hub
 > acceptance. The executor does not commit or push. That repository rule
 > replaces the generic writing-plan recommendation for intermediate commits.
@@ -233,8 +238,9 @@ discovery rule.
   their role membership and content.
 - [ ] Keep stable Artifact selection command behavior and config contents.
 - [ ] Add module package-data declarations for the moved Skills/assets.
-- [ ] Move owning tests under the corresponding module test roots and update
-  only imports, owner-path assertions and fixtures required by the final owner.
+- [ ] Move only single-module owning tests under the corresponding module test
+  roots. A test that imports another module's Private fixture or proves a
+  multi-module path remains in the root test tiers.
 - [ ] Keep cross-component, Process, System and repository architecture proof
   at root.
 
@@ -272,14 +278,18 @@ owner/consumer manifest.
 - Create three root architecture tests named in the manifest
 - Update classified root tests and current docs
 
-- [ ] Delete all retired sources, assets, Skills and root owner-test copies in
-  the same candidate.
+- [ ] Delete all retired sources, assets, Skills and duplicate test copies in
+  the same candidate. Root cross-component tests are current proof, not
+  retired residue.
 - [ ] Add Track boundary proof for physical ownership, Public/Private
   dependency direction, exact assembly contributions, stable paths and old
   owner absence.
 - [ ] Add Artifact boundary proof for physical ownership, Public/Private
   dependency direction, exact assembly contributions, assets and old owner
   absence.
+- [ ] Prove module-local tests import only their own Private implementation or
+  another module's Public contract. Do not exclude module test directories
+  from this proof.
 - [ ] Add inbound-source proof for type validation, duplicate rejection,
   explicit Track contribution, generic Daemon independence and unchanged
   Message/Browser behavior.

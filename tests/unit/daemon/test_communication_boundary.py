@@ -14,12 +14,12 @@ DAEMON_OWNED_FILES = [
     ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "message_inbound.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_inbound.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_inbound.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
@@ -32,7 +32,7 @@ DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "da
 IM_ACTOR_DELIVERY_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "im_actor_delivery.py"
 PRODUCT_HANDLER_PATHS = (
     ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py",
+    ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
@@ -199,8 +199,19 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn("def handle_signal(", handler_source)
 
     def test_track_comment_handler_owns_track_signal_payload_semantics(self) -> None:
-        handler_source = (ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py").read_text(encoding="utf-8")
-        handler_imports = _imported_modules(ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py")
+        handler_path = (
+            ROOT
+            / "src"
+            / "buddyswitch"
+            / "modules"
+            / "track"
+            / "private"
+            / "adapters"
+            / "daemon"
+            / "track_comment_added_handler.py"
+        )
+        handler_source = handler_path.read_text(encoding="utf-8")
+        handler_imports = _imported_modules(handler_path)
         nc_source = (ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py").read_text(encoding="utf-8")
 
         self.assertIn("track.comment.added", handler_source)
@@ -212,7 +223,10 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertFalse(any("task_sys" in name for name in handler_imports), msg=handler_imports)
         self.assertNotIn("track_id", nc_source)
         self.assertNotIn("comment_id", nc_source)
-        self.assertNotIn("buddyswitch.env.repos.track_comments", nc_source)
+        self.assertNotIn(
+            "buddyswitch.modules.track.private.state.track_comments",
+            nc_source,
+        )
 
     def test_mailbox_exposes_local_trigger_not_business_specific_parent_required_method(self) -> None:
         mailbox_source = (ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py").read_text(encoding="utf-8")

@@ -9,7 +9,9 @@ from typing import Any, TypedDict
 from buddyswitch.runtime_support import env_profiles
 from buddyswitch.env.tool_runtime import registry as tool_registry
 from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.modules.artifact import public as artifact_public
 from buddyswitch.modules.task import public as task_public
+from buddyswitch.modules.track import public as track_public
 from .tool import DEFINITION
 
 
@@ -309,28 +311,6 @@ def _build_source_workspace(
     return source_workspace
 
 
-def _actor_identity_id(current_identity: dict[str, Any]) -> str | None:
-    identity_id = current_identity.get("id") if isinstance(current_identity, dict) else None
-    return identity_id if isinstance(identity_id, str) and identity_id else None
-
-
-def _candidate_track_row(*, track: dict[str, Any], current_identity: dict[str, Any]) -> dict[str, Any]:
-    relation = "owner" if track.get("owner_identity_id") == _actor_identity_id(current_identity) else "collaborator"
-    return {
-        "track_id": track.get("id"),
-        "title": track.get("title"),
-        "outcome": track.get("outcome", ""),
-        "owner_identity_id": track.get("owner_identity_id"),
-        "state": track.get("state"),
-        "now": track.get("now"),
-        "acceptance_criteria": track.get("acceptance_criteria"),
-        "non_goals": track.get("non_goals"),
-        "current_identity_relation": relation,
-        "active_role_relation": relation,
-        "updated_at": track.get("updated_at"),
-    }
-
-
 def _candidate_task_row(*, task: dict[str, Any]) -> dict[str, Any]:
     demand_ref = task.get("demand_ref")
     selection = task.get("selection")
@@ -370,13 +350,6 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
     }
 
 
-def _visible_tracks(*, track_filter: str | None, limit_value: int, context: ContextServiceContext) -> list[dict[str, Any]]:
-    tracks = [row for row in context.repos.track.list_tracks() if row.get("archived_at") is None]
-    if isinstance(track_filter, str) and track_filter.strip():
-        tracks = [row for row in tracks if row.get("id") == track_filter.strip()]
-    return tracks[:limit_value]
-
-
 def _visible_tasks(
     *,
     task_filter: str | None,
@@ -390,136 +363,6 @@ def _visible_tasks(
     if isinstance(task_filter, str) and task_filter.strip():
         tasks = [row for row in tasks if row.get("id") == task_filter.strip()]
     return tasks[:limit_value]
-
-
-def _candidate_artifact_rows(
-    *,
-    track_filter: str | None,
-    active_role: str,
-    limit_value: int,
-    context: ContextServiceContext,
-) -> list[dict[str, Any]]:
-    normalized_track_filter = track_filter.strip() if isinstance(track_filter, str) and track_filter.strip() else None
-    rows: list[dict[str, Any]] = []
-    current_identity = context["current_identity"]
-    for artifact in context.repos.artifact.list_artifacts():
-        decision = context.rules.artifact_visibility.artifact_read_decision(artifact, current_identity)
-        if not bool(decision.get("allowed")):
-            continue
-        if not _context_artifact_row_allowed(
-            artifact=artifact,
-            decision=decision,
-            active_role=active_role,
-            track_filter=normalized_track_filter,
-        ):
-            continue
-        artifact_id = artifact.get("id")
-        if not isinstance(artifact_id, str) or not artifact_id:
-            continue
-        comment_counts = context.rules.artifact_relations.comment_counts_for_artifact(artifact_id)
-        relation_counts = context.rules.artifact_relations.relation_counts_for_artifact(
-            artifact_id=artifact_id,
-            active_role=active_role,
-            current_identity_address=context["current_identity"],
-        )
-        rows.append(
-            context.rules.artifact_visibility.artifact_list_row(
-                artifact,
-                current_identity,
-                comment_counts=comment_counts,
-                relation_counts=relation_counts,
-            )
-        )
-    rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("artifact_id") or "")), reverse=True)
-    return rows[:limit_value]
-
-
-def _context_artifact_row_allowed(
-    *,
-    artifact: dict[str, Any],
-    decision: dict[str, Any],
-    active_role: str,
-    track_filter: str | None,
-) -> bool:
-    relation = decision.get("relation")
-    if isinstance(track_filter, str) and track_filter:
-        if decision.get("track_id") != track_filter:
-            return False
-        return relation in {"track_material", "track_proof"}
-    if relation in {"track_material", "track_proof"}:
-        return True
-    return relation == "owner"
-
-
-def _open_comment_thread_rows(
-    *,
-    visible_track_ids: set[str],
-    limit_value: int,
-    context: ContextServiceContext,
-) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for comment in context.repos.track_comment.list_track_comments():
-        track_id = comment.get("track_id")
-        if not isinstance(track_id, str):
-            continue
-        if track_id not in visible_track_ids:
-            continue
-        thread_id = comment.get("thread_id")
-        if not isinstance(thread_id, str) or not thread_id:
-            continue
-        grouped.setdefault(thread_id, []).append(comment)
-
-    rows: list[dict[str, Any]] = []
-    for thread_id, thread_comments in grouped.items():
-        open_count = sum(1 for row in thread_comments if row.get("status") == "open")
-        if open_count <= 0:
-            continue
-        latest = max(
-            thread_comments,
-            key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")),
-        )
-        rows.append(
-            {
-                "thread_id": thread_id,
-                "track_id": latest.get("track_id"),
-                "latest_comment_id": latest.get("id"),
-                "latest_by_identity_id": latest.get("by_identity_id"),
-                "open_comment_count": open_count,
-                "updated_at": latest.get("created_at"),
-            }
-        )
-    rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("thread_id") or "")), reverse=True)
-    return rows[:limit_value]
-
-
-def _recent_update_rows(
-    *,
-    tracks: list[dict[str, Any]],
-    limit_value: int,
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for track in tracks:
-        track_id = track.get("id")
-        if not isinstance(track_id, str) or not track_id:
-            continue
-        for update in track.get("updates", []):
-            if not isinstance(update, dict):
-                continue
-            refs = update.get("refs")
-            ref_count = len(refs) if isinstance(refs, list) else 0
-            rows.append(
-                {
-                    "track_id": track_id,
-                    "update_id": update.get("id"),
-                    "kind": update.get("kind"),
-                    "summary": update.get("summary"),
-                    "by_identity_id": update.get("by_identity_id"),
-                    "ref_count": ref_count,
-                    "created_at": update.get("created_at"),
-                }
-            )
-    rows.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("update_id") or "")), reverse=True)
-    return rows[:limit_value]
 
 
 def _current_identity_id(context: ContextServiceContext) -> str | None:
@@ -589,37 +432,25 @@ def _current_context_sections(
     limit = args.get("limit")
     limit_value = limit if isinstance(limit, int) and limit > 0 else 20
 
-    visible_tracks = _visible_tracks(
+    track_snapshot = track_public.context_snapshot(
+        current_identity=context["current_identity"],
         track_filter=track_filter if isinstance(track_filter, str) else None,
-        limit_value=limit_value,
-        context=context,
+        limit=limit_value,
     )
-    visible_track_ids = {row.get("id") for row in visible_tracks if isinstance(row.get("id"), str)}
+    visible_tracks = list(track_snapshot.tracks)
     visible_tasks = _visible_tasks(
         task_filter=task_filter if isinstance(task_filter, str) else None,
         limit_value=limit_value,
         context=context,
     )
-    visible_artifacts = _candidate_artifact_rows(
-        track_filter=track_filter if isinstance(track_filter, str) else None,
+    visible_artifacts = artifact_public.list_readable_summaries(
+        current_identity=context["current_identity"],
+        track_id=track_filter if isinstance(track_filter, str) else None,
+        limit=limit_value,
         active_role=active_role,
-        limit_value=limit_value,
-        context=context,
     )
-    visible_artifact_ids = {
-        row.get("artifact_id")
-        for row in visible_artifacts
-        if isinstance(row, dict) and isinstance(row.get("artifact_id"), str)
-    }
-    open_comment_threads = _open_comment_thread_rows(
-        visible_track_ids=visible_track_ids,
-        limit_value=limit_value,
-        context=context,
-    )
-    recent_updates = _recent_update_rows(
-        tracks=visible_tracks,
-        limit_value=limit_value,
-    )
+    open_comment_threads = list(track_snapshot.open_comment_threads)
+    recent_updates = list(track_snapshot.recent_updates)
     current_identity = context.current_identity.to_payload()
     message_cues = _message_cues(limit_value=limit_value, context=context)
     source_workspace = _build_source_workspace(
@@ -630,7 +461,7 @@ def _current_context_sections(
     )
 
     writable_surfaces = _build_writable_surfaces(instance_payload)
-    candidate_tracks = [_candidate_track_row(track=row, current_identity=context["current_identity"]) for row in visible_tracks]
+    candidate_tracks = list(track_snapshot.candidate_tracks)
     candidate_tasks = [_candidate_task_row(task=row) for row in visible_tasks]
 
     return {

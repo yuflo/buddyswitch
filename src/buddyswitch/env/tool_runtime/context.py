@@ -10,23 +10,15 @@ from pathlib import Path
 from typing import Any
 import uuid
 
-from buddyswitch.env.domain import artifact_relations as _artifact_relations_domain
-from buddyswitch.env.domain import artifact_visibility as _artifact_visibility_domain
 from buddyswitch.env.domain import actor_private_workspace as _actor_private_workspace_domain
-from buddyswitch.env.domain import source_refs as _source_ref_domain
-from buddyswitch.env.domain import track_comments as _track_comment_domain
-from buddyswitch.env.domain import track_artifact_relations as _track_artifact_relations_domain
 from buddyswitch.env.domain.identity import ActorIdentityProfile
 from buddyswitch.env.domain.identity import IdentityRef
 from buddyswitch.env.domain.identity import actor_identity
 from buddyswitch.runtime_support import env_profiles
 from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST
-from buddyswitch.env.repos import artifacts as _artifact_repo
 from buddyswitch.env.repos import actor_private_files as _actor_private_repo
 from buddyswitch.env.repos import messages as _message_repo
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.repos import track_comments as _track_comment_repo
-from buddyswitch.env.repos import tracks as _track_repo
 from buddyswitch.env.tool_runtime import daemon_client
 from buddyswitch.env.tool_runtime import im_actor_delivery
 from buddyswitch.env.tool_runtime import role_auth as _role_auth
@@ -44,128 +36,6 @@ def _load_registry_module():
 
 class RuntimeObjectAccess:
     """Concrete runtime-object helpers for tool implementations."""
-
-    def list_tracks(self) -> list[dict[str, Any]]:
-        return _track_repo.list_tracks()
-
-    def create_track(self, track_id: str, title: str, outcome: str, owner_identity: dict[str, Any], now: dict[str, Any]) -> dict[str, Any]:
-        return _track_repo.create_track(
-            track_id,
-            title,
-            outcome=outcome,
-            owner_identity=owner_identity,
-            now=now,
-        )
-
-    def get_track(self, track_id: str) -> dict[str, Any] | None:
-        return _track_repo.get_track(track_id)
-
-    def update_track_status(self, track_id: str, now: dict[str, Any], state: str) -> dict[str, Any]:
-        return _track_repo.update_track(track_id, {"now": now, "state": state})
-
-    def add_track_material(self, track_id: str, artifact_id: str, label: str, summary: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        result = _track_artifact_relations_domain.add_material_relation(
-            track_id=track_id,
-            artifact_id=artifact_id,
-            label=label,
-            from_identity={"id": "act-pm-system", "type": "actor"},
-            summary=summary,
-        )
-        return result["track"], result["artifact"]
-
-    def add_track_update(self, track_id: str, summary: str, kind: str, refs: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
-        return _track_repo.append_track_update(
-            track_id=track_id,
-            by_identity={"id": "act-pm-system", "type": "actor"},
-            kind=kind,
-            summary=summary,
-            refs=refs,
-        )
-
-    def add_track_proof(self, track_id: str, artifact_id: str, label: str, summary: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        result = _track_artifact_relations_domain.add_proof_relation(
-            track_id=track_id,
-            artifact_id=artifact_id,
-            label=label,
-            from_identity={"id": "act-pm-system", "type": "actor"},
-            summary=summary,
-        )
-        return result["track"], result["artifact"]
-
-    def archive_track(self, track_id: str) -> dict[str, Any]:
-        return _track_repo.update_track(track_id, {"archived_at": runtime_files.now_iso()})
-
-    def get_artifact(self, artifact_id: str) -> dict[str, Any] | None:
-        return _artifact_repo.get_artifact(artifact_id)
-
-    def create_artifact_revision(
-        self,
-        artifact_id: str | None,
-        title: str,
-        summary: str,
-        template: str,
-        body: str,
-        source_refs: list[dict[str, Any]] | None,
-        read_claim: str | None,
-        track_id: str | None,
-        publish_as: str | None,
-        label: str | None,
-    ) -> dict[str, Any]:
-        del read_claim, track_id, publish_as, label
-        return _artifact_repo.create_artifact_revision(
-            artifact_id=artifact_id,
-            title=title,
-            created_by_identity={"id": "act-pm-system", "type": "actor"},
-            body=body,
-            template=template,
-            summary=summary,
-            source_refs=source_refs,
-        )
-
-    def update_artifact_metadata(
-        self,
-        artifact_id: str,
-        title: str | None,
-        summary: str | None,
-        template: str | None,
-        body: str | None,
-        source_refs: list[dict[str, Any]] | None,
-        read_claim: str | None,
-    ) -> dict[str, Any]:
-        del read_claim
-        patch: dict[str, Any] = {}
-        if title is not None:
-            patch["title"] = title
-        if summary is not None:
-            patch["summary"] = summary
-        if template is not None:
-            patch["template"] = template
-        if body is not None:
-            patch["body"] = body
-        if source_refs is not None:
-            patch["source_refs"] = source_refs
-        return _artifact_repo.update_artifact(artifact_id, patch)
-
-    def add_track_comment(
-        self,
-        track_id: str,
-        content: str,
-        reply_to: str | None,
-        mentioned_actors: list[dict[str, Any]] | None,
-    ) -> dict[str, Any]:
-        return _track_comment_repo.create_track_comment(
-            track_id=track_id,
-            by_identity={"id": "act-pm-system", "type": "actor"},
-            content=content,
-            reply_to=reply_to,
-            mentioned_identities=mentioned_actors,
-        )
-
-    def list_track_comments(self, track_id: str, status: str | None) -> list[dict[str, Any]]:
-        rows = _track_comment_repo.comments_for_track(track_id)
-        if isinstance(status, str) and status.strip():
-            rows = [row for row in rows if row.get("status") == status]
-        return rows
 
     def runtime_sources(self) -> dict[str, Any]:
         return {
@@ -392,24 +262,16 @@ class ImActorDeliveryAccess:
 class DomainAccess:
     """Host-owned domain validator/normalizer access."""
 
-    artifact_relations: Any = field(default_factory=lambda: _artifact_relations_domain)
-    artifact_visibility: Any = field(default_factory=lambda: _artifact_visibility_domain)
     actor_private_workspace: Any = field(default_factory=lambda: _actor_private_workspace_domain)
-    source_refs: Any = field(default_factory=lambda: _source_ref_domain)
-    track_comment: Any = field(default_factory=lambda: _track_comment_domain)
-    track_artifact_relations: Any = field(default_factory=lambda: _track_artifact_relations_domain)
 
 
 @dataclass(frozen=True)
 class RepoAccess:
     """Host-owned repository and runtime-file access."""
 
-    artifact: Any = field(default_factory=lambda: _artifact_repo)
     actor_private: Any = field(default_factory=lambda: _actor_private_repo)
     message: Any = field(default_factory=lambda: _message_repo)
     runtime_files: Any = field(default_factory=lambda: runtime_files)
-    track_comment: Any = field(default_factory=lambda: _track_comment_repo)
-    track: Any = field(default_factory=lambda: _track_repo)
 
 
 @dataclass(frozen=True)

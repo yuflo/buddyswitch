@@ -1,7 +1,7 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `TRACK–ARTIFACT READY`
-> Executable packet: `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01`
+> Stage state: `TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY`
+> Executable packet: none
 > Other lanes: `PREPARATION ONLY`
 > Merge unit: one accepted lane at a time
 
@@ -29,7 +29,11 @@ Context still require later refreshed packets and READY reviews.
 12. `track-artifact/S4-TRACK-ARTIFACT-OWNER-CONSUMER-MANIFEST.md`;
 13. `track-artifact/S4-TRACK-ARTIFACT-IMPLEMENTATION-PLAN.md`;
 14. `track-artifact/S4-TRACK-ARTIFACT-READY-REVIEW.md`;
-15. `track-artifact/S4-TRACK-ARTIFACT-GOAL-PACKET.md`.
+15. `track-artifact/S4-TRACK-ARTIFACT-GOAL-PACKET.md`;
+16. `track-artifact/S4-TRACK-ARTIFACT-R2-READY-REVIEW.md`;
+17. `track-artifact/S4-TRACK-ARTIFACT-R2-CONTINUATION-PLAN.md`;
+18. `track-artifact/S4-TRACK-ARTIFACT-R2-GOAL-PACKET.md`;
+19. `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -39,8 +43,8 @@ adds current-source execution facts; it does not broaden S4.
 | Lane | Current state | Blocking or selected boundary |
 |---|---|---|
 | Search | ACCEPTED | `search/S4-SEARCH-ACCEPTANCE.md` |
-| Track | READY WITH ARTIFACT | owns relations; consumes two injected Artifact Public callables |
-| Artifact | READY WITH TRACK | owns content/read policy; reads Track Public |
+| Track | ACCEPTED WITH ARTIFACT | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
+| Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Communication | PREPARATION ONLY | iMessage worker lifecycle contribution |
 | Evidence | PREPARATION ONLY | accepted Artifact Public and Browser foundation input |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
@@ -53,17 +57,23 @@ proof. All Search packets are consumed. No later lane may reuse a Search
 packet; the coordinating hub refreshes source and issues a new packet after
 accepting each lane.
 
-## Current atomic lane acceptance sentence
+Track and Artifact were cut over atomically while remaining two independent
+modules. R1 supplied the product candidate and behavior evidence. Coordinating
+review found that ten cross-component tests had been placed under a module and
+that the architecture proofs skipped module test roots. R2 corrected only that
+test topology, machine-enforced D-020, and passed exact, affected and one new
+frozen FINAL. Both packets are consumed.
 
-> Track and Artifact become two physically independent product modules selected
-> once by application composition. Track remains the sole owner of Track state,
-> comments, updates, Artifact relations and lifecycle invariants. Artifact
-> remains the sole owner of Artifact content, revisions, attachments, templates
-> and read policy. Existing product behavior, durable object formats, external
-> interfaces, failure effects and operational results remain unchanged.
+## Next-lane admission rule
+
+The next lane is not selected from the old source snapshot. The coordinating
+hub first refreshes the committed Communication, Evidence and Context owners,
+representations, host contracts, tests and runtime identity. It then selects
+one lane whose boundary is complete and passes a new source-bound READY review.
 
 ## Checkpoint protocol
 
-Only `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01` is authorized. It does not
-authorize Communication, Evidence or Context component migration, S5, Git
-integration or master-truth closure.
+No executable packet is currently authorized. Track–Artifact acceptance
+authorizes only its Git checkpoint and source refresh for the remaining S4
+lanes. It does not authorize Communication, Evidence or Context implementation,
+S5, S6 or S7.

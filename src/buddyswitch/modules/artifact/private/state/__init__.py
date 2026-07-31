@@ -1,0 +1,1 @@
+"""Artifact-owned durable state."""

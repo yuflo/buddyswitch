@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from buddyswitch.env.domain import track_artifact_relations
-from buddyswitch.env.repos import artifacts, track_comments, tracks
+from buddyswitch.modules.artifact.private.state import artifacts
+from buddyswitch.modules.track.private.domain import track_artifact_relations
+from buddyswitch.modules.track.private.state import track_comments, tracks
+from buddyswitch.modules.artifact import public as artifact_public
 
 
 KNOWN_ROLE_IDS = frozenset({"pm", "design", "dev", "market", "test"})
@@ -101,6 +103,7 @@ def publish_track_material(
         label=label,
         from_identity=role_identity_id(from_role),
         summary=summary,
+        resolve_publication_candidate=artifact_public.resolve_publication_candidate,
     )
     return result["track"], result["artifact"], result["superseded_artifact_id"]
 
@@ -119,6 +122,7 @@ def publish_track_proof(
         label=label,
         from_identity=role_identity_id(from_role),
         summary=summary,
+        resolve_publication_candidate=artifact_public.resolve_publication_candidate,
     )
     return result["track"], result["artifact"], result["superseded_artifact_id"]
 

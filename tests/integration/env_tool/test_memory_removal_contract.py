@@ -15,13 +15,13 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_cleanup  # noqa: E402
-from buddyswitch.env.repos import artifacts as artifact_repo
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.repos import track_comments as track_comment_repo
-from buddyswitch.env.repos import tracks as track_repo
+from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
+from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
+from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-from buddyswitch.env.domain import source_refs  # noqa: E402
+from buddyswitch.modules.artifact.private.domain import source_refs  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"

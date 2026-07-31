@@ -104,7 +104,9 @@ def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -
         "buddyswitch.config",
         "buddyswitch.contracts",
         "buddyswitch.launcher",
+        "buddyswitch.modules.artifact",
         "buddyswitch.modules.demand",
+        "buddyswitch.modules.track",
         "buddyswitch.skills",
     }
     patterns = {
@@ -240,6 +242,16 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/modules/search/private/adapters/tool/tool.py",
             "src/buddyswitch/modules/search/private/adapters/tool/_impl.py",
             "src/buddyswitch/modules/search/tests/integration",
+        ),
+        REPO_ROOT / "docs" / "arch" / "track-capability-architecture.md": (
+            "src/buddyswitch/modules/track/",
+            "buddyswitch/objects/tracks",
+            "buddyswitch/objects/track-comments",
+        ),
+        REPO_ROOT / "docs" / "arch" / "artifact-capability-architecture.md": (
+            "src/buddyswitch/modules/artifact/",
+            "buddyswitch/objects/artifacts",
+            "buddyswitch/objects/artifact-attachments",
         ),
     }
     missing_required_paths = sorted(

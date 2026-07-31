@@ -30,8 +30,8 @@ class RuntimeSkillsTests(unittest.TestCase):
         "--target-id",
     )
     SHARED_TOOL_SKILLS = {
-        "track": ROOT / "src/buddyswitch/skills/shared/track-tool/SKILL.md",
-        "artifact": ROOT / "src/buddyswitch/skills/shared/artifact-tool/SKILL.md",
+        "track": ROOT / "src/buddyswitch/modules/track/skills/track-tool/SKILL.md",
+        "artifact": ROOT / "src/buddyswitch/modules/artifact/skills/artifact-tool/SKILL.md",
     }
     DEV_PRODUCT_SKILLS = (
         "enter-dev-workspace",
@@ -129,7 +129,12 @@ class RuntimeSkillsTests(unittest.TestCase):
         return self._dev_skill_file(skill_id).read_text(encoding="utf-8").lower()
 
     def _pm_skill_file(self, skill_id: str) -> Path:
-        return ROOT / "src" / "buddyswitch" / "skills" / "pm" / skill_id / "SKILL.md"
+        skill = next(
+            row
+            for row in self.manifest["skills"]
+            if row["id"] == skill_id
+        )
+        return ROOT / "src" / "buddyswitch" / skill["path"] / "SKILL.md"
 
     def _pm_role(self) -> dict:
         return next(
@@ -481,7 +486,9 @@ class RuntimeSkillsTests(unittest.TestCase):
 
     def test_track_shared_tool_skill_stays_atomic(self) -> None:
         """MCT-SURF-006: Track skill does not teach non-goal features."""
-        track_skill = (ROOT / "src/buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8").lower()
+        track_skill = (
+            ROOT / "src/buddyswitch/modules/track/skills/track-tool/SKILL.md"
+        ).read_text(encoding="utf-8").lower()
         non_goals = ["broadcast", "read receipt", "read_receipt", "handoff", "edit", "delete", "reopen", "task comment", "whiteboard"]
         self.assertIn("env.tool", track_skill)
         self.assertIn("context.get.tool_catalog", track_skill)
@@ -717,8 +724,12 @@ class RuntimeSkillsTests(unittest.TestCase):
             self._pm_skill_file(skill_id).read_text(encoding="utf-8").lower()
             for skill_id in self.PM_PRODUCT_SKILLS
         )
-        artifact_skill = (ROOT / "src/buddyswitch/skills/shared/artifact-tool/SKILL.md").read_text(encoding="utf-8").lower()
-        track_skill = (ROOT / "src/buddyswitch/skills/shared/track-tool/SKILL.md").read_text(encoding="utf-8").lower()
+        artifact_skill = (
+            ROOT / "src/buddyswitch/modules/artifact/skills/artifact-tool/SKILL.md"
+        ).read_text(encoding="utf-8").lower()
+        track_skill = (
+            ROOT / "src/buddyswitch/modules/track/skills/track-tool/SKILL.md"
+        ).read_text(encoding="utf-8").lower()
 
         self.assertNotIn("published_to_track", pm_skill)
         self.assertNotIn("content.prd", pm_skill)

@@ -17,7 +17,17 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 NC_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py"
 MESSAGE_INBOUND_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "message_inbound.py"
-TRACK_COMMENT_INBOUND_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_inbound.py"
+TRACK_COMMENT_INBOUND_PATH = (
+    ROOT
+    / "src"
+    / "buddyswitch"
+    / "modules"
+    / "track"
+    / "private"
+    / "adapters"
+    / "daemon"
+    / "track_comment_inbound.py"
+)
 DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 MODULE_COUNTER = count()
 
@@ -25,9 +35,8 @@ MODULE_COUNTER = count()
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    return importlib.reload(
-        importlib.import_module(f"buddyswitch.launcher.{path.stem}")
-    )
+    module_name = ".".join(path.relative_to(ROOT / "src").with_suffix("").parts)
+    return importlib.reload(importlib.import_module(module_name))
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -199,7 +208,7 @@ class NotificationCenterTests(unittest.TestCase):
             "notification.archive",
             "nc.notification",
             "buddyswitch.env.repos.messages",
-            "buddyswitch.env.repos.track_comments",
+            "buddyswitch.modules.track.private.state.track_comments",
         ]
 
         for token in forbidden_tokens:
@@ -211,7 +220,10 @@ class NotificationCenterTests(unittest.TestCase):
         self.assertNotIn("track_comment_added_handler", imports)
         self.assertNotIn("buddyswitch.env.domain.messages", imports)
         self.assertNotIn("buddyswitch.env.repos.messages", imports)
-        self.assertNotIn("buddyswitch.env.repos.track_comments", imports)
+        self.assertNotIn(
+            "buddyswitch.modules.track.private.state.track_comments",
+            imports,
+        )
 
     def test_message_inbound_registers_im_message_created_as_source_owned_handler(self) -> None:
         nc = load_module(NC_PATH)

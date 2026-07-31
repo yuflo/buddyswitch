@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 
 from .tool import DEFINITION
 from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.modules.artifact import public as artifact_public
 
 
 _ACTION_DEFINITION_MAP = {
@@ -142,20 +143,23 @@ def _resolve_target(
     active_role: str,
     action: str,
     context: EvidenceServiceContext,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[object | None, dict[str, Any] | None]:
     if target_type == "artifact":
-        artifact = context.repos.artifact.get_artifact(target_id)
-        if artifact is None:
+        current_identity = context["current_identity"]
+        active_identity_id = current_identity.get("id") if isinstance(current_identity, dict) else None
+        try:
+            target = artifact_public.resolve_evidence_target(
+                target_id,
+                str(active_identity_id or ""),
+            )
+        except artifact_public.ArtifactNotFound:
             return None, _reject_payload(
                 action=action,
-                current_identity=context["current_identity"],
+                current_identity=current_identity,
                 active_role=active_role,
                 message=f"artifact not found: {target_id}",
             )
-        current_identity = context["current_identity"]
-        active_identity_id = current_identity.get("id") if isinstance(current_identity, dict) else None
-        authors = artifact.get("author_identity_ids") if isinstance(artifact.get("author_identity_ids"), list) else []
-        if active_identity_id not in [row for row in authors if isinstance(row, str)]:
+        except artifact_public.ArtifactOwnershipDenied:
             return None, _reject_scope(
                 action=action,
                 current_identity=current_identity,
@@ -164,7 +168,7 @@ def _resolve_target(
                 code="E_EVIDENCE_TARGET_SCOPE",
                 message=f"artifact '{target_id}' is not authored by the active actor",
             )
-        return artifact, None
+        return target, None
     return None, _reject_scope(
         action=action,
         current_identity=context["current_identity"],

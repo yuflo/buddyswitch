@@ -4,15 +4,15 @@
 
 | Field | Current value |
 |---|---|
-| Evidence baseline | Search direct `6701c80ce5444a80bfd91b448d082d2b`, affected `d1d75714466b4bf390812aaeb60ff526`, frozen FINAL `7ecfb65c5e0643c6b112cc8af3c7e98b` |
+| Evidence baseline | Track–Artifact product direct `70b6dff13d724f6183c1868718ac1fb5`, affected `5afac5b2466e4c759e1bafc00a4e2c14`; R2 architecture exact `65c9520b0b984c639cb49aa5bc18959b`, affected `034adb94a4fc43adb88ee73123909968`, frozen FINAL `83f35f08d4de4f4fb211314b936e5e3f` |
 | Active stage | S4 — Independent Component Waves / next lane preparation |
-| State | SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY |
+| State | TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY |
 | Runtime migration authorized | none |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | checkpoint Search, refresh remaining lane boundaries, READY-review one next lane |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task and Search modules |
+| Next gate | checkpoint Track–Artifact, refresh Communication/Evidence/Context boundaries, READY-review one next lane |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track and Artifact modules |
 
 ## Stage ledger
 
@@ -22,7 +22,7 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY | S3 | coordinating hub | source refresh and one next-lane READY review |
+| S4 Component waves | TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY | S3 | coordinating hub | source refresh and one next-lane READY review |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -280,6 +280,35 @@ continued the unchanged candidate, passed direct
 `7ecfb65c5e0643c6b112cc8af3c7e98b`. Search is accepted in
 `S4-SEARCH-ACCEPTANCE.md`; all Search packets are consumed.
 
+The post-Search source refresh proved that Track and Artifact must cut over as
+one atomic candidate while remaining two independent final modules. Direct
+Public imports in both directions would create a cycle, so the accepted design
+keeps Artifact's read-only relation dependencies on Track Public and gives
+Track two consumer-owned callable input ports injected from Artifact Public.
+The same refresh proved the earned `inbound_sources` contribution for the
+current Track comment source, with the generic Daemon remaining product
+neutral.
+
+Packet `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01` produced the complete product
+candidate and passed direct `70b6dff13d724f6183c1868718ac1fb5`, affected
+`5afac5b2466e4c759e1bafc00a4e2c14` and frozen FINAL
+`09d7540e94b24d06bcf7157a6ddc39af`. Hub review did not accept that FINAL as
+lane closure because ten cross-component tests were physically located under
+one module while importing another module's Private implementation, and the
+new architecture proofs skipped module test roots. The R1 preparation
+manifest had contradicted accepted D-020.
+
+R2 retired that false physical ownership without changing product source. It
+left three true single-module tests under their module roots, returned the ten
+cross-component tests to root tiers and made cross-module Private imports from
+module-local tests machine-forbidden. Architecture RED
+`b59e5b1825bf4bde9dcca817dd5d2ba5` reproduced the escaped topology; exact
+GREEN `65c9520b0b984c639cb49aa5bc18959b`, affected
+`034adb94a4fc43adb88ee73123909968` and one new frozen FINAL
+`83f35f08d4de4f4fb211314b936e5e3f` passed with clean runtime and resource
+state. Track–Artifact is accepted in
+`track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`; both packets are consumed.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -314,6 +343,10 @@ continued the unchanged candidate, passed direct
 | 2026-07-30 | S4 Search | REPLANNING | READY — SEARCH R1 LANE ONLY | coordinating hub | representation audit completed, missing baseline passed, GREEN refactor entry, one initial activation boundary and one bounded classified FIX_AFTER_FINAL policy frozen |
 | 2026-07-30 | S4 Search | READY — SEARCH R1 LANE ONLY | READY — SEARCH R2 CONTINUATION ONLY | coordinating hub | R1 coherent candidate preserved; invalid immutable parent-directory command diagnosed before collection; D-051 assigns bounded execution mechanics to the executor and R2 resumes at proof |
 | 2026-07-30 | S4 Search | READY — SEARCH R2 CONTINUATION ONLY | ACCEPTED | coordinating hub | exact candidate/runtime identity reproduced; direct, affected and single frozen FINAL passed; one physical owner, one explicit registration, retired package and host placeholder absence accepted |
+| 2026-07-30 | S4 Track–Artifact | SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY | READY — TRACK–ARTIFACT R1 ONLY | coordinating hub | current-source owner/consumer audit proved one atomic candidate, acyclic Public/input-port graph, earned inbound contribution, representation-complete write set and final-topology preflight |
+| 2026-07-31 | S4 Track–Artifact | READY — TRACK–ARTIFACT R1 ONLY | REPLANNING — TEST BOUNDARY | coordinating hub | product candidate and FINAL passed, but hub review found cross-component tests under module roots and architecture proof excluding those roots; R1 packet consumed |
+| 2026-07-31 | S4 Track–Artifact | REPLANNING — TEST BOUNDARY | READY — TRACK–ARTIFACT R2 CONTINUATION ONLY | coordinating hub | product source frozen; exact ten-test root disposition, three module-local tests, architecture RED and topology-only FIX_AFTER_FINAL packet reviewed |
+| 2026-07-31 | S4 Track–Artifact | READY — TRACK–ARTIFACT R2 CONTINUATION ONLY | ACCEPTED | coordinating hub | candidate/runtime identities reproduced; architecture RED/GREEN, affected proof and one new frozen FINAL passed; product modules and test ownership accepted |
 
 ## Checkpoint record
 
@@ -347,6 +380,9 @@ continued the unchanged candidate, passed direct
 | 2026-07-30 | S4 Search R1 handoff | READY | affected `b96f488146524dbc97eb14463aea7780`; mutable-consumer `978b8137549e47bf9542e69b2045e2d6`; representation `c50a7fce15e94e0b902f7478abccf6ca`; shared response `d0414c37f2a64ca7a1aa0c1c5de1866c`; preflight `S4SEARCHP-20260730-02`; packet `BS-MM-S4-SEARCH-R1-20260730-01` | user starts one independent Search task; hub pauses without polling |
 | 2026-07-30 | S4 Search R1 return / R2 handoff | READY — CONTINUATION ONLY | `S4-SEARCH-R1-RETURN-REVIEW.md`; preserved tracked patch `144a55b0…`; no-collection run `69e82249c86343c19bf4bf792b2bb151`; D-051; packet `BS-MM-S4-SEARCH-R2-20260730-01` | preserve candidate and resume at executor-selected direct/affected proof, then frozen FINAL |
 | 2026-07-30 | S4 Search acceptance | ACCEPTED | `S4-SEARCH-ACCEPTANCE.md`; direct `6701c80ce5444a80bfd91b448d082d2b`; affected `d1d75714466b4bf390812aaeb60ff526`; FINAL `7ecfb65c5e0643c6b112cc8af3c7e98b` | checkpoint Search, then refresh remaining S4 lanes; do not resume Search packets |
+| 2026-07-30 | S4 Track–Artifact handoff | READY | `track-artifact/S4-TRACK-ARTIFACT-READY-REVIEW.md`; packet `BS-MM-S4-TRACK-ARTIFACT-R1-20260730-01` | user starts one independent atomic product-lane task; hub pauses without polling |
+| 2026-07-31 | S4 Track–Artifact R1 return / R2 handoff | READY — TEST-BOUNDARY CONTINUATION ONLY | preserved R1 product candidate; R1 FINAL `09d7540e94b24d06bcf7157a6ddc39af`; `S4-TRACK-ARTIFACT-R2-READY-REVIEW.md`; packet `BS-MM-S4-TRACK-ARTIFACT-R2-20260731-01` | preserve product source, correct test topology and architecture proof only, then one FIX_AFTER_FINAL cycle |
+| 2026-07-31 | S4 Track–Artifact acceptance | ACCEPTED | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`; product direct `70b6dff13d724f6183c1868718ac1fb5`; product affected `5afac5b2466e4c759e1bafc00a4e2c14`; R2 exact `65c9520b0b984c639cb49aa5bc18959b`; affected `034adb94a4fc43adb88ee73123909968`; FINAL `83f35f08d4de4f4fb211314b936e5e3f` | checkpoint Track–Artifact, then refresh Communication/Evidence/Context; do not resume either packet |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -369,10 +405,10 @@ Stop/replan condition:
 
 ```text
 Stage: S4
-Master state: SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY
+Master state: TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY
 Goal Packet: none
 Execution session: none
-Last hub checkpoint: Search R2 accepted with one frozen FINAL
-Next action: commit/push Search acceptance checkpoint, then refresh remaining lane boundaries
+Last hub checkpoint: Track–Artifact R2 accepted with one frozen FINAL
+Next action: commit/push Track–Artifact acceptance checkpoint, then refresh Communication/Evidence/Context boundaries
 No-polling state: not entered; no next-lane packet exists
 ```

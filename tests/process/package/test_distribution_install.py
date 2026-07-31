@@ -13,7 +13,8 @@ from tests.support.paths import REPO_ROOT
 REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/catalog/manifest.toml",
     "buddyswitch/catalog/env-profiles/dev.json",
-    "buddyswitch/config/artifact-selection-v2.json",
+    "buddyswitch/modules/artifact/assets/artifact-selection-v1.json",
+    "buddyswitch/modules/artifact/assets/artifact-selection-v2.json",
     "buddyswitch/contracts/schemas/dev/dev-result.json",
     "buddyswitch/launcher/assets/roles/dev/AGENTS.md",
     "buddyswitch/launcher/assets/web-management/index.html",
@@ -23,6 +24,9 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/launcher/assets/web-management/vendor/markdown-it/LICENSE",
     "buddyswitch/modules/demand/skills/demand-triage/SKILL.md",
     "buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md",
+    "buddyswitch/modules/artifact/skills/artifact-tool/SKILL.md",
+    "buddyswitch/modules/track/skills/track-tool/SKILL.md",
+    "buddyswitch/modules/track/skills/triage-track/SKILL.md",
     "buddyswitch/skills/dev/implement-scoped-change/SKILL.md",
 }
 

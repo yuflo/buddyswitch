@@ -38,8 +38,8 @@ Statuses:
 |---|---|---|---|
 | R-DEMAND-001 | CLOSED — Demand domain/state/adapters/assets/Skills/tests physically aggregated under one Demand root and selected once by application composition | S2 | `02-demand-component-pilot-plan/S2-ACCEPTANCE.md`; one owner/Public/state path and retired Demand paths absent |
 | R-TASK-001 | CLOSED — Task state, Tool, Goal adapters, CLI/Web/cleanup contributions and owning tests are physically aggregated under one Task root and selected once by application composition | S3 | `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`; one owner/Public/state path, exact acyclic Demand collaboration and retired Task paths absent |
-| R-TRACK-001 | scattered Track/comment/repo/Tool/inbound/Skill/tests | S4 Track | one Track root/assembly |
-| R-ARTIFACT-001 | scattered Artifact/relation/visibility/config/Tool/Skill/tests | S4 Artifact | one Artifact root/assembly |
+| R-TRACK-001 | CLOSED — Track state, domain, Tool, inbound, CLI/Web projections, Skills and owning tests have one module root and one explicit assembly | S4 Track | `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
+| R-ARTIFACT-001 | CLOSED — Artifact state, domain, Tool, selection assets, Skill and owning tests have one module root and one explicit assembly | S4 Artifact | `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | R-COMM-001 | scattered Message/IM/service/Tool/inbound/session/channel/worker/tests | S4 Communication | one Communication root and worker contribution |
 | R-SEARCH-001 | CLOSED — Search Tool and owning tests are physically aggregated, explicitly composed once, and the dynamic package plus generic host placeholder are absent | S4 Search | `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` |
 | R-EVIDENCE-001 | Evidence Tool/capability mixed with Artifact/browser context | S4 Evidence | one capability plus Artifact Public |
@@ -49,18 +49,18 @@ Statuses:
 
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
-| R-FND-001 | Demand and Task portions CLOSED; fine-grained imports for unmigrated products remain in host entrypoints | S2–S5 | S2/S3 acceptance; later component registrations only and no product import |
-| R-FND-002 | Demand, Task and Search portions CLOSED through explicit fail-closed registration; global scanner remains for unmigrated Tools | S2–S5 | S2/S3/Search acceptance; final explicit Tool registrations in S5 |
-| R-FND-003 | Demand, Task and Search-private portions CLOSED; broad product-aware ToolContext remains for unmigrated products | S2–S5 | S2/S3/Search acceptance; final host facts/injected Public capabilities in S5 |
-| R-FND-004 | Task Actor Console portion CLOSED through one typed section contribution; other product routes/projections and retry coupling remain in Web implementation | S2–S5 | S3 acceptance for Task; WebHost plus remaining owner contributions |
+| R-FND-001 | Demand, Task, Track and Artifact portions CLOSED; fine-grained imports for unmigrated products remain in host entrypoints | S2–S5 | S2/S3/Track–Artifact acceptance; later component registrations only and no product import |
+| R-FND-002 | Demand, Task, Search, Track and Artifact portions CLOSED through explicit fail-closed registration; global scanner remains for unmigrated Tools | S2–S5 | accepted component lanes; final explicit Tool registrations in S5 |
+| R-FND-003 | Demand, Task, Search, Track and Artifact private portions CLOSED; broad product-aware ToolContext remains for unmigrated products | S2–S5 | accepted component lanes; final host facts/injected Public capabilities in S5 |
+| R-FND-004 | Task and Track Actor Console portions CLOSED through typed section contributions; other product routes/projections and retry coupling remain in Web implementation | S2–S5 | S3/Track–Artifact acceptance; WebHost plus remaining owner contributions |
 | R-FND-005 | iMessage worker lifetime hidden in WebHost | S4 Communication | Communication lifecycle contribution |
-| R-FND-006 | Demand and Task portions CLOSED through owner CLI contributions; switches for unmigrated products remain | S2–S5 | S2/S3 acceptance; remaining owner command contributions |
+| R-FND-006 | Demand, Task and Track portions CLOSED through owner CLI contributions; switches for unmigrated products remain | S2–S5 | S2/S3/Track–Artifact acceptance; remaining owner command contributions |
 | R-FND-007 | Browser ownership fragmented across lifecycle/Daemon/Broker/proxy | S1/S5 | one Actor browser-runtime owner |
-| R-FND-008 | Demand and Task portions CLOSED through typed cleanup contributions; attribution for unmigrated products remains | S2–S5 | S2/S3 acceptance; remaining module cleanup contributions |
+| R-FND-008 | Demand, Task, Track and Artifact portions CLOSED through typed cleanup contributions; attribution for unmigrated products remains | S2–S5 | accepted component lanes; remaining module cleanup contributions |
 | R-FND-009 | Identity spread across product/daemon/Web/IM | S1/S5 | foundation Identity owner |
 | R-FND-010 | Actor-private/source-reference primitives mixed into product ToolContext | S1/S5 | exact foundation value/capability boundaries |
-| R-FND-011 | Demand, Task and Search portions CLOSED with module-boundary proof; old technical-root enumeration remains for unmigrated components | S1–S5 | S2/S3/Search acceptance; generic final dependency/topology proofs |
-| R-FND-012 | Demand, Task and Search obsolete paths CLOSED; empty/obsolete technical paths for unmigrated components remain | owning stage/S5 | S2/S3/Search acceptance; later owner-stage absence proof |
+| R-FND-011 | Demand, Task, Search, Track and Artifact portions CLOSED with module-boundary proof; old technical-root enumeration remains for unmigrated components | S1–S5 | accepted component lanes; generic final dependency/topology proofs |
+| R-FND-012 | Demand, Task, Search, Track and Artifact obsolete paths CLOSED; empty/obsolete technical paths for unmigrated components remain | owning stage/S5 | accepted component lanes; later owner-stage absence proof |
 
 ## Role residue
 
@@ -78,8 +78,8 @@ Statuses:
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
 | R-DOC-001 | CLOSED — current architecture paths match accepted S1 installed-package truth | S1 | `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md` |
-| R-DOC-002 | Demand, Task and Search paths CLOSED; other current component paths remain | S2–S4 | S2/S3/Search acceptance; later owner cutovers |
-| R-DOC-003 | Demand and Task contribution wording CLOSED; remaining Daemon/Web/foundation composition wording awaits final host truth | S5 | S2/S3 acceptance portions; S5 final host truth |
+| R-DOC-002 | Demand, Task, Search, Track and Artifact paths CLOSED; other current component paths remain | S2–S4 | accepted component lanes; later owner cutovers |
+| R-DOC-003 | Demand, Task and Track contribution wording CLOSED; remaining Daemon/Web/foundation composition wording awaits final host truth | S5 | accepted component lanes; S5 final host truth |
 | R-DOC-004 | root stable Role/manifest paths | S6 | final RoleHost paths |
 | R-DOC-005 | migration instructions presented as current policy after completion | S7 | historical-only state |
 

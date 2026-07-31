@@ -86,6 +86,7 @@ def test_demand_is_one_passive_module_selected_once_by_application_composition()
         "skills",
         "cleanup",
         "actor_console_sections",
+        "inbound_sources",
     ]
 
     composition_imports = _imports(APPLICATION_COMPOSITION)
@@ -238,7 +239,10 @@ def test_hosts_receive_typed_contributions_and_consumers_use_demand_public() -> 
 
     consumers = (
         Path("src/buddyswitch/launcher/im_wake_handler.py"),
-        Path("src/buddyswitch/launcher/track_comment_added_handler.py"),
+        Path(
+            "src/buddyswitch/modules/track/private/adapters/daemon/"
+            "track_comment_added_handler.py"
+        ),
     )
     for relative in consumers:
         imports = _imports(relative)
@@ -445,7 +449,10 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
     assert "DemandOrchestrationHandler" not in instance_daemon_source
     assert "DaemonHandlerRegistration" in instance_daemon_source
 
-    track_handler = Path("src/buddyswitch/launcher/track_comment_added_handler.py")
+    track_handler = Path(
+        "src/buddyswitch/modules/track/private/adapters/daemon/"
+        "track_comment_added_handler.py"
+    )
     track_imports = _imports(track_handler)
     track_source = (REPO_ROOT / track_handler).read_text(encoding="utf-8")
     actor_session = (REPO_ROOT / "src/buddyswitch/launcher/actor_session.py").read_text(encoding="utf-8")

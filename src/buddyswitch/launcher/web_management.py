@@ -26,13 +26,13 @@ from buddyswitch.launcher import im_http_router
 from buddyswitch.launcher import imessage_channel
 from buddyswitch.launcher import host_control as host_control_module
 from buddyswitch.launcher import cli_contract
-from buddyswitch.env.domain import track_read
 from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
 from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.tool_runtime import daemon_client
 from buddyswitch.env.tool_runtime import im_actor_delivery
 from buddyswitch.launcher import external_im_session
 from buddyswitch.launcher.web_contracts import ActorConsoleSectionRegistration
+from buddyswitch.modules.track import public as track_public
 
 
 STATIC_ROOT = HELPER_DIR / "assets" / "web-management"
@@ -398,11 +398,11 @@ class WebManagementService:
         if method == "GET" and actor_console_id is not None:
             return 200, {"ok": True, "console": self._actor_console(actor_console_id)}
         if method == "GET" and route == "/api/tracks":
-            return 200, {"ok": True, "tracks": track_read.list_external_tracks()}
+            return 200, {"ok": True, "tracks": track_public.list_external_tracks()}
         track_id = self._parse_track_detail_path(route)
         if method == "GET" and track_id is not None:
             try:
-                detail = track_read.get_external_track(track_id)
+                detail = track_public.get_external_track(track_id)
             except ValueError as exc:
                 raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
             if detail is None:
@@ -895,7 +895,6 @@ class WebManagementService:
         role = instance.get("role")
         if not isinstance(role, str) or not role:
             raise HttpError(status=502, code="COMMAND_FAILED", message=f"Invalid instance status payload for {actor_id}.")
-        current_identity = {"id": actor_id, "type": "actor"}
         actor_profile = ActorIdentityProfile(
             identity=IdentityRef(id=actor_id, type="actor"),
             role_id=role,
@@ -904,10 +903,6 @@ class WebManagementService:
         console: dict[str, Any] = {
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
-            "tracks": {
-                "items": track_read.list_external_tracks(owner_identity=current_identity),
-                "source": "web-track-summary",
-            },
             "im": {
                 "target": {
                     "identity": {"id": actor_id, "type": "actor"},

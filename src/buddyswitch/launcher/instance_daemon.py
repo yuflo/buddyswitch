@@ -15,18 +15,27 @@ from buddyswitch.launcher import browser_inbound  # noqa: E402
 from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration  # noqa: E402
 from buddyswitch.launcher import message_inbound  # noqa: E402
 from buddyswitch.launcher import notification_center  # noqa: E402
-from buddyswitch.launcher import track_comment_inbound  # noqa: E402
 
 
-def default_notification_registrations() -> list[notification_center.InboundSourceRegistration]:
+def default_notification_registrations(
+    component_registrations: Sequence[
+        notification_center.InboundSourceRegistration
+    ] = (),
+) -> list[notification_center.InboundSourceRegistration]:
     return [
         *message_inbound.inbound_registrations(),
-        *track_comment_inbound.inbound_registrations(),
+        *component_registrations,
     ]
 
 
-def default_notify_subscriptions() -> list[str]:
-    return notification_center.subscriptions_from_registrations(default_notification_registrations())
+def default_notify_subscriptions(
+    component_registrations: Sequence[
+        notification_center.InboundSourceRegistration
+    ] = (),
+) -> list[str]:
+    return notification_center.subscriptions_from_registrations(
+        default_notification_registrations(component_registrations)
+    )
 
 
 def default_application_command_factories(
@@ -41,8 +50,13 @@ def default_application_command_factories(
 
 def default_daemon_handlers(
     component_registrations: Sequence[DaemonHandlerRegistration] = (),
+    inbound_source_registrations: Sequence[
+        notification_center.InboundSourceRegistration
+    ] = (),
 ) -> list[object]:
-    registrations = default_notification_registrations()
+    registrations = default_notification_registrations(
+        inbound_source_registrations
+    )
     browser_registrations = browser_inbound.inbound_registrations()
     built_in_before = [
         *notification_center.handlers_from_registrations(registrations),
@@ -109,6 +123,9 @@ def main(
     argv: list[str] | None = None,
     *,
     component_registrations: tuple[DaemonHandlerRegistration, ...] = (),
+    inbound_source_registrations: tuple[
+        notification_center.InboundSourceRegistration, ...
+    ] = (),
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -126,8 +143,13 @@ def main(
             try:
                 return daemon_core.run_daemon(
                     instance_json,
-                    handlers=default_daemon_handlers(component_registrations),
-                    notify_subscriptions=default_notify_subscriptions(),
+                    handlers=default_daemon_handlers(
+                        component_registrations,
+                        inbound_source_registrations,
+                    ),
+                    notify_subscriptions=default_notify_subscriptions(
+                        inbound_source_registrations
+                    ),
                     application_command_factories=default_application_command_factories(
                         component_registrations
                     ),
@@ -140,8 +162,13 @@ def main(
                 json.dumps(
                     daemon_core.start_daemon(
                         instance_json,
-                        handlers=default_daemon_handlers(component_registrations),
-                        notify_subscriptions=default_notify_subscriptions(),
+                        handlers=default_daemon_handlers(
+                            component_registrations,
+                            inbound_source_registrations,
+                        ),
+                        notify_subscriptions=default_notify_subscriptions(
+                            inbound_source_registrations
+                        ),
                     ),
                     ensure_ascii=True,
                 )
@@ -155,8 +182,13 @@ def main(
                 json.dumps(
                     daemon_core.daemon_status(
                         instance_json,
-                        handlers=default_daemon_handlers(component_registrations),
-                        notify_subscriptions=default_notify_subscriptions(),
+                        handlers=default_daemon_handlers(
+                            component_registrations,
+                            inbound_source_registrations,
+                        ),
+                        notify_subscriptions=default_notify_subscriptions(
+                            inbound_source_registrations
+                        ),
                     ),
                     ensure_ascii=True,
                 )

@@ -1,6 +1,6 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY
+> Current state: S0–S3 ACCEPTED; S4 TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY
 > Runtime authorization: `NONE`
 > The prior Demand-first pack was replaced after the readiness audit.
 
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | SEARCH ACCEPTED — NEXT LANE PREPARATION ONLY |
+| S4 | `04-independent-component-waves.md` | TRACK–ARTIFACT ACCEPTED — NEXT LANE PREPARATION ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -111,7 +111,19 @@ boundaries hub-owned while assigning target discovery and bounded execution
 judgment to the executor. R2 then passed direct, affected and one frozen FINAL
 on the preserved identity. Search is accepted in
 `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md`; all
-Search packets are consumed and no next lane is executable yet.
+Search packets are consumed.
+
+The next source refresh proved Track and Artifact must cut over atomically
+while remaining separate modules. R1 completed and proved the product
+candidate. Hub review then found a false test-ownership boundary: ten
+cross-component tests had moved under one module and the architecture proof
+excluded module test roots. R2 changed no product source; it returned those
+tests to root tiers, retained three true module-local tests, enforced the
+cross-Private rule and passed exact, affected and one new frozen FINAL.
+Track–Artifact is accepted in
+`04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
+Both packets are consumed. Communication, Evidence and Context remain
+preparation-only; no next lane is executable yet.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

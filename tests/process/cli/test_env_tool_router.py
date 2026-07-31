@@ -290,7 +290,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
                     "now": {"next": "seed", "blocker": None},
                 },
             },
-            blocked_module="buddyswitch.env.tools.track._impl",
+            blocked_module="buddyswitch.modules.track.private.adapters.tool._impl",
             role="dev",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
@@ -314,7 +314,7 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
                     "now": {"next": "seed", "blocker": None},
                 },
             },
-            blocked_module="buddyswitch.env.tools.track._impl",
+            blocked_module="buddyswitch.modules.track.private.adapters.tool._impl",
             role="pm",
         )
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)

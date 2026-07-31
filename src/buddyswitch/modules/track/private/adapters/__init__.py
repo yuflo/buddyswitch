@@ -1,0 +1,1 @@
+"""Track-owned adapters."""

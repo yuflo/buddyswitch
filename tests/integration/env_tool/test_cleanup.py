@@ -11,6 +11,7 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
+from buddyswitch.application.composition import ARTIFACT, TRACK  # noqa: E402
 from buddyswitch.runtime_support import env_cleanup  # noqa: E402
 
 
@@ -23,6 +24,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.manifest_path = self.repo_root / "buddyswitch" / "manifest.toml"
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml", self.manifest_path)
+        self.product_cleanup = (*ARTIFACT.cleanup, *TRACK.cleanup)
 
         self._write_json(
             "buddyswitch/objects/tracks/track-demo.json",
@@ -129,6 +131,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             role="pm",
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
+            contributions=self.product_cleanup,
         )
         self.assertEqual(plan["scope"], "role")
         self.assertIn("art-pm-r1", plan["artifact_object_ids"])
@@ -145,8 +148,12 @@ class CleanupRepositoryTests(unittest.TestCase):
             role=None,
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
+            contributions=self.product_cleanup,
         )
-        result = env_cleanup.execute_cleanup_plan(plan)
+        result = env_cleanup.execute_cleanup_plan(
+            plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(result["ok"])
 
         for directory in (
@@ -202,6 +209,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             role=None,
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
+            contributions=self.product_cleanup,
         )
         self.assertIn("message_object_ids", plan)
         self.assertIn("msg-test", plan["message_object_ids"])
@@ -272,8 +280,12 @@ class CleanupRepositoryTests(unittest.TestCase):
             role="dev",
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
+            contributions=self.product_cleanup,
         )
-        result = env_cleanup.execute_cleanup_plan(plan)
+        result = env_cleanup.execute_cleanup_plan(
+            plan,
+            contributions=self.product_cleanup,
+        )
 
         self.assertTrue(result["ok"], msg=result)
         self.assertFalse(self._path("buddyswitch/objects/track-comments/track-clean-comment/comment-dev-clean.json").exists())
@@ -298,6 +310,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
             shared_root=self.shared_root,
+            contributions=self.product_cleanup,
         )
         self.assertIn("path_categories", plan)
         self.assertTrue(
@@ -307,7 +320,10 @@ class CleanupRepositoryTests(unittest.TestCase):
             ),
             msg=plan,
         )
-        result = env_cleanup.execute_cleanup_plan(plan)
+        result = env_cleanup.execute_cleanup_plan(
+            plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(result["ok"], msg=result)
         self.assertFalse(pm_owned.exists())
         self.assertTrue(dev_owned.exists())
@@ -318,8 +334,12 @@ class CleanupRepositoryTests(unittest.TestCase):
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
             shared_root=self.shared_root,
+            contributions=self.product_cleanup,
         )
-        all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
+        all_data_result = env_cleanup.execute_cleanup_plan(
+            all_data_plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(all_data_result["ok"], msg=all_data_result)
         self.assertFalse(dev_owned.exists())
 
@@ -377,7 +397,10 @@ class CleanupRepositoryTests(unittest.TestCase):
             any("cannot be safely attributed" in warning for warning in role_plan["warnings"]),
             msg=role_plan,
         )
-        role_result = env_cleanup.execute_cleanup_plan(role_plan)
+        role_result = env_cleanup.execute_cleanup_plan(
+            role_plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(role_result["ok"], msg=role_result)
         self.assertFalse(pm_path.exists())
         self.assertTrue(dev_path.exists())
@@ -403,7 +426,10 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "buddyswitch/objects/demand-sys/actors/malformed.json",
             },
         )
-        all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
+        all_data_result = env_cleanup.execute_cleanup_plan(
+            all_data_plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(all_data_result["ok"], msg=all_data_result)
         self.assertFalse(dev_path.exists())
         self.assertFalse(invalid_utf8_path.exists())
@@ -456,7 +482,10 @@ class CleanupRepositoryTests(unittest.TestCase):
             any("cannot be safely attributed" in warning for warning in role_plan["warnings"]),
             msg=role_plan,
         )
-        role_result = env_cleanup.execute_cleanup_plan(role_plan)
+        role_result = env_cleanup.execute_cleanup_plan(
+            role_plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(role_result["ok"], msg=role_result)
         self.assertFalse(pm_path.exists())
         self.assertTrue(dev_path.exists())
@@ -480,7 +509,10 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "buddyswitch/objects/task-sys/tasks/malformed.json",
             },
         )
-        all_data_result = env_cleanup.execute_cleanup_plan(all_data_plan)
+        all_data_result = env_cleanup.execute_cleanup_plan(
+            all_data_plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(all_data_result["ok"], msg=all_data_result)
         self.assertFalse(dev_path.exists())
         self.assertFalse(malformed_path.exists())
@@ -529,7 +561,10 @@ class CleanupRepositoryTests(unittest.TestCase):
             3,
             msg=plan,
         )
-        result = env_cleanup.execute_cleanup_plan(plan)
+        result = env_cleanup.execute_cleanup_plan(
+            plan,
+            contributions=self.product_cleanup,
+        )
         self.assertTrue(result["ok"], msg=result)
         self.assertEqual(outside.read_text(encoding="utf-8"), "outside")
         self.assertTrue(symlink.is_symlink())

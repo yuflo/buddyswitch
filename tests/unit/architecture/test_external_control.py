@@ -15,7 +15,9 @@ from tests.support import task_fixtures
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.domain import track_read  # noqa: E402
+from buddyswitch.modules.track import public as track_public  # noqa: E402
+from buddyswitch.modules.track.private.state import track_comments as track_comment_repo  # noqa: E402
+from buddyswitch.modules.track.private.state import tracks as track_repo  # noqa: E402
 
 task_read = task_fixtures.task_read_model()
 
@@ -370,15 +372,15 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             task_read.task_sys,
             "get_task",
             return_value=task_record,
-        ), mock.patch.object(track_read.track_repo, "list_tracks", return_value=[track_record]), mock.patch.object(
-            track_read.track_repo,
+        ), mock.patch.object(track_repo, "list_tracks", return_value=[track_record]), mock.patch.object(
+            track_repo,
             "get_track",
             return_value=track_record,
-        ), mock.patch.object(track_read.track_comment_repo, "comments_for_track", return_value=comments):
+        ), mock.patch.object(track_comment_repo, "comments_for_track", return_value=comments):
             tasks = task_read.list_external_tasks()
             task = task_read.get_external_task("task-demo")
-            tracks = track_read.list_external_tracks()
-            track = track_read.get_external_track("track-demo")
+            tracks = track_public.list_external_tracks()
+            track = track_public.get_external_track("track-demo")
 
         task_keys = (
             "task_id",
@@ -486,7 +488,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             "Actor Session owns direct parent-thread input and attach resolution.",
             "Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session",
             "`/api/im/*` is the single browser-facing Message contract.",
-            "Demand, Task, and Track reads to external-safe domain projections",
+            "Demand, Task, and Track reads to their Public external-safe projections",
             "Web to Actor runtime mutation tools for console reads",
             "Web or CLI to native Goal mutation",
             "Actor Session to Demand or Task mutation",

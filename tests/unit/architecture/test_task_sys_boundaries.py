@@ -152,6 +152,7 @@ def test_task_contributions_are_typed_and_generic_hosts_have_no_task_private_sta
         "skills",
         "cleanup",
         "actor_console_sections",
+        "inbound_sources",
     ]
 
     for relative in GENERIC_HOSTS:

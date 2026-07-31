@@ -71,8 +71,10 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         }
 
     def _seed_track_pages(self) -> None:
-        from buddyswitch.env.repos import track_comments as track_comment_repo
-        from buddyswitch.env.repos import tracks as track_repo
+        from buddyswitch.modules.track.private.state import (
+            track_comments as track_comment_repo,
+        )
+        from buddyswitch.modules.track.private.state import tracks as track_repo
 
         actor = {"role_id": "pm", "actor_id": "act-pm-demo"}
         actor_id = actor["actor_id"]

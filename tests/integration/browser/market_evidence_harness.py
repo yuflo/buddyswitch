@@ -17,7 +17,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
+from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 

@@ -36,4 +36,9 @@ namespaces = false
   "shell/*.sh",
 ]
 "buddyswitch.modules.demand" = ["skills/**/*.md"]
+"buddyswitch.modules.track" = ["skills/**/*.md"]
+"buddyswitch.modules.artifact" = [
+  "assets/**/*.json",
+  "skills/**/*.md",
+]
 "buddyswitch.skills" = ["**/*.toml", "**/*.json", "**/*.md", "**/*.sh"]

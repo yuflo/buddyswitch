@@ -1,4 +1,4 @@
-"""Response contract tests for broker-routed env.tool actions."""
+"""Artifact response contract tests for broker-routed Tool actions."""
 
 from __future__ import annotations
 

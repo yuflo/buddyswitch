@@ -18,7 +18,9 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
-from buddyswitch.env.domain import track_read  # noqa: E402
+from buddyswitch.modules.track import public as track_public  # noqa: E402
+from buddyswitch.modules.track.private.state import track_comments as track_comment_repo  # noqa: E402
+from buddyswitch.modules.track.private.state import tracks as track_repo  # noqa: E402
 
 
 TASK_KEYS = (
@@ -322,8 +324,8 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
                 },
             )
 
-        with mock.patch.object(track_read.track_repo, "list_tracks", return_value=[]):
-            self.assertEqual(track_read.list_external_tracks(owner_identity="act-pm-demo"), [])
+        with mock.patch.object(track_repo, "list_tracks", return_value=[]):
+            self.assertEqual(track_public.list_external_tracks(owner_identity="act-pm-demo"), [])
 
     def test_track_external_list_filters_sorts_and_allowlists_exact_keys(self) -> None:
         tracks = [
@@ -336,12 +338,12 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         before_tracks = deepcopy(tracks)
         before_comments = deepcopy(comments)
 
-        with mock.patch.object(track_read.track_repo, "list_tracks", return_value=tracks), mock.patch.object(
-            track_read.track_comment_repo,
+        with mock.patch.object(track_repo, "list_tracks", return_value=tracks), mock.patch.object(
+            track_comment_repo,
             "comments_for_track",
             return_value=comments,
         ):
-            rows = track_read.list_external_tracks(owner_identity="act-pm-demo")
+            rows = track_public.list_external_tracks(owner_identity="act-pm-demo")
 
         self.assertEqual([row["id"] for row in rows], ["track-new", "track-old"])
         for row in rows:
@@ -366,12 +368,12 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         before_track = deepcopy(track)
         before_comments = deepcopy(comments)
 
-        with mock.patch.object(track_read.track_repo, "get_track", return_value=track), mock.patch.object(
-            track_read.track_comment_repo,
+        with mock.patch.object(track_repo, "get_track", return_value=track), mock.patch.object(
+            track_comment_repo,
             "comments_for_track",
             return_value=comments,
         ):
-            detail = track_read.get_external_track("track-alpha", current_identity={"id": "act-pm-demo", "type": "actor"})
+            detail = track_public.get_external_track("track-alpha", current_identity={"id": "act-pm-demo", "type": "actor"})
 
         self.assertIsNotNone(detail)
         assert detail is not None
@@ -388,10 +390,10 @@ class ExternalQueryProjectionTests(RuntimeWorkspaceTestCase):
         self.assertEqual(track["updates"][0]["refs"][0]["id"], "artifact-proof")
         self.assertEqual(comments[0]["mentioned_identity_ids"], ["act-pm-demo"])
 
-        with mock.patch.object(track_read.track_repo, "get_track", return_value=None):
-            self.assertIsNone(track_read.get_external_track("track-missing"))
+        with mock.patch.object(track_repo, "get_track", return_value=None):
+            self.assertIsNone(track_public.get_external_track("track-missing"))
 
         archived = dict(track)
         archived["archived_at"] = "2026-07-13T12:00:00Z"
-        with mock.patch.object(track_read.track_repo, "get_track", return_value=archived):
-            self.assertIsNone(track_read.get_external_track("track-alpha"))
+        with mock.patch.object(track_repo, "get_track", return_value=archived):
+            self.assertIsNone(track_public.get_external_track("track-alpha"))

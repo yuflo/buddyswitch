@@ -100,7 +100,10 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertIn("buddyswitch.launcher.notification_center", imports)
         self.assertIn("buddyswitch.launcher.browser_inbound", imports)
         self.assertIn("buddyswitch.launcher.message_inbound", imports)
-        self.assertIn("buddyswitch.launcher.track_comment_inbound", imports)
+        self.assertFalse(
+            any("track" in name for name in imports),
+            msg=imports,
+        )
         self.assertNotIn("buddyswitch.launcher.demand_triage_handler", imports)
         self.assertNotIn("buddyswitch.launcher.demand_orchestration_handler", imports)
         self.assertNotIn("message" + "_available" + "_handler", imports)
@@ -108,9 +111,15 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertNotIn("browser_page_expired_handler", imports)
         self.assertNotIn("task_" + "checkout_handler", imports)
         self.assertFalse((ROOT / "src" / "buddyswitch" / "launcher" / ("task_" + "checkout_handler.py")).exists())
-        self.assertEqual(self.instance_daemon.default_notify_subscriptions(), EXPECTED_SUBSCRIPTIONS)
+        self.assertEqual(
+            self.instance_daemon.default_notify_subscriptions(
+                self.application.inbound_sources
+            ),
+            EXPECTED_SUBSCRIPTIONS,
+        )
         handlers = self.instance_daemon.default_daemon_handlers(
-            self.application.daemon_handlers
+            self.application.daemon_handlers,
+            self.application.inbound_sources,
         )
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
         self.assertEqual(type(handlers[-2]).__name__, "TaskGoalHandler")
@@ -174,6 +183,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         result = self.instance_daemon.main(
             ["run", "--instance-json", "/tmp/inst.json"],
             component_registrations=self.application.daemon_handlers,
+            inbound_source_registrations=self.application.inbound_sources,
         )
 
         self.assertEqual(result, 0)
@@ -213,6 +223,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             result = self.instance_daemon.main(
                 ["start", "--instance-json", "/tmp/inst.json"],
                 component_registrations=self.application.daemon_handlers,
+                inbound_source_registrations=self.application.inbound_sources,
             )
 
         self.assertEqual(result, 0)
@@ -237,6 +248,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             result = self.instance_daemon.main(
                 ["stop", "--instance-json", "/tmp/inst.json"],
                 component_registrations=self.application.daemon_handlers,
+                inbound_source_registrations=self.application.inbound_sources,
             )
 
         self.assertEqual(result, 0)
@@ -264,6 +276,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             result = self.instance_daemon.main(
                 ["status", "--instance-json", "/tmp/inst.json", "--json"],
                 component_registrations=self.application.daemon_handlers,
+                inbound_source_registrations=self.application.inbound_sources,
             )
 
         self.assertEqual(result, 0)

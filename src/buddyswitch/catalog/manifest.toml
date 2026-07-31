@@ -97,20 +97,8 @@ id = "decide-from-proof"
 path = "skills/pm/decide-from-proof"
 
 [[skills]]
-id = "triage-track"
-path = "skills/pm/triage-track"
-
-[[skills]]
 id = "sequence-product-work"
 path = "skills/pm/sequence-product-work"
-
-[[skills]]
-id = "track-tool"
-path = "skills/shared/track-tool"
-
-[[skills]]
-id = "artifact-tool"
-path = "skills/shared/artifact-tool"
 
 [[skills]]
 id = "shape-prototype"

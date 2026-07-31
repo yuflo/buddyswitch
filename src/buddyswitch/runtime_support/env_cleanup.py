@@ -21,10 +21,7 @@ from buddyswitch.runtime_support.env_manifest import (
 
 ROOT = runtime_files.ROOT
 CATEGORY_ORDER = (
-    "artifact_objects",
-    "track_objects",
     "message_objects",
-    "comment_objects",
     "actor_private_files",
 )
 
@@ -33,11 +30,8 @@ def _runtime_relative_path(path: Path) -> str:
     return path.relative_to(runtime_files.STATE_ROOT).as_posix()
 
 
-TRACK_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACKS_DIR)
-ARTIFACT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.ARTIFACT_OBJECTS_DIR)
 MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.STATE_ROOT / "im" / "messages")
 RETIRED_MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
-COMMENT_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.TRACK_COMMENTS_DIR)
 ACTOR_PRIVATE_RELATIVE_DIR = "private"
 
 
@@ -45,12 +39,15 @@ ACTOR_PRIVATE_RELATIVE_DIR = "private"
 class OwnedStatePath:
     relative_path: str
     owner_role: str | None
+    object_id: str | None = None
+    warning: str | None = None
 
 
 @dataclass(frozen=True)
 class CleanupContribution:
     category: str
     discover: Callable[[Path], tuple[OwnedStatePath, ...]]
+    required_directories: tuple[str, ...] = ()
 
 
 def rel(root: Path, path: Path) -> str:
@@ -251,36 +248,6 @@ def add_external_path(plan: dict[str, Any], *, display_path: str, absolute_path:
         plan["direct_delete_paths"].append(display_path)
 
 
-def discover_artifact_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    valid: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, ARTIFACT_OBJECTS_RELATIVE_DIR):
-        relative = rel(root, path)
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "reason": f"invalid artifact object JSON: {exc}"})
-            continue
-
-        artifact_id = payload.get("id")
-        created_by_actor = payload.get("created_by_actor")
-        producer_role = created_by_actor.get("role_id") if isinstance(created_by_actor, dict) else None
-        if not isinstance(artifact_id, str) or not artifact_id:
-            invalid.append({"path": relative, "reason": "artifact object is missing id"})
-            continue
-        if not isinstance(producer_role, str) or not producer_role:
-            invalid.append({"path": relative, "reason": f"artifact '{artifact_id}' is missing created_by_actor.role_id"})
-            continue
-
-        record = {
-            "id": artifact_id,
-            "producer_role": producer_role,
-            "object_path": relative,
-        }
-        valid.append(record)
-    return valid, invalid
-
-
 def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
@@ -330,40 +297,6 @@ def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dic
         invalid.append({
             "path": relative,
             "reason": f"{label} uses retired message object schema; current IM messages live under {MESSAGE_OBJECTS_RELATIVE_DIR}",
-        })
-    return valid, invalid
-
-
-def discover_comment_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    valid: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, COMMENT_OBJECTS_RELATIVE_DIR):
-        relative = rel(root, path)
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "reason": f"invalid comment object JSON: {exc}"})
-            continue
-
-        cmt_id = payload.get("id")
-        by_actor = payload.get("by_actor")
-        author_role = by_actor.get("role_id") if isinstance(by_actor, dict) else None
-        track_id = payload.get("track_id")
-        if not isinstance(cmt_id, str) or not cmt_id:
-            invalid.append({"path": relative, "reason": "comment object is missing id"})
-            continue
-        if not isinstance(track_id, str) or not track_id:
-            invalid.append({"path": relative, "reason": f"comment '{cmt_id}' is missing track_id"})
-            continue
-        if not isinstance(author_role, str) or not author_role:
-            invalid.append({"path": relative, "reason": f"comment '{cmt_id}' is missing by_actor.role_id"})
-            continue
-
-        valid.append({
-            "id": cmt_id,
-            "author_role": author_role,
-            "track_id": track_id,
-            "object_path": relative,
         })
     return valid, invalid
 
@@ -523,22 +456,10 @@ def add_instance_workspace_dir_files(
         add_external_path(plan, display_path=display_path, absolute_path=path, category=category)
 
 
-def object_category_relative_dir(category: str) -> str:
-    if category == "artifact_objects":
-        return ARTIFACT_OBJECTS_RELATIVE_DIR
-    if category == "message_objects":
-        return MESSAGE_OBJECTS_RELATIVE_DIR
-    if category == "comment_objects":
-        return COMMENT_OBJECTS_RELATIVE_DIR
-    if category == "track_objects":
-        return TRACK_OBJECTS_RELATIVE_DIR
-    raise ValueError(f"Unsupported object category: {category}")
-
-
-def owner_object_json_path(root: Path, *, category: str, object_id: str) -> tuple[Path | None, str | None]:
+def message_object_json_path(root: Path, *, object_id: str) -> tuple[Path | None, str | None]:
     return resolve_guarded_object_json_path(
         root,
-        relative_dir=object_category_relative_dir(category),
+        relative_dir=MESSAGE_OBJECTS_RELATIVE_DIR,
         object_id=object_id,
     )
 
@@ -576,46 +497,18 @@ def delete_actor_private_path(path: Path) -> bool:
     return True
 
 
-def add_indexed_artifact(plan: dict[str, Any], record: dict[str, Any]) -> None:
-    root = Path(plan["repo_root"])
-    if record["id"] not in plan["artifact_object_ids"]:
-        plan["artifact_object_ids"].append(record["id"])
-        plan["artifact_records"].append(record)
-
-    object_path, blocked_reason = owner_object_json_path(root, category="artifact_objects", object_id=str(record["id"]))
-    if object_path is None:
-        if blocked_reason is not None:
-            add_warning(plan, f"Skipping artifact cleanup for '{record['id']}': {blocked_reason}")
-        return
-    add_path(plan, object_path, "artifact_objects")
-
-
 def add_indexed_message(plan: dict[str, Any], record: dict[str, Any]) -> None:
     root = Path(plan["repo_root"])
     if record["id"] not in plan["message_object_ids"]:
         plan["message_object_ids"].append(record["id"])
         plan["message_records"].append(record)
 
-    object_path, blocked_reason = owner_object_json_path(root, category="message_objects", object_id=str(record["id"]))
+    object_path, blocked_reason = message_object_json_path(root, object_id=str(record["id"]))
     if object_path is None:
         if blocked_reason is not None:
             add_warning(plan, f"Skipping message cleanup for '{record['id']}': {blocked_reason}")
         return
     add_path(plan, object_path, "message_objects")
-
-
-def add_indexed_comment(plan: dict[str, Any], record: dict[str, Any]) -> None:
-    root = Path(plan["repo_root"])
-    if record["id"] not in plan["comment_object_ids"]:
-        plan["comment_object_ids"].append(record["id"])
-        plan["comment_records"].append(record)
-
-    relative_path = record.get("object_path")
-    if not isinstance(relative_path, str) or not relative_path:
-        add_warning(plan, f"Skipping comment cleanup for '{record['id']}': missing object path")
-        return
-    object_path = root / relative_path
-    add_path(plan, object_path, "comment_objects")
 
 
 def delete_relative_path(root: Path, relative_path: str) -> None:
@@ -637,13 +530,40 @@ def delete_absolute_path(path: Path) -> None:
     path.unlink()
 
 
-def ensure_required_skeleton(root: Path, *, warnings: list[str] | None = None) -> None:
-    for relative_dir in (
-        TRACK_OBJECTS_RELATIVE_DIR,
-        ARTIFACT_OBJECTS_RELATIVE_DIR,
-        MESSAGE_OBJECTS_RELATIVE_DIR,
-        COMMENT_OBJECTS_RELATIVE_DIR,
-    ):
+def _required_directories(
+    contributions: tuple[CleanupContribution, ...],
+) -> tuple[str, ...]:
+    directories = [MESSAGE_OBJECTS_RELATIVE_DIR]
+    for contribution in contributions:
+        if not isinstance(contribution.required_directories, tuple):
+            raise ValueError(
+                f"cleanup required directories for "
+                f"'{contribution.category}' must be a tuple"
+            )
+        for relative_dir in contribution.required_directories:
+            path = Path(relative_dir)
+            if (
+                not isinstance(relative_dir, str)
+                or not relative_dir.strip()
+                or path.is_absolute()
+                or ".." in path.parts
+            ):
+                raise ValueError(
+                    f"invalid cleanup required directory: {relative_dir!r}"
+                )
+            normalized = path.as_posix()
+            if normalized not in directories:
+                directories.append(normalized)
+    return tuple(directories)
+
+
+def ensure_required_skeleton(
+    root: Path,
+    *,
+    contributions: tuple[CleanupContribution, ...] = (),
+    warnings: list[str] | None = None,
+) -> None:
+    for relative_dir in _required_directories(contributions):
         directory, blocked_reason = resolve_guarded_relative_dir(root, relative_dir, allow_missing=True)
         if directory is None:
             if blocked_reason is not None:
@@ -711,20 +631,13 @@ def build_cleanup_plan(
             )
         contribution_categories.add(category)
         plan["counts_by_category"][category] = 0
+    _required_directories(contributions)
 
-    artifact_objects, invalid_artifact_objects = discover_artifact_objects(repo_root)
     message_objects, invalid_message_objects = discover_message_objects(repo_root)
-    comment_objects, invalid_comment_objects = discover_comment_objects(repo_root)
     if scope == "role":
-        for record in artifact_objects:
-            if record["producer_role"] == role:
-                add_indexed_artifact(plan, record)
         for record in message_objects:
             if record.get("from_role") == role or record.get("to_role") == role:
                 add_indexed_message(plan, record)
-        for record in comment_objects:
-            if record.get("author_role") == role:
-                add_indexed_comment(plan, record)
         actor_private_relative_dir = ACTOR_PRIVATE_RELATIVE_DIR
         if shared_root is not None:
             resolved_shared_root = shared_root.resolve(strict=False)
@@ -742,27 +655,14 @@ def build_cleanup_plan(
                 )
         else:
             add_dir_files(plan, actor_private_relative_dir, "actor_private_files")
-        for item in invalid_artifact_objects:
-            add_warning(
-                plan,
-                f"{item['path']} cannot be safely attributed to role '{role}' and will be skipped in scoped cleanup ({item['reason']}).",
-            )
         for item in invalid_message_objects:
-            add_warning(
-                plan,
-                f"{item['path']} cannot be safely attributed to role '{role}' and will be skipped in scoped cleanup ({item['reason']}).",
-            )
-        for item in invalid_comment_objects:
             add_warning(
                 plan,
                 f"{item['path']} cannot be safely attributed to role '{role}' and will be skipped in scoped cleanup ({item['reason']}).",
             )
 
     elif scope == "all-data":
-        add_dir_files(plan, TRACK_OBJECTS_RELATIVE_DIR, "track_objects")
-        add_dir_files(plan, ARTIFACT_OBJECTS_RELATIVE_DIR, "artifact_objects")
         add_dir_files(plan, MESSAGE_OBJECTS_RELATIVE_DIR, "message_objects")
-        add_dir_files(plan, COMMENT_OBJECTS_RELATIVE_DIR, "comment_objects")
         if shared_root is not None:
             resolved_shared_root = shared_root.resolve(strict=False)
             for workspace_dir in discover_instance_workspaces(
@@ -779,24 +679,12 @@ def build_cleanup_plan(
                 )
         else:
             add_dir_files(plan, ACTOR_PRIVATE_RELATIVE_DIR, "actor_private_files")
-        for record in artifact_objects:
-            if record["id"] not in plan["artifact_object_ids"]:
-                plan["artifact_object_ids"].append(record["id"])
-                plan["artifact_records"].append(record)
         for record in message_objects:
             if record["id"] not in plan["message_object_ids"]:
                 plan["message_object_ids"].append(record["id"])
                 plan["message_records"].append(record)
-        for record in comment_objects:
-            if record["id"] not in plan["comment_object_ids"]:
-                plan["comment_object_ids"].append(record["id"])
-                plan["comment_records"].append(record)
-        for item in invalid_artifact_objects:
-            add_warning(plan, f"All-data cleanup will delete malformed artifact object: {item['path']} ({item['reason']}).")
         for item in invalid_message_objects:
             add_warning(plan, f"All-data cleanup will delete malformed message object: {item['path']} ({item['reason']}).")
-        for item in invalid_comment_objects:
-            add_warning(plan, f"All-data cleanup will delete malformed comment object: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
 
@@ -809,6 +697,8 @@ def build_cleanup_plan(
                     "a non-OwnedStatePath value"
                 )
             relative_path = owned_path.relative_path
+            if isinstance(owned_path.warning, str) and owned_path.warning:
+                add_warning(plan, owned_path.warning)
             candidate = repo_path(repo_root, relative_path)
             if candidate is None:
                 add_warning(
@@ -836,11 +726,12 @@ def build_cleanup_plan(
                 continue
             if scope == "role":
                 if owned_path.owner_role is None:
-                    add_warning(
-                        plan,
-                        f"{relative_path} cannot be safely attributed to role "
-                        f"'{role}' and will be skipped in scoped cleanup.",
-                    )
+                    if owned_path.warning is None:
+                        add_warning(
+                            plan,
+                            f"{relative_path} cannot be safely attributed to role "
+                            f"'{role}' and will be skipped in scoped cleanup.",
+                        )
                     continue
                 if owned_path.owner_role != role:
                     continue
@@ -848,6 +739,34 @@ def build_cleanup_plan(
                 continue
             add_path(plan, candidate, contribution.category)
             plan["direct_delete_paths"].append(relative_path)
+            if (
+                contribution.category == "artifact_objects"
+                and isinstance(owned_path.object_id, str)
+                and owned_path.object_id
+                and owned_path.object_id not in plan["artifact_object_ids"]
+            ):
+                plan["artifact_object_ids"].append(owned_path.object_id)
+                plan["artifact_records"].append(
+                    {
+                        "id": owned_path.object_id,
+                        "producer_role": owned_path.owner_role,
+                        "object_path": relative_path,
+                    }
+                )
+            if (
+                contribution.category == "comment_objects"
+                and isinstance(owned_path.object_id, str)
+                and owned_path.object_id
+                and owned_path.object_id not in plan["comment_object_ids"]
+            ):
+                plan["comment_object_ids"].append(owned_path.object_id)
+                plan["comment_records"].append(
+                    {
+                        "id": owned_path.object_id,
+                        "author_role": owned_path.owner_role,
+                        "object_path": relative_path,
+                    }
+                )
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
@@ -865,7 +784,11 @@ def build_cleanup_plan(
     return plan
 
 
-def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
+def execute_cleanup_plan(
+    plan: dict[str, Any],
+    *,
+    contributions: tuple[CleanupContribution, ...] = (),
+) -> dict[str, Any]:
     root = Path(plan["repo_root"])
     deleted_paths: list[str] = []
     warnings = plan.get("warnings")
@@ -896,10 +819,7 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
             if isinstance(raw_object_path, str) and raw_object_path:
                 relative_path = raw_object_path
             else:
-                owner_path, _ = owner_object_json_path(root, category=category, object_id=object_id)
-                if owner_path is None:
-                    continue
-                relative_path = rel(root, owner_path)
+                continue
             if relative_path in deleted_set:
                 continue
             delete_relative_path(root, relative_path)
@@ -926,7 +846,11 @@ def execute_cleanup_plan(plan: dict[str, Any]) -> dict[str, Any]:
         deleted_paths.append(relative_path)
         deleted_set.add(relative_path)
 
-    ensure_required_skeleton(root, warnings=warnings)
+    ensure_required_skeleton(
+        root,
+        contributions=contributions,
+        warnings=warnings,
+    )
     if isinstance(warnings, list):
         warnings.sort()
     return {
@@ -1017,7 +941,10 @@ def main(
             print(json.dumps(plan, ensure_ascii=True, sort_keys=True))
             return 0
 
-        result = execute_cleanup_plan(plan)
+        result = execute_cleanup_plan(
+            plan,
+            contributions=contributions,
+        )
         print(json.dumps({"plan": plan, "result": result}, ensure_ascii=True, sort_keys=True))
         return 0
     except (OSError, ValueError, ManifestError, json.JSONDecodeError) as exc:

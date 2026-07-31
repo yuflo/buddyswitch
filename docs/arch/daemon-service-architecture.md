@@ -37,7 +37,8 @@ The instance composition currently registers, among other owners:
 - `DemandTriageHandler` for isolated inbound Demand triage recovery;
 - `TaskGoalHandler` for canonical Task/native Goal convergence;
 - `DemandOrchestrationHandler` for Demand reconciliation and Task selection;
-- IM, Track, and Browser handlers for their own source lifecycles.
+- Message and Browser built-in handlers for their current source lifecycles;
+- Track's contributed `track.comment.added` inbound registration and handler.
 
 These modules may import product domains and App Server adapters. Generic
 daemon modules may not.
@@ -95,9 +96,11 @@ does not add a product switch to daemon core.
 
 `src/buddyswitch/application/composition.py` is the production component
 selection root and the only owner of the complete current component list. It
-selects each passive `ModuleAssembly` once and owns concrete cross-component
-wiring such as Task's Demand resolver. Search contributes no daemon handler,
-so the exact daemon order remains:
+selects each passive `ModuleAssembly` once in the explicit order Demand, Task,
+Search, Artifact, Track. It owns concrete cross-component wiring such as
+Task's Demand resolver and the two Artifact Public callables injected into
+Track's consumer-owned ports. Search, Artifact, and Track contribute no
+ordered reconciliation handler, so the exact handler order remains:
 
 ```text
 demand_triage -> task_goal -> demand_orchestration
@@ -105,10 +108,11 @@ demand_triage -> task_goal -> demand_orchestration
 
 `src/buddyswitch/application/build.py` validates that this order is a
 one-to-one permutation of the contributed handler names and flattens each
-typed registration, including Task's mailbox command factory.
-`src/buddyswitch/launcher/instance_daemon.py` imports only generic daemon
-orchestration and current unmigrated handlers, then merges the injected
-registrations in that explicit order.
+typed registration, including Task's mailbox command factory and Track's
+inbound source. `src/buddyswitch/launcher/instance_daemon.py` imports generic
+daemon orchestration plus the current Message and Browser built-ins. It
+combines Message, contributed Track, and Browser registrations without
+importing Track.
 
 There is no plugin discovery, semantic event bus, central product workflow
 engine, or product service locator.
@@ -143,4 +147,5 @@ transport -> product transition policy
 product tool -> broad daemon service locator
 generic host -> Demand private package
 generic host -> Task private package
+generic host -> Track private package
 ```

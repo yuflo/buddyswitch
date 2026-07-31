@@ -395,11 +395,30 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         hits = [line for line in completed.stdout.splitlines() if line.strip()]
         self.assertEqual(hits, [], msg="\n".join(hits))
 
-    def test_object_repo_sibling_imports_are_restricted_to_runtime_files(self) -> None:
+    def test_object_state_sibling_imports_are_restricted_to_runtime_files(self) -> None:
+        application = build_application()
         repo_files = sorted(
-            path
-            for path in ROOT.glob("src/buddyswitch/**/repos/*.py")
-            if path.name != "__init__.py"
+            {
+                *(
+                    path
+                    for path in ROOT.glob("src/buddyswitch/**/repos/*.py")
+                    if path.name != "__init__.py"
+                ),
+                *(
+                    path
+                    for module in application.modules
+                    for path in (
+                        ROOT
+                        / "src"
+                        / "buddyswitch"
+                        / "modules"
+                        / module.name
+                        / "private"
+                        / "state"
+                    ).glob("*.py")
+                    if path.name != "__init__.py"
+                ),
+            }
         )
         if not repo_files:
             self.skipTest("No packaged repository modules exist.")
@@ -424,7 +443,10 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(violations, [], msg="\n".join(violations))
 
     def test_track_comment_repo_owns_only_track_comment_storage(self) -> None:
-        path = ROOT / "src/buddyswitch/env/repos/track_comments.py"
+        path = (
+            ROOT
+            / "src/buddyswitch/modules/track/private/state/track_comments.py"
+        )
         source = path.read_text(encoding="utf-8")
         self.assertNotIn("env_legacy_store", source)
         self.assertNotIn("artifact_revision_chain", source)
@@ -439,7 +461,30 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(forbidden, [], msg=", ".join(forbidden))
 
     def test_active_object_repos_do_not_import_env_legacy_store(self) -> None:
-        repo_files = sorted(path for path in (ROOT / "src/buddyswitch/env/repos").glob("*.py") if path.name != "__init__.py")
+        application = build_application()
+        repo_files = sorted(
+            {
+                *(
+                    path
+                    for path in (ROOT / "src/buddyswitch/env/repos").glob("*.py")
+                    if path.name != "__init__.py"
+                ),
+                *(
+                    path
+                    for module in application.modules
+                    for path in (
+                        ROOT
+                        / "src"
+                        / "buddyswitch"
+                        / "modules"
+                        / module.name
+                        / "private"
+                        / "state"
+                    ).glob("*.py")
+                    if path.name != "__init__.py"
+                ),
+            }
+        )
         violations: list[str] = []
         for path in repo_files:
             if path.name == "runtime_files.py":
@@ -450,10 +495,15 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertEqual(violations, [], msg="\n".join(violations))
 
     def test_active_runtime_modules_do_not_import_env_legacy_store(self) -> None:
+        application = build_application()
         roots = [
             ROOT / "src/buddyswitch/env/domain",
             ROOT / "src/buddyswitch/env/repos",
             ROOT / "src/buddyswitch/env/tools",
+            *(
+                ROOT / "src" / "buddyswitch" / "modules" / module.name
+                for module in application.modules
+            ),
         ]
         violations = self._legacy_store_import_violations(roots)
         self.assertEqual(violations, [], msg="\n".join(violations))
@@ -467,13 +517,23 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
             "close_proof",
         )
         allowed_paths = {
-            "src/buddyswitch/env/repos/artifacts.py",
-            "src/buddyswitch/env/repos/tracks.py",
+            "src/buddyswitch/modules/artifact/private/adapters/tool/_impl.py",
+            "src/buddyswitch/modules/artifact/private/adapters/tool/tool.py",
+            "src/buddyswitch/modules/artifact/private/state/artifacts.py",
+            "src/buddyswitch/modules/track/private/state/tracks.py",
         }
-        scanned_roots = [ROOT / "src/buddyswitch/env/domain"]
+        scanned_roots = [
+            ROOT
+            / "src"
+            / "buddyswitch"
+            / "modules"
+            / module.name
+            / "private"
+            for module in build_application().modules
+        ]
         violations: list[str] = []
         for root in scanned_roots:
-            for path in sorted(root.glob("*.py")):
+            for path in sorted(root.rglob("*.py")):
                 rel = path.relative_to(ROOT).as_posix()
                 source = path.read_text(encoding="utf-8")
                 if rel in allowed_paths:
@@ -535,6 +595,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                     + "|##\\s*`[^`]+`\\s+payload"
                 ),
                 "src/buddyswitch/skills",
+                "src/buddyswitch/modules",
                 "src/buddyswitch/contracts",
                 "src/buddyswitch/launcher/assets/roles",
             ],

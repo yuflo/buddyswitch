@@ -10,10 +10,10 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.repos import artifacts as artifact_repo  # noqa: E402
+from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
-from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
+from buddyswitch.modules.track.private.state import track_comments as comment_repo  # noqa: E402
+from buddyswitch.modules.track.private.state import tracks as track_repo  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 

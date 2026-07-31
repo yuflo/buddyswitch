@@ -11,7 +11,7 @@ The public CLI delegates:
 
 - instance lifecycle and capabilities to private Host Control;
 - instance input and attach to Actor Session;
-- Demand, Task, and Track reads to external-safe domain projections;
+- Demand, Task, and Track reads to their Public external-safe projections;
 - Web startup to the Web process launcher.
 
 Web does not run the CLI as a subprocess or parse CLI output. Open TUI is the
@@ -25,13 +25,13 @@ Control facts with external-safe product reads, but it does not own lifecycle
 mechanics, Actor input, Demand/Task mutation, or IM semantics.
 
 `/api/actors/{id}/console` composes one Actor Console read model. The generic
-Web host owns the surrounding Actor, runtime, Track, IM, and capability DTO.
-It invokes typed `ActorConsoleSectionRegistration` projectors selected by
-application composition. Task contributes the single `task_sys` projector;
-that projection contains active and terminal Tasks only and uses the exact
-external-safe Task DTO. Web imports no Task-private package, contains no Task
-lifecycle rule, has no raw repository fallback, and exposes no Task mutation
-subroute.
+Web host owns the surrounding Actor, runtime, IM, and capability DTO. It
+invokes typed `ActorConsoleSectionRegistration` projectors selected by
+application composition. Task contributes `task_sys`; Track contributes
+`tracks` using Track Public external projections. Those projections preserve
+their exact external-safe DTOs. Web imports neither Task-private nor
+Track-private packages, contains no product lifecycle rule, has no raw
+repository fallback, and exposes no product mutation subroute.
 
 ## Web Message
 
@@ -65,6 +65,7 @@ or Task state.
 - Task Sys owns minimal Demand-bound Task records.
 - Codex App Server owns native Goal execution.
 - Track owns Track state and projections.
+- Artifact owns Artifact content, attachment state, and read policy.
 - Central IM owns Message state and delivery results.
 
 Actor runtime Task tools expose exactly `list`, `get`, `create`, and `cancel`.
@@ -111,6 +112,7 @@ Forbidden paths:
 - Web to CLI subprocess execution as an internal product API;
 - Web to raw product repository rows;
 - generic Web host to Task private code or Task lifecycle rules;
+- generic Web host to Track private code or Track lifecycle rules;
 - Web to Actor runtime mutation tools for console reads;
 - Web or CLI to native Goal mutation;
 - Actor Session to Demand or Task mutation;

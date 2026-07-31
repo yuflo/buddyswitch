@@ -78,21 +78,27 @@ def test_public_launcher_is_a_thin_python_cli_bootstrap() -> None:
     assert "PYTHONPATH" not in launcher
 
 
-def test_public_cli_adapter_is_neutral_and_task_owns_its_cli_projection() -> None:
+def test_public_cli_adapter_is_neutral_and_modules_own_product_projections() -> None:
     cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "launcher" / "cli.py"
     task_cli_adapter = (
         REPO_ROOT
         / "src/buddyswitch/modules/task/private/adapters/cli.py"
     )
+    track_cli_adapter = (
+        REPO_ROOT
+        / "src/buddyswitch/modules/track/private/adapters/cli.py"
+    )
     imports = _imported_modules(cli_adapter)
     task_imports = _imported_modules(task_cli_adapter)
+    track_imports = _imported_modules(track_cli_adapter)
     calls = _called_names(cli_adapter)
 
     assert "buddyswitch.launcher.host_control" in imports
     assert "buddyswitch.launcher.actor_session" in imports
-    assert "buddyswitch.env.domain.track_read" in imports
+    assert not any("track" in name for name in imports)
     assert not any("task" in name for name in imports)
     assert "buddyswitch.modules.task.private.read_model" in task_imports
+    assert "buddyswitch.modules.track.public" in track_imports
     assert not {
         "save_track",
         "create_track",
@@ -134,7 +140,10 @@ def test_generic_daemon_modules_do_not_depend_on_product_adapters() -> None:
 def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
     handlers = (
         Path("src/buddyswitch/launcher/im_wake_handler.py"),
-        Path("src/buddyswitch/launcher/track_comment_added_handler.py"),
+        Path(
+            "src/buddyswitch/modules/track/private/adapters/daemon/"
+            "track_comment_added_handler.py"
+        ),
         Path("src/buddyswitch/launcher/browser_page_expired_handler.py"),
         Path("src/buddyswitch/launcher/browser_release_handler.py"),
         Path(
@@ -182,13 +191,17 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
 
 
 def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
+    from buddyswitch.application.composition import COMPONENTS
+
     roots = (
         REPO_ROOT / "src" / "buddyswitch" / "runtime_support" / "turn_runtime.py",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "tools",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "domain",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "repos",
-        REPO_ROOT / "src" / "buddyswitch" / "modules" / "demand",
-        REPO_ROOT / "src" / "buddyswitch" / "modules" / "task",
+        *(
+            REPO_ROOT / "src" / "buddyswitch" / "modules" / component.name
+            for component in COMPONENTS
+        ),
     )
     violations: list[str] = []
     for root in roots:

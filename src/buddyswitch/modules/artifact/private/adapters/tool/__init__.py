@@ -1,0 +1,1 @@
+"""Artifact Tool adapter."""

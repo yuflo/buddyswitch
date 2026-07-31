@@ -1,4 +1,4 @@
-"""Tests for daemon-side Track comment trigger handling."""
+"""Track module tests for daemon-side comment trigger handling."""
 
 from __future__ import annotations
 
@@ -21,21 +21,26 @@ LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
-from buddyswitch.env.repos import track_comments as comment_repo  # noqa: E402
-from buddyswitch.env.repos import tracks as track_repo  # noqa: E402
+from buddyswitch.modules.track.private.state import track_comments as comment_repo  # noqa: E402
+from buddyswitch.modules.track.private.state import tracks as track_repo  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
 from buddyswitch.modules.demand.private.state import demands  # noqa: E402
 
-TRACK_COMMENT_DOMAIN_PATH = ROOT / "src" / "buddyswitch" / "env" / "domain" / "track_comments.py"
+TRACK_COMMENT_DOMAIN_PATH = ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "domain" / "track_comments.py"
 DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
-HANDLER_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "track_comment_added_handler.py"
+HANDLER_PATH = ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
+    module_name = (
+        "buddyswitch.launcher.daemon_core"
+        if path == DAEMON_CORE_PATH
+        else "buddyswitch.modules.track.private.adapters.daemon.track_comment_added_handler"
+    )
+    return importlib.reload(importlib.import_module(module_name))
 
 
 def assert_contains_all(testcase: unittest.TestCase, text: str, expected: tuple[str, ...]) -> None:

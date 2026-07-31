@@ -1,0 +1,1 @@
+"""Track Tool adapter."""
