@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 EVIDENCE ACCEPTED — COMMUNICATION PREPARATION ONLY
-> Runtime authorization: `NONE`
+> Current state: S0–S3 ACCEPTED; S4 COMMUNICATION READY
+> Runtime authorization: `BS-MM-S4-COMMUNICATION-R1-20260803-01`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | EVIDENCE ACCEPTED — COMMUNICATION PREPARATION ONLY |
+| S4 | `04-independent-component-waves.md` | COMMUNICATION READY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -133,8 +133,13 @@ pre-existing nonexistent-`feedback` mismatch at the Evidence command adapter,
 added product-boundary process proof, and passed exact, direct, affected and one
 frozen FINAL. Evidence is accepted in
 `04-independent-component-waves-plan/evidence/S4-EVIDENCE-ACCEPTANCE.md`; both
-Evidence packets are consumed. Communication source refresh is now unlocked as
-preparation only. Context remains last.
+Evidence packets are consumed. The committed Communication refresh froze its
+owner/consumer map, the two earned passive WebHost contributions, the acyclic
+Demand input edge and generic multi-owner cleanup projection. Direct,
+affected and process/package preservation baselines plus topology preflight
+`S4COMMP-20260803-01` passed. Packet
+`BS-MM-S4-COMMUNICATION-R1-20260803-01` is the sole executable authority.
+Context remains blocked and last.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

@@ -1,7 +1,7 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `EVIDENCE ACCEPTED — COMMUNICATION PREPARATION ONLY`
-> Executable packet: `NONE`
+> Stage state: `COMMUNICATION READY`
+> Executable packet: `BS-MM-S4-COMMUNICATION-R1-20260803-01`
 > Other lane: Context remains `PREPARATION ONLY` and last
 > Merge unit: one accepted lane at a time
 
@@ -11,9 +11,10 @@ Accordingly, Search was accepted independently. Current-source review then
 proved that Track and Artifact must cut over as one atomic migration candidate
 while remaining two independent final modules. The next refresh selected
 Evidence because it needs only the existing Tool contribution and accepted
-Artifact Public. Communication still lacks a worker-lifecycle contribution;
-Context remains last. Evidence is now accepted; Communication source refresh is
-the only unlocked preparation boundary.
+Artifact Public. At that checkpoint Communication still lacked an exact
+worker boundary. Context remains last. Evidence is accepted. Communication's
+route/worker boundary, source refresh, preflight and READY review are now
+complete; only its R1 packet may run.
 
 ## Read order for the current lane
 
@@ -38,7 +39,7 @@ the only unlocked preparation boundary.
 18. `track-artifact/S4-TRACK-ARTIFACT-R2-GOAL-PACKET.md`;
 19. `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
 20. `evidence/README.md` and its ordered Evidence lane documents.
-21. the forthcoming Communication source snapshot after it is committed.
+21. `communication/README.md` and its ordered Communication lane documents.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -50,7 +51,7 @@ adds current-source execution facts; it does not broaden S4.
 | Search | ACCEPTED | `search/S4-SEARCH-ACCEPTANCE.md` |
 | Track | ACCEPTED WITH ARTIFACT | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
-| Communication | PREPARATION ONLY | refresh and freeze the iMessage worker lifecycle contribution |
+| Communication | READY | `communication/S4-COMMUNICATION-GOAL-PACKET.md` |
 | Evidence | ACCEPTED | `evidence/S4-EVIDENCE-ACCEPTANCE.md` |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
 
@@ -92,10 +93,9 @@ consumed permanently.
 
 ## Later-lane admission rule
 
-Communication and Context may not reuse an Evidence snapshot or packet. The
-coordinating hub now refreshes Communication owners, representations, host
-contracts, tests and runtime identity. Context remains blocked until the
-Communication lane is accepted.
+Communication and Context may not reuse an Evidence snapshot or packet.
+Communication now has its own exact snapshot and R1 authority. Context remains
+blocked until the Communication lane is accepted.
 
 ## Checkpoint protocol
 

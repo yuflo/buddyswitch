@@ -2,9 +2,9 @@
 
 > Audit source: `e4fe342144febc023d1d635012e7e8a5e645138d`
 > Initial audit result: Search executed first.
-> 2026-07-31 refresh: Track–Artifact is accepted and Evidence is READY through
-> the existing Tool contribution; Communication and Context remain
-> preparation-only.
+> 2026-08-03 refresh: Search, Track–Artifact and Evidence are accepted;
+> Communication is READY through exact Web route/worker and cleanup contracts;
+> Context remains blocked and last.
 
 ## 1. Why S4 is lane-sized
 
@@ -33,7 +33,7 @@ Track <-> Artifact
   requires an exact Public/input-port decision before either cutover
 
 Communication
-  requires one worker-lifecycle contribution contract
+  READY through one route registration and one optional worker registration
 
 Artifact accepted
   -> Evidence
@@ -109,6 +109,11 @@ This proves:
 This Search preflight did not authorize another S4 lane. Evidence was admitted
 later by its own committed-source trace, preservation evidence, boundary
 decision, and `EVIDENCEP-20260731-01` topology preflight.
+
+Communication was admitted later by its own 25-path source manifest, three
+preservation groups, acyclic Demand/Communication edge, exact generic cleanup
+projection and `S4COMMP-20260803-01` topology preflight. It adds only the two
+host fields earned by current `/api/im/*` and iMessage worker behavior.
 
 ## 5. S4 sequencing rule
 

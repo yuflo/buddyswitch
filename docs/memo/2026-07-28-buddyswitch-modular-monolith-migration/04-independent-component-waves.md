@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Current state: EVIDENCE ACCEPTED — COMMUNICATION PREPARATION ONLY
+> Current state: COMMUNICATION READY
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: `NONE`
+> Execution authority: `BS-MM-S4-COMMUNICATION-R1-20260803-01`
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -16,7 +16,7 @@
 |---|---|---|
 | Track | Track/comments/state/inbound/Skill/projections | ACCEPTED with two Artifact Public callables injected into Track-owned ports |
 | Artifact | artifacts/relations/visibility/config/Skill | ACCEPTED with read-only Track Public dependency |
-| Communication | Message/IM/delivery/external session/channel worker | worker lifecycle contribution not yet frozen |
+| Communication | Message/IM/delivery/external session/channel worker | READY; passive Web route/worker contributions and cleanup edge frozen |
 | Search | bounded non-opening Actor search capability | existing Tool contribution; Browser remains foundation |
 | Evidence | transient evidence/downgrade capability | ACCEPTED; one stateless module and canonical broker-backed command result |
 | Context | application read projection and context Tool | last; consumes other Public reads |
@@ -27,8 +27,9 @@ Search, the atomic Track–Artifact pair and Evidence are accepted. See
 `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` and
 `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`
 and `04-independent-component-waves-plan/evidence/S4-EVIDENCE-ACCEPTANCE.md`.
-Communication is the next source-refresh boundary and remains preparation-only;
-Context remains last. Neither may reuse an accepted lane's packet.
+Communication is READY through its own committed source snapshot, boundary
+design and packet under `04-independent-component-waves-plan/communication/`.
+Context remains last and may not begin until Communication is accepted.
 
 ## Lane protocol
 
