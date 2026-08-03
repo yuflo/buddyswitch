@@ -156,7 +156,7 @@ class ActorPrivateAccess:
 
 
 class BrowserAccess:
-    """Browser/evidence helper placeholders owned by host runtime."""
+    """Generic Browser status exposed by the host runtime."""
 
     def __init__(self, *, active_role: str, instance_payload: dict[str, Any], manifest_path: Path | None) -> None:
         self._active_role = active_role
@@ -166,22 +166,6 @@ class BrowserAccess:
     def status(self) -> dict[str, Any]:
         port = self._instance_payload.get("browser_port")
         return {"active_role": self._active_role, "browser_port": port}
-
-    def issue_evidence_token(self, target_type: str, target_id: str, mode: str | None = None) -> dict[str, Any]:
-        return {
-            "target_type": target_type,
-            "target_id": target_id,
-            "mode": mode or "strict",
-            "token_id": f"evidence-{uuid.uuid4().hex[:12]}",
-        }
-
-    def approve_downgrade(self, target_type: str, target_id: str, reason: str) -> dict[str, Any]:
-        return {
-            "target_type": target_type,
-            "target_id": target_id,
-            "reason": reason,
-            "approved": True,
-        }
 
 
 class RegistryCatalogAccess:

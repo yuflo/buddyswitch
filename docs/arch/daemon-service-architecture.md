@@ -97,9 +97,9 @@ does not add a product switch to daemon core.
 `src/buddyswitch/application/composition.py` is the production component
 selection root and the only owner of the complete current component list. It
 selects each passive `ModuleAssembly` once in the explicit order Demand, Task,
-Search, Artifact, Track. It owns concrete cross-component wiring such as
+Search, Artifact, Track, Evidence. It owns concrete cross-component wiring such as
 Task's Demand resolver and the two Artifact Public callables injected into
-Track's consumer-owned ports. Search, Artifact, and Track contribute no
+Track's consumer-owned ports. Search, Artifact, Track, and Evidence contribute no
 ordered reconciliation handler, so the exact handler order remains:
 
 ```text

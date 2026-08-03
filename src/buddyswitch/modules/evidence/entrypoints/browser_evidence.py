@@ -1,4 +1,4 @@
-"""Issue broker-backed target-scoped browser evidence tokens."""
+"""Issue broker-backed target-scoped Evidence metadata."""
 
 from __future__ import annotations
 
@@ -67,17 +67,13 @@ def _dispatch_issue(*, target_type: str, target_id: str, mode: str) -> dict[str,
         )
     if response.get("ok") is not True:
         return response
-    if not isinstance(response.get("tool_evidence"), dict) or not isinstance(response.get("feedback"), dict):
+    if not isinstance(response.get("tool_evidence"), dict):
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_UNAVAILABLE",
             "runtime broker evidence payload is invalid.",
             details=broker_unavailable_feedback(),
         )
-    return {
-        "ok": True,
-        "tool_evidence": response["tool_evidence"],
-        "feedback": response["feedback"],
-    }
+    return response
 
 
 def _dispatch_approve(*, target_type: str, target_id: str, reason: str) -> dict[str, Any]:
@@ -101,17 +97,13 @@ def _dispatch_approve(*, target_type: str, target_id: str, reason: str) -> dict[
         )
     if response.get("ok") is not True:
         return response
-    if not isinstance(response.get("tool_evidence"), dict) or not isinstance(response.get("feedback"), dict):
+    if not isinstance(response.get("tool_evidence"), dict):
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_UNAVAILABLE",
             "runtime broker downgrade evidence payload is invalid.",
             details=broker_unavailable_feedback(),
         )
-    return {
-        "ok": True,
-        "tool_evidence": response["tool_evidence"],
-        "feedback": response["feedback"],
-    }
+    return response
 
 
 def main() -> int:

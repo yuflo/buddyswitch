@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 
 from .tool import DEFINITION
 from buddyswitch.env.tool_runtime import results as tool_results
-from buddyswitch.modules.artifact import public as artifact_public
+import buddyswitch.modules.artifact.public as artifact_public
 
 
 _ACTION_DEFINITION_MAP = {

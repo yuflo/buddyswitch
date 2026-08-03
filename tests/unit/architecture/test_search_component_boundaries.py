@@ -153,11 +153,9 @@ def test_browser_host_has_no_search_request_placeholder() -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     assert "request" not in methods
-    assert {
-        "status",
-        "issue_evidence_token",
-        "approve_downgrade",
-    }.issubset(methods)
+    assert "status" in methods
+    assert "issue_evidence_token" not in methods
+    assert "approve_downgrade" not in methods
 
 
 def test_current_guidance_does_not_teach_the_retired_search_path() -> None:

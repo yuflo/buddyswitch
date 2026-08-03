@@ -1,4 +1,4 @@
-"""Black-box protocol entrypoint for env.tools.evidence."""
+"""Black-box Tool entrypoint for Evidence."""
 
 from __future__ import annotations
 

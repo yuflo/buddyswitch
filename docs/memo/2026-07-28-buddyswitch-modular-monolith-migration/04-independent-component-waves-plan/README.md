@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `READY — EVIDENCE R2 ONLY`
-> Executable packet: `BS-MM-S4-EVIDENCE-R2-20260731-01`
-> Other lanes: Communication and Context remain `PREPARATION ONLY`
+> Stage state: `EVIDENCE ACCEPTED — COMMUNICATION PREPARATION ONLY`
+> Executable packet: `NONE`
+> Other lane: Context remains `PREPARATION ONLY` and last
 > Merge unit: one accepted lane at a time
 
 S4 is not one mechanical directory migration. Its six lanes share the same
@@ -12,7 +12,8 @@ proved that Track and Artifact must cut over as one atomic migration candidate
 while remaining two independent final modules. The next refresh selected
 Evidence because it needs only the existing Tool contribution and accepted
 Artifact Public. Communication still lacks a worker-lifecycle contribution;
-Context remains last.
+Context remains last. Evidence is now accepted; Communication source refresh is
+the only unlocked preparation boundary.
 
 ## Read order for the current lane
 
@@ -37,6 +38,7 @@ Context remains last.
 18. `track-artifact/S4-TRACK-ARTIFACT-R2-GOAL-PACKET.md`;
 19. `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
 20. `evidence/README.md` and its ordered Evidence lane documents.
+21. the forthcoming Communication source snapshot after it is committed.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -48,8 +50,8 @@ adds current-source execution facts; it does not broaden S4.
 | Search | ACCEPTED | `search/S4-SEARCH-ACCEPTANCE.md` |
 | Track | ACCEPTED WITH ARTIFACT | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
-| Communication | PREPARATION ONLY | iMessage worker lifecycle contribution |
-| Evidence | READY — R2 ONLY | preserved structural candidate plus stable-command terminal-loop repair |
+| Communication | PREPARATION ONLY | refresh and freeze the iMessage worker lifecycle contribution |
+| Evidence | ACCEPTED | `evidence/S4-EVIDENCE-ACCEPTANCE.md` |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
 
 The initial Search packet was rejected before execution by the pre-handoff
@@ -79,17 +81,23 @@ boundary. R1 then produced the complete structural candidate, but correctly
 stopped before FINAL because the protected CLI had no terminal-loop proof.
 Hub preflight subsequently proved the preserved command rejects successful
 canonical ToolResult payloads by requiring a nonexistent `feedback` field.
-R1 is consumed; R2 owns only the command adapter repair and real-broker
+R1 was consumed; R2 owned only the command adapter repair and real-Broker
 process proof on the preserved candidate.
+
+R2 then selected the canonical Broker ToolResult as the single response owner,
+proved successful issue and downgrade plus business and transport failures
+through the installed stable command and real Broker, and passed direct,
+affected and one frozen FINAL. Evidence is accepted. Both Evidence packets are
+consumed permanently.
 
 ## Later-lane admission rule
 
-Communication and Context may not reuse this snapshot or packet. The
-coordinating hub refreshes their owners, representations, host contracts,
-tests and runtime identity only after Evidence acceptance.
+Communication and Context may not reuse an Evidence snapshot or packet. The
+coordinating hub now refreshes Communication owners, representations, host
+contracts, tests and runtime identity. Context remains blocked until the
+Communication lane is accepted.
 
 ## Checkpoint protocol
 
-Only `BS-MM-S4-EVIDENCE-R2-20260731-01` is executable. It does not authorize
-Communication, Context, S5, S6, S7, Git integration, or migration-master
-acceptance.
+No S4 packet is executable. Communication preparation does not authorize
+Communication implementation, Context, S5, S6 or S7.
