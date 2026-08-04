@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1 ACCEPTED — C2 PREPARATION ONLY
-> Runtime authorization: none
+> Current state: S0–S4 ACCEPTED; S5 C1 ACCEPTED — C2 READY
+> Runtime authorization: C2 packet `BS-MM-S5-WEB-CLEANUP-R1-20260804-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1 ACCEPTED — C2 PREPARATION ONLY |
+| S5 | `05-foundation-convergence.md` | C1 ACCEPTED — C2 READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -170,8 +170,14 @@ ToolContext/error/Broker surfaces, preserved all eight Tool contracts, passed
 affected proof and one replacement frozen FINAL after an owner-correct Search
 repair, and is accepted in
 `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`. Both C1
-packets are consumed. C2 source refresh and READY preparation are unblocked;
-C2 implementation, C3–C7 and S6 remain blocked.
+packets are consumed. C2 refresh then traced the remaining concrete Track
+import in WebHost and the product-enumerated cleanup projection fields. D-060
+selects passive exact/prefix route matchers and contribution-derived cleanup
+plan/result fields without changing current Web, cleanup or CLI effects.
+Preflight `S5C2P-20260804-02` passed and packet
+`BS-MM-S5-WEB-CLEANUP-R1-20260804-01` is READY under
+`05-foundation-convergence-plan/web-cleanup/`. C2 alone is executable; C3–C7
+and S6 remain blocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

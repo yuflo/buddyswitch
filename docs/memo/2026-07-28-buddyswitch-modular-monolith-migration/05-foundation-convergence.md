@@ -1,8 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Current state: C1 ACCEPTED — C2 SOURCE REFRESH/PREPARATION ONLY
+> Current state: C1 ACCEPTED — C2 READY
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: none
+> Execution authority: `BS-MM-S5-WEB-CLEANUP-R1-20260804-01` only
 > Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
 
 The executable blueprint and current handoff live at

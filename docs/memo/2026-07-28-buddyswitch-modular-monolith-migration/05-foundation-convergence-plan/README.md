@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1 ACCEPTED — C2 SOURCE REFRESH/PREPARATION ONLY`
-> Current execution authority: none
+> Stage state: `C1 ACCEPTED — C2 READY`
+> Current execution authority: `BS-MM-S5-WEB-CLEANUP-R1-20260804-01`
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -18,19 +18,19 @@ source facts, target topology, checkpoint order and dependency boundaries.
 
 C1 is accepted in
 `tool-host/S5-TOOL-HOST-ACCEPTANCE.md`. Both ToolHost packets are consumed and
-must never resume. The current allowed work is read-only C2 source refresh plus
-coordinating documentation for a new READY decision.
+must never resume. C2 source/consumer refresh, boundary preflight,
+implementation plan and READY review are complete under `web-cleanup/`.
 
-No Web, cleanup, Browser, Daemon, Broker, Actor, App, CLI, RoleHost or final
-S5 implementation is authorized until the corresponding checkpoint passes its
-own source-bound READY review.
+The current packet authorizes only the C2 Web route/cleanup projection
+cutover. Browser, Daemon, Broker, Actor, App, physical Web/CLI host movement,
+RoleHost and final S5 implementation remain unauthorized.
 
 ## Remaining checkpoints
 
 | Checkpoint | Owner convergence | State |
 |---|---|---|
 | C1 | explicit ToolHost, narrow ToolContext, Daemon client placement | ACCEPTED |
-| C2 | WebHost route contribution and generic cleanup projection | SOURCE REFRESH/PREPARATION ONLY |
+| C2 | WebHost route contribution and generic cleanup projection | READY — R1 NOT YET EXECUTED |
 | C3 | Browser runtime and public lifecycle operations | BLOCKED |
 | C4 | Identity, state and process primitives | BLOCKED |
 | C5 | Runtime Broker and Daemon host | BLOCKED |
