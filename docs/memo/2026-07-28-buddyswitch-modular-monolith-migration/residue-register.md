@@ -43,7 +43,7 @@ Statuses:
 | R-COMM-001 | CLOSED — Message/IM/service/Tool/inbound/session/channel/worker/tests have one Communication root and one explicit assembly | S4 Communication | `04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md` |
 | R-SEARCH-001 | CLOSED — Search Tool and owning tests are physically aggregated, explicitly composed once, and the dynamic package plus generic host placeholder are absent | S4 Search | `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` |
 | R-EVIDENCE-001 | CLOSED — Evidence Tool and stable broker-backed adapter have one stateless module root and one explicit assembly; retired technical roots and generic host placeholders are absent | S4 Evidence | `04-independent-component-waves-plan/evidence/S4-EVIDENCE-ACCEPTANCE.md` |
-| R-CONTEXT-001 | Context projection reading private repos/domains from broad ToolContext | S4 Context | public read composition and one Context Tool |
+| R-CONTEXT-001 | CONFIRMED — Context now reads accepted component Public operations, but its Tool remains dynamically owned and Context-only catalog/runtime-source/Role-policy surfaces remain on shared ToolContext | S4 Context | one last-selected Context Tool module, old package absent and exact host residue removed |
 
 ## Foundation/composition residue
 

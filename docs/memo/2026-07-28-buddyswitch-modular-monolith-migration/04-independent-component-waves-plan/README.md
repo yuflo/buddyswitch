@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `CONTEXT PREPARATION ONLY`
-> Executable packet: none
-> Current lane: Context source refresh and READY preparation; remains last
+> Stage state: `CONTEXT READY`
+> Executable packet: `BS-MM-S4-CONTEXT-R1-20260804-01`
+> Current lane: Context atomic cutover; remains last
 > Merge unit: one accepted lane at a time
 
 S4 is not one mechanical directory migration. Its six lanes share the same
@@ -13,8 +13,8 @@ while remaining two independent final modules. The next refresh selected
 Evidence because it needs only the existing Tool contribution and accepted
 Artifact Public. Communication then completed its route/worker boundary,
 physical cutover and generic cleanup execution repair. Search, Track,
-Artifact, Evidence and Communication are accepted. Context remains last and
-is now the only lane eligible for source refresh and READY preparation.
+Artifact, Evidence and Communication are accepted. Context remains last; its
+committed-source refresh and READY review now authorize one atomic packet.
 
 ## Read order for the current lane
 
@@ -40,6 +40,7 @@ is now the only lane eligible for source refresh and READY preparation.
 19. `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`.
 20. `evidence/README.md` and its ordered Evidence lane documents.
 21. `communication/README.md` and its ordered Communication lane documents.
+22. `context/README.md` and its ordered Context lane documents.
 
 The target design and stage charter remain architectural authority. This plan
 adds current-source execution facts; it does not broaden S4.
@@ -53,7 +54,7 @@ adds current-source execution facts; it does not broaden S4.
 | Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Communication | ACCEPTED | `communication/S4-COMMUNICATION-ACCEPTANCE.md` |
 | Evidence | ACCEPTED | `evidence/S4-EVIDENCE-ACCEPTANCE.md` |
-| Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
+| Context | READY | `context/S4-CONTEXT-GOAL-PACKET.md` |
 
 The initial Search packet was rejected before execution by the pre-handoff
 review. R1 produced a coherent candidate but stopped before collection on an
@@ -91,14 +92,15 @@ through the installed stable command and real Broker, and passed direct,
 affected and one frozen FINAL. Evidence is accepted. Both Evidence packets are
 consumed permanently.
 
-## Later-lane admission rule
+## Context admission
 
-Context may not reuse an Evidence or Communication snapshot or packet. It
-requires a fresh committed-source owner/consumer trace and its own reviewed
-execution authority.
+Context did not reuse another lane's packet. Its fresh source/consumer trace
+proved Public-only product reads and three exact Context-specific shared-host
+residues. Direct baseline `f905a017ab6f455b9efd04dda9c2bcb3`, affected
+baseline `0b6cafba442b403ea441df38b6393241` and topology probe
+`S4CONTEXTP-20260804-01` passed. Only the packet under `context/` may execute.
 
 ## Checkpoint protocol
 
-No S4 packet is executable. Communication acceptance authorizes Context source
-refresh and READY preparation only; it does not authorize Context
-implementation, S5, S6 or S7.
+Only `BS-MM-S4-CONTEXT-R1-20260804-01` is executable. It does not authorize
+Context acceptance, S5, S6 or S7.

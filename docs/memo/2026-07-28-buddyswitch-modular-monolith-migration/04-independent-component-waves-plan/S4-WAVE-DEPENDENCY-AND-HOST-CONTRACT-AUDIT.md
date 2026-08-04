@@ -2,9 +2,9 @@
 
 > Audit source: `e4fe342144febc023d1d635012e7e8a5e645138d`
 > Initial audit result: Search executed first.
-> 2026-08-03 refresh: Search, Track–Artifact and Evidence are accepted;
-> Communication is READY through exact Web route/worker and cleanup contracts;
-> Context remains blocked and last.
+> 2026-08-04 refresh: Search, Track–Artifact, Evidence and Communication are
+> accepted; Context is READY through its existing Tool contribution, accepted
+> Public reads and exact shared-host residue removal.
 
 ## 1. Why S4 is lane-sized
 
@@ -115,10 +115,16 @@ preservation groups, acyclic Demand/Communication edge, exact generic cleanup
 projection and `S4COMMP-20260803-01` topology preflight. It adds only the two
 host fields earned by current `/api/im/*` and iMessage worker behavior.
 
+Context was admitted last by a fresh committed-source trace. It already reads
+Track, Task, Artifact and Communication exclusively through Public operations.
+Probe `S4CONTEXTP-20260804-01` proved the passive last-selected Tool module,
+unchanged Daemon order, explicit dispatch and fail-closed old/new registration.
+Its lane removes only `RuntimeObjectAccess`, `RegistryCatalogAccess` and the
+Context-only Role policy preview method from shared `ToolContext`; every other
+foundation convergence target remains S5-owned.
+
 ## 5. S4 sequencing rule
 
-After Search returns, the hub accepts or rejects that exact candidate before
-preparing another lane. Parallel execution remains possible only if a later
-source refresh proves disjoint owners, frozen host contracts, disjoint write
-sets and one application-root integration owner. That condition is not
-currently established and is not implied by S4's name.
+Context is now the only executable S4 lane. After its return, the hub accepts
+or rejects that exact candidate before closing S4 or preparing S5. No parallel
+S4 implementation remains, and READY does not authorize Foundation work.
