@@ -87,6 +87,8 @@ def test_demand_is_one_passive_module_selected_once_by_application_composition()
         "cleanup",
         "actor_console_sections",
         "inbound_sources",
+        "web_routes",
+        "web_workers",
     ]
 
     composition_imports = _imports(APPLICATION_COMPOSITION)
@@ -237,17 +239,22 @@ def test_hosts_receive_typed_contributions_and_consumers_use_demand_public() -> 
             }
         ], relative
 
-    consumers = (
-        Path("src/buddyswitch/launcher/im_wake_handler.py"),
-        Path(
-            "src/buddyswitch/modules/track/private/adapters/daemon/"
-            "track_comment_added_handler.py"
-        ),
+    consumer = Path(
+        "src/buddyswitch/modules/track/private/adapters/daemon/"
+        "track_comment_added_handler.py"
     )
-    for relative in consumers:
-        imports = _imports(relative)
-        assert "buddyswitch.modules.demand.public" in imports, relative
-        assert not any(name.startswith("buddyswitch.modules.demand.private") for name in imports)
+    imports = _imports(consumer)
+    assert "buddyswitch.modules.demand.public" in imports
+    assert not any(name.startswith("buddyswitch.modules.demand.private") for name in imports)
+
+    communication_handler = Path(
+        "src/buddyswitch/modules/communication/private/adapters/daemon/"
+        "im_wake_handler.py"
+    )
+    handler_imports = _imports(communication_handler)
+    assert not any(name.startswith("buddyswitch.modules.demand") for name in handler_imports)
+    composition_source = (REPO_ROOT / APPLICATION_COMPOSITION).read_text(encoding="utf-8")
+    assert "enqueue_inbound=demand_public.enqueue_inbound" in composition_source
 
 
 def test_composed_host_implementations_are_not_direct_module_entrypoints() -> None:
@@ -417,12 +424,17 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
         assert "demand_sys" not in source, relative
         assert "demand-sys" not in source, relative
 
-    handler = Path("src/buddyswitch/launcher/im_wake_handler.py")
+    handler = Path(
+        "src/buddyswitch/modules/communication/private/adapters/daemon/"
+        "im_wake_handler.py"
+    )
     adapter = FINAL_DAEMON_ROOT / "demand_sys_daemon_adapter.py"
     handler_imports = _imports(handler)
     adapter_imports = _imports(adapter)
-    assert "buddyswitch.modules.demand.public" in handler_imports
-    assert "buddyswitch.env.services.messages" in handler_imports
+    assert not any(name.startswith("buddyswitch.modules.demand") for name in handler_imports)
+    assert "buddyswitch.modules.communication.private.domain" in handler_imports
+    composition_source = (REPO_ROOT / APPLICATION_COMPOSITION).read_text(encoding="utf-8")
+    assert "enqueue_inbound=demand_public.enqueue_inbound" in composition_source
     assert not any("task_sys" in name for name in handler_imports)
     assert not any("demand_sys" in name for name in adapter_imports)
     adapter_source = (REPO_ROOT / adapter).read_text(encoding="utf-8").lower()

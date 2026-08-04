@@ -137,14 +137,14 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
 
     def test_current_im_surfaces_do_not_contain_retired_processing_model(self) -> None:
         current_surfaces = (
-            "src/buddyswitch/env/repos/messages.py",
-            "src/buddyswitch/env/services/messages.py",
-            "src/buddyswitch/env/tools/message/tool.py",
-            "src/buddyswitch/env/tools/message/_impl.py",
-            "src/buddyswitch/env/tool_runtime/im_client.py",
+            "src/buddyswitch/modules/communication/private/state/messages.py",
+            "src/buddyswitch/modules/communication/private/domain/messages.py",
+            "src/buddyswitch/modules/communication/private/adapters/tool/tool.py",
+            "src/buddyswitch/modules/communication/private/adapters/tool/_impl.py",
+            "src/buddyswitch/modules/communication/private/adapters/actor/im_client.py",
             "src/buddyswitch/env/tool_runtime/role_auth.py",
-            "src/buddyswitch/launcher/external_im_session.py",
-            "src/buddyswitch/launcher/im_http_router.py",
+            "src/buddyswitch/modules/communication/private/adapters/web/external_im_session.py",
+            "src/buddyswitch/modules/communication/private/adapters/web/im_http_router.py",
             "src/buddyswitch/modules/task/private/adapters/goal/handler.py",
             "src/buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md",
             "docs/arch/web-interface-call-architecture.md",

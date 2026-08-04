@@ -139,7 +139,10 @@ def test_generic_daemon_modules_do_not_depend_on_product_adapters() -> None:
 
 def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
     handlers = (
-        Path("src/buddyswitch/launcher/im_wake_handler.py"),
+        Path(
+            "src/buddyswitch/modules/communication/private/adapters/daemon/"
+            "im_wake_handler.py"
+        ),
         Path(
             "src/buddyswitch/modules/track/private/adapters/daemon/"
             "track_comment_added_handler.py"

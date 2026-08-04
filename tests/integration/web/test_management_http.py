@@ -755,10 +755,21 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 self.calls.append((method, path, body, headers))
                 return 209, {"ok": True, "owner": "im-router"}
 
+            def prepare(self) -> None:
+                return None
+
         host_control = RecordingHostControl()
         router = RecordingImRouter()
-        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
-        service._im_router = router
+        service = WEB_MANAGEMENT.WebManagementService(
+            host_control=host_control,
+            web_routes=(
+                WEB_MANAGEMENT.WebRouteRegistration(
+                    name="im-router-probe",
+                    prefix="/api/im/",
+                    factory=lambda _access: router,
+                ),
+            ),
+        )
 
         status, payload = service.handle_api(
             "POST",

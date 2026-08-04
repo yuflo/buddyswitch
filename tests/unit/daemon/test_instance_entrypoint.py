@@ -22,10 +22,10 @@ DAEMON_SH_PATH = (
 )
 CENTRAL_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py"
 MODULE_COUNTER = count()
-EXPECTED_SUBSCRIPTIONS = ["im.message.created", "track.comment.added"]
+EXPECTED_SUBSCRIPTIONS = ["track.comment.added", "im.message.created"]
 EXPECTED_HANDLER_TYPES = [
-    "ImMessageCreatedHandler",
     "TrackCommentAddedHandler",
+    "ImMessageCreatedHandler",
     "BrowserPageExpiredHandler",
     "BrowserReleaseHandler",
     "BrowserFailedOpenPageCleanupHandler",
@@ -34,8 +34,8 @@ EXPECTED_HANDLER_TYPES = [
     "DemandOrchestrationHandler",
 ]
 EXPECTED_HANDLER_NAMES = [
-    "im_message_created",
     "track_comment_added",
+    "im_message_created",
     "browser_page_expired",
     "browser_cockpit_release",
     "browser_failed_open_page_cleanup",
@@ -99,7 +99,11 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
         self.assertIn("buddyswitch.launcher.notification_center", imports)
         self.assertIn("buddyswitch.launcher.browser_inbound", imports)
-        self.assertIn("buddyswitch.launcher.message_inbound", imports)
+        self.assertNotIn("buddyswitch.launcher.message_inbound", imports)
+        self.assertFalse(
+            any(name.startswith("buddyswitch.modules.communication") for name in imports),
+            msg=imports,
+        )
         self.assertFalse(
             any("track" in name for name in imports),
             msg=imports,
@@ -145,16 +149,16 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             )
 
         class BuiltInCollision:
-            name = "im_message_created"
+            name = "browser_page_expired"
 
         with self.assertRaisesRegex(
             ValueError,
-            "duplicate daemon handler registration: im_message_created",
+            "duplicate daemon handler registration: browser_page_expired",
         ):
             self.instance_daemon.default_daemon_handlers(
                 (
                     DaemonHandlerRegistration(
-                        name="im_message_created",
+                        name="browser_page_expired",
                         factory=BuiltInCollision,
                     ),
                 )
@@ -190,8 +194,8 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
         self.assertEqual([type(handler).__name__ for handler in handlers], EXPECTED_HANDLER_TYPES)
-        self.assertEqual(getattr(handlers[0], "name", None), "im_message_created")
-        self.assertEqual(getattr(handlers[1], "name", None), "track_comment_added")
+        self.assertEqual(getattr(handlers[0], "name", None), "track_comment_added")
+        self.assertEqual(getattr(handlers[1], "name", None), "im_message_created")
         self.assertEqual(recorded["instance_json"], Path("/tmp/inst.json"))
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
         self.assertEqual(
@@ -231,7 +235,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         handlers = recorded["handlers"]
         assert isinstance(handlers, list)
         self.assertEqual([getattr(handler, "name", None) for handler in handlers], EXPECTED_HANDLER_NAMES)
-        self.assertEqual(getattr(handlers[0], "name", None), "im_message_created")
+        self.assertEqual(getattr(handlers[1], "name", None), "im_message_created")
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
 
     def test_stop_prints_json_from_daemon_core(self) -> None:

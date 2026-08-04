@@ -37,7 +37,7 @@ def discover(root: Path) -> tuple[OwnedStatePath, ...]:
         owned.append(
             OwnedStatePath(
                 relative_path=path.relative_to(root).as_posix(),
-                owner_role=owner_role,
+                owner_roles=(owner_role,) if owner_role is not None else (),
             )
         )
     return tuple(owned)

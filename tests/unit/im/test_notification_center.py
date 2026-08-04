@@ -16,7 +16,10 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 NC_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py"
-MESSAGE_INBOUND_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "message_inbound.py"
+MESSAGE_INBOUND_PATH = (
+    ROOT
+    / "src/buddyswitch/modules/communication/private/adapters/daemon/message_inbound.py"
+)
 TRACK_COMMENT_INBOUND_PATH = (
     ROOT
     / "src"
@@ -230,12 +233,14 @@ class NotificationCenterTests(unittest.TestCase):
         message_inbound = load_module(MESSAGE_INBOUND_PATH)
         daemon_core = load_module(DAEMON_CORE_PATH)
 
-        registrations = message_inbound.inbound_registrations()
+        registrations = message_inbound.inbound_registrations(
+            lambda *_args, **_kwargs: None
+        )
 
         self.assertEqual(len(registrations), 1)
         registration = registrations[0]
         self.assertEqual(registration.event_type, "im.message.created")
-        self.assertTrue(registration.owner_module.endswith("message_inbound"))
+        self.assertEqual(registration.owner_module, "communication")
         self.assertEqual(dict(registration.payload_contract), {"required_fields": ("message_id", "conversation_id", "event_id")})
         contract_text = json.dumps(dict(registration.payload_contract), ensure_ascii=True, default=list)
         self.assertNotIn("body", contract_text.lower())

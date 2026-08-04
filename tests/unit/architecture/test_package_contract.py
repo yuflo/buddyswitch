@@ -253,6 +253,11 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "buddyswitch/objects/artifacts",
             "buddyswitch/objects/artifact-attachments",
         ),
+        REPO_ROOT / "docs" / "arch" / "communication-capability-architecture.md": (
+            "src/buddyswitch/modules/communication/",
+            "WebRouteRegistration",
+            "WebWorkerRegistration",
+        ),
     }
     missing_required_paths = sorted(
         (owner.relative_to(REPO_ROOT).as_posix(), required_path)

@@ -20,26 +20,33 @@ explicit user-visible exception: Web hands Terminal.app the same public
 
 ## Web interface
 
-Web owns browser routes and browser DTO composition. It may combine Host
-Control facts with external-safe product reads, but it does not own lifecycle
-mechanics, Actor input, Demand/Task mutation, or IM semantics.
+The generic Web host owns its built-in browser routes and host DTO composition.
+It may combine Host Control facts with external-safe product reads, but it does
+not own lifecycle mechanics, Actor input, Demand/Task mutation, Communication
+routes, workers, identities, delivery, or Message semantics.
 
 `/api/actors/{id}/console` composes one Actor Console read model. The generic
-Web host owns the surrounding Actor, runtime, IM, and capability DTO. It
+Web host owns the surrounding Actor, runtime, and capability DTO. It
 invokes typed `ActorConsoleSectionRegistration` projectors selected by
 application composition. Task contributes `task_sys`; Track contributes
-`tracks` using Track Public external projections. Those projections preserve
-their exact external-safe DTOs. Web imports neither Task-private nor
-Track-private packages, contains no product lifecycle rule, has no raw
+`tracks` using Track Public external projections; Communication contributes
+`im`. Those projections preserve their exact external-safe DTOs. Web imports
+no component-private package, contains no product lifecycle rule, has no raw
 repository fallback, and exposes no product mutation subroute.
 
 ## Web Message
 
-`/api/im/*` is the single browser-facing Message contract.
-`ExternalImSession` projects external identity, Actor discovery, send, events,
-reply, acknowledgement, and conversation calls onto Central IM. Central IM
-owns immutable Messages, `reply_to` edges, identity-visible cursors, target
-resolution, and delivery results.
+`/api/im/*` is the single browser-facing Message contract. Communication owns
+that route and contributes it through one typed `WebRouteRegistration`.
+Communication also contributes the optional iMessage channel through one
+`WebWorkerRegistration`. Application composition selects both; the generic Web
+host validates, instantiates, prepares, dispatches, starts, stops, and closes
+them without importing Communication.
+
+Communication's external session projection maps external identity, Actor
+discovery, send, events, reply, acknowledgement, and conversation calls onto
+its Message owner. Communication owns immutable Messages, `reply_to` edges,
+identity-visible cursors, target resolution, and delivery results.
 
 Inbound Actor delivery may create Demand triage attention through the owning
 IM delivery path. Web does not synthesize Demand or Task state and does not
@@ -66,7 +73,8 @@ or Task state.
 - Codex App Server owns native Goal execution.
 - Track owns Track state and projections.
 - Artifact owns Artifact content, attachment state, and read policy.
-- Central IM owns Message state and delivery results.
+- Communication owns Message state, delivery results, its Web route, its
+  iMessage worker, and the Actor Console `im` projection.
 
 Actor runtime Task tools expose exactly `list`, `get`, `create`, and `cancel`.
 Successful Task completion is recorded by Task's native-Goal adapter from the
@@ -97,7 +105,7 @@ Valid paths:
 Browser -> Web -> private Host Control
 Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session
 Browser -> Web -> typed Actor Console section projectors
-Browser -> Web -> IM API
+Browser -> generic Web host -> contributed Communication route
 
 Public CLI -> private Host Control
 Public CLI -> Actor Session
@@ -113,6 +121,7 @@ Forbidden paths:
 - Web to raw product repository rows;
 - generic Web host to Task private code or Task lifecycle rules;
 - generic Web host to Track private code or Track lifecycle rules;
+- generic Web host to Communication private code or Message semantics;
 - Web to Actor runtime mutation tools for console reads;
 - Web or CLI to native Goal mutation;
 - Actor Session to Demand or Task mutation;

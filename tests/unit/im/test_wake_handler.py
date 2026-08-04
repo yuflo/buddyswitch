@@ -6,12 +6,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from buddyswitch.launcher import im_wake_handler
 from buddyswitch.env.repos import identities as identity_repo
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.services import messages as message_service
-from buddyswitch.modules.demand.private.adapters.daemon import (
-    demand_sys_daemon_adapter,
+from buddyswitch.modules.communication.private.adapters.daemon import (
+    im_wake_handler,
+)
+from buddyswitch.modules.communication.private.domain import (
+    messages as message_service,
 )
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
@@ -55,14 +56,6 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         )
         self._save_actor(self.route["identity_id"], self.route["role_id"])
         self.enqueue_calls: list[dict[str, Any]] = []
-        original_enqueue = demand_sys_daemon_adapter.enqueue_inbound
-        self.addCleanup(
-            setattr,
-            demand_sys_daemon_adapter,
-            "enqueue_inbound",
-            original_enqueue,
-        )
-        demand_sys_daemon_adapter.enqueue_inbound = self._enqueue_inbound
 
     def _save_actor(self, actor_id: str, role_id: str) -> None:
         identity_repo.save_actor_identity_profile({
@@ -126,7 +119,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         runtime = _Runtime()
         state = _State()
 
-        result = im_wake_handler.ImMessageCreatedHandler().handle(
+        result = im_wake_handler.ImMessageCreatedHandler(self._enqueue_inbound).handle(
             self.context,
             state,
             runtime,
@@ -163,7 +156,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
             label="wrong-im-target",
         )
 
-        result = im_wake_handler.ImMessageCreatedHandler().handle(
+        result = im_wake_handler.ImMessageCreatedHandler(self._enqueue_inbound).handle(
             self.context,
             None,
             _Runtime(),
@@ -189,7 +182,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
                     target_role_id=valid_trigger.target_role_id,
                     payload={**valid_trigger.payload, field: value},
                 )
-                result = im_wake_handler.ImMessageCreatedHandler().handle(
+                result = im_wake_handler.ImMessageCreatedHandler(self._enqueue_inbound).handle(
                     self.context,
                     None,
                     _Runtime(),
@@ -215,7 +208,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
                     target_role_id=first_trigger.target_role_id,
                     payload=payload,
                 )
-                result = im_wake_handler.ImMessageCreatedHandler().handle(
+                result = im_wake_handler.ImMessageCreatedHandler(self._enqueue_inbound).handle(
                     self.context,
                     None,
                     _Runtime(),
@@ -235,7 +228,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
             content="Message for a different actor.",
         )
 
-        result = im_wake_handler.ImMessageCreatedHandler().handle(
+        result = im_wake_handler.ImMessageCreatedHandler(self._enqueue_inbound).handle(
             self.context,
             None,
             _Runtime(),
@@ -249,11 +242,11 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
 
     def test_enqueue_error_returns_failed_and_keeps_task_projection_empty(self) -> None:
         _sent, trigger = self._persist_message()
-        demand_sys_daemon_adapter.enqueue_inbound = lambda *_args, **_kwargs: (
+        failing_enqueue = lambda *_args, **_kwargs: (
             (_ for _ in ()).throw(RuntimeError("demand schedule unavailable"))
         )
 
-        result = im_wake_handler.ImMessageCreatedHandler().handle(
+        result = im_wake_handler.ImMessageCreatedHandler(failing_enqueue).handle(
             self.context,
             None,
             _Runtime(),
@@ -266,7 +259,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         self.assertEqual(self._task_records(), [])
 
     def test_handler_does_not_handle_unrelated_event(self) -> None:
-        handler = im_wake_handler.ImMessageCreatedHandler()
+        handler = im_wake_handler.ImMessageCreatedHandler(self._enqueue_inbound)
         trigger = _Trigger(
             "example.ready",
             self.route["identity_id"],

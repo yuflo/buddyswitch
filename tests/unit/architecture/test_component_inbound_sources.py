@@ -40,6 +40,8 @@ def test_module_assembly_has_only_the_approved_inbound_source_host_seam() -> Non
         "cleanup",
         "actor_console_sections",
         "inbound_sources",
+        "web_routes",
+        "web_workers",
     ]
 
 
@@ -126,17 +128,17 @@ def test_application_validates_and_rejects_duplicate_inbound_events() -> None:
         )
 
 
-def test_track_inbound_is_contributed_once_and_generic_daemon_stays_neutral() -> None:
+def test_component_inbound_sources_are_contributed_once_and_generic_daemon_stays_neutral() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.launcher import instance_daemon
 
     application = build_application()
     assert [
         registration.event_type for registration in application.inbound_sources
-    ] == ["track.comment.added"]
+    ] == ["track.comment.added", "im.message.created"]
     assert instance_daemon.default_notify_subscriptions(
         application.inbound_sources
-    ) == ["im.message.created", "track.comment.added"]
+    ) == ["track.comment.added", "im.message.created"]
 
     imports = _imports(REPO_ROOT / INSTANCE_DAEMON)
     assert not [
@@ -151,7 +153,7 @@ def test_track_inbound_is_contributed_once_and_generic_daemon_stays_neutral() ->
     assert "application.inbound_sources" in entrypoint_source
 
 
-def test_message_and_browser_built_ins_remain_exact() -> None:
+def test_component_and_browser_inbound_handlers_remain_exact() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.launcher import browser_inbound, instance_daemon
 
@@ -161,8 +163,8 @@ def test_message_and_browser_built_ins_remain_exact() -> None:
         application.inbound_sources,
     )
     assert [getattr(handler, "name", None) for handler in handlers] == [
-        "im_message_created",
         "track_comment_added",
+        "im_message_created",
         "browser_page_expired",
         "browser_cockpit_release",
         "browser_failed_open_page_cleanup",

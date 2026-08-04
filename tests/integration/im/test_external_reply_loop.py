@@ -15,14 +15,15 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.launcher import daemon_mailbox  # noqa: E402
-from buddyswitch.launcher import im_http_router  # noqa: E402
-from buddyswitch.launcher import im_wake_handler  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.web import im_http_router  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.daemon import im_wake_handler  # noqa: E402
 from buddyswitch.env.repos import identities  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
-from buddyswitch.env.services import messages as message_service  # noqa: E402
-from buddyswitch.env.tool_runtime import im_actor_delivery  # noqa: E402
-from buddyswitch.env.tool_runtime import im_client as im_client_module  # noqa: E402
+from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.actor import im_actor_delivery  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
+from buddyswitch.modules.demand import public as demand_public  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
@@ -34,7 +35,6 @@ class _ActorContext(dict[str, Any]):
             manifest={"roles": [{"id": role_id}]},
         )
         self.actor_directory = capabilities
-        self.im_actor_delivery = capabilities
 
 
 class _RecordingImDelivery:
@@ -88,7 +88,9 @@ class _WakeHandlerDispatcher:
         self.role_id = role_id
         self.runtime = _Runtime()
         self.state = _RecordingState()
-        self.handler = im_wake_handler.ImMessageCreatedHandler()
+        self.handler = im_wake_handler.ImMessageCreatedHandler(
+            demand_public.enqueue_inbound
+        )
         self.triggers: list[Any] = []
 
     def __call__(self, trigger: Any) -> dict[str, Any]:
@@ -453,7 +455,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
 
             capabilities = _SourceCapabilities()
             client = im_client_module.ActorImClient(
-                _ActorContext(identity_id=source_identity_id, role_id="dev", capabilities=capabilities)
+                _ActorContext(identity_id=source_identity_id, role_id="dev", capabilities=capabilities),
+                actor_delivery_handler=capabilities.deliver,
             )
 
             response = client.send({"target_identity_id": target_identity_id, "content": "integrated ping"})
@@ -546,8 +549,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
             (
                 (ROOT / "src/buddyswitch/launcher/web_management.py").read_text(encoding="utf-8"),
                 (ROOT / "src/buddyswitch/launcher/assets/web-management/app.js").read_text(encoding="utf-8"),
-                (ROOT / "src/buddyswitch/env/tool_runtime/im_client.py").read_text(encoding="utf-8"),
-                (ROOT / "src/buddyswitch/env/tools/message/_impl.py").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/modules/communication/private/adapters/actor/im_client.py").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/modules/communication/private/adapters/tool/_impl.py").read_text(encoding="utf-8"),
             )
         )
 

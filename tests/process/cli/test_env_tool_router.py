@@ -124,7 +124,7 @@ from pathlib import Path
 
 class BlockMessageImpl(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "buddyswitch.env.tools.message._impl":
+        if fullname == "buddyswitch.modules.communication.private.adapters.tool._impl":
             raise RuntimeError("blocked message _impl import")
         return None
 

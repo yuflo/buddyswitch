@@ -13,11 +13,11 @@ ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.env.repos import identities  # noqa: E402
-from buddyswitch.env.repos import messages as message_repo  # noqa: E402
+from buddyswitch.modules.communication.private.state import messages as message_repo  # noqa: E402
 from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
 from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
-from buddyswitch.env.tool_runtime import im_actor_delivery  # noqa: E402
-from buddyswitch.env.tool_runtime import im_client as im_client_module  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.actor import im_actor_delivery  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
 from buddyswitch.launcher import central_daemon_core  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -30,7 +30,6 @@ class _IdentityContext(dict[str, Any]):
             manifest={"roles": [{"id": role_id}]},
         )
         self.actor_directory = capabilities
-        self.im_actor_delivery = capabilities
 
 
 class _NoActorsCapabilities:

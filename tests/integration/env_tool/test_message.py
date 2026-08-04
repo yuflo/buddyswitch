@@ -11,10 +11,10 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.tools.message import _impl as message_impl  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.tool import _impl as message_impl  # noqa: E402
 from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
-from buddyswitch.env.services import messages as message_service  # noqa: E402
-from buddyswitch.env.tool_runtime import im_client as im_client_module  # noqa: E402
+from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
@@ -75,7 +75,6 @@ class _RealImContext(dict[str, Any]):
             manifest={"roles": [{"id": role_id}, {"id": "pm"}]},
         )
         self.actor_directory = capabilities
-        self.im_actor_delivery = capabilities
 
 
 class _RecordingImDelivery:
@@ -178,8 +177,10 @@ class ActorImClientTests(RuntimeWorkspaceTestCase):
         original = im_client_module.message_service.send_im_message
         im_client_module.message_service.send_im_message = fake_send_im_message
         try:
+            capabilities = _Capabilities()
             client = im_client_module.ActorImClient(
-                _RealImContext(identity_id=actor_id, role_id="dev", capabilities=_Capabilities())
+                _RealImContext(identity_id=actor_id, role_id="dev", capabilities=capabilities),
+                actor_delivery_handler=capabilities.deliver,
             )
             response = client.send({"target_identity_id": target_id, "content": "hello"})
         finally:
@@ -305,7 +306,8 @@ class ActorImClientTests(RuntimeWorkspaceTestCase):
 
         capabilities = _Capabilities()
         client = im_client_module.ActorImClient(
-            _RealImContext(identity_id=active_actor_id, role_id="dev", capabilities=capabilities)
+            _RealImContext(identity_id=active_actor_id, role_id="dev", capabilities=capabilities),
+            actor_delivery_handler=capabilities.deliver,
         )
 
         reply = client.send({"content": "Reply from dev.", "reply_to": root["message"]["id"]})

@@ -13,12 +13,12 @@ DAEMON_OWNED_FILES = [
     ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "message_inbound.py",
+    ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/message_inbound.py",
     ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_inbound.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py",
     ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
+    ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
@@ -29,9 +29,9 @@ DAEMON_OWNED_FILES = [
 DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_contracts.py"
 CONTEXT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "context.py"
 DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py"
-IM_ACTOR_DELIVERY_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "im_actor_delivery.py"
+IM_ACTOR_DELIVERY_PATH = ROOT / "src/buddyswitch/modules/communication/private/adapters/actor/im_actor_delivery.py"
 PRODUCT_HANDLER_PATHS = (
-    ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py",
+    ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
@@ -92,12 +92,10 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn("Daemon" + "Access", class_names)
         self.assertNotIn("TaskGoalRuntimeAccess", class_names)
         self.assertNotIn('"daemon"', context_source)
-        for name in (
-            "ActorDirectoryAccess",
-            "SignalDeliveryAccess",
-            "ImActorDeliveryAccess",
-        ):
+        for name in ("ActorDirectoryAccess", "SignalDeliveryAccess"):
             self.assertIn(name, class_names)
+        self.assertNotIn("ImActorDeliveryAccess", class_names)
+        self.assertNotIn("im_actor_delivery", context_source)
 
     def test_generic_daemon_client_contains_no_im_product_delivery(self) -> None:
         source = DAEMON_CLIENT_PATH.read_text(encoding="utf-8")
@@ -191,7 +189,10 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn('"comment_id"', source)
 
     def test_im_wake_handler_owns_im_signal_payload_semantics(self) -> None:
-        handler_source = (ROOT / "src" / "buddyswitch" / "launcher" / "im_wake_handler.py").read_text(encoding="utf-8")
+        handler_source = (
+            ROOT
+            / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("im.message.created", handler_source)
         self.assertIn("message_id", handler_source)

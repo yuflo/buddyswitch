@@ -18,7 +18,11 @@ from buddyswitch.launcher.cli_contract import CliCommandRegistration
 from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
 from buddyswitch.launcher import notification_center
 from buddyswitch.launcher.notification_center import InboundSourceRegistration
-from buddyswitch.launcher.web_contracts import ActorConsoleSectionRegistration
+from buddyswitch.launcher.web_contracts import (
+    ActorConsoleSectionRegistration,
+    WebRouteRegistration,
+    WebWorkerRegistration,
+)
 from buddyswitch.runtime_support.env_cleanup import CleanupContribution
 from buddyswitch.runtime_support.skill_contracts import SkillExport
 
@@ -33,6 +37,8 @@ class ApplicationAssembly:
     cleanup: tuple[CleanupContribution, ...]
     actor_console_sections: tuple[ActorConsoleSectionRegistration, ...]
     inbound_sources: tuple[InboundSourceRegistration, ...]
+    web_routes: tuple[WebRouteRegistration, ...]
+    web_workers: tuple[WebWorkerRegistration, ...]
 
 
 def _text(value: object, *, label: str) -> str:
@@ -63,6 +69,9 @@ def build_application(
     cleanup_categories: set[str] = set()
     actor_console_names: set[str] = set()
     inbound_event_types: set[str] = set()
+    web_route_names: set[str] = set()
+    web_route_prefixes: set[str] = set()
+    web_worker_names: set[str] = set()
     command_factory_ids: set[int] = set()
     daemon_handlers: list[DaemonHandlerRegistration] = []
     tools: list[ToolRegistration] = []
@@ -71,6 +80,8 @@ def build_application(
     cleanup: list[CleanupContribution] = []
     actor_console_sections: list[ActorConsoleSectionRegistration] = []
     inbound_sources: list[InboundSourceRegistration] = []
+    web_routes: list[WebRouteRegistration] = []
+    web_workers: list[WebWorkerRegistration] = []
 
     for module in modules:
         if not isinstance(module, ModuleAssembly):
@@ -178,6 +189,45 @@ def build_application(
             )
             inbound_sources.append(normalized)
 
+        for registration in module.web_routes:
+            if not isinstance(registration, WebRouteRegistration):
+                raise ValueError(
+                    "Web route contribution must be WebRouteRegistration"
+                )
+            name = _text(registration.name, label="Web route name")
+            prefix = registration.prefix
+            if (
+                not isinstance(prefix, str)
+                or not prefix.startswith("/api/")
+                or not prefix.endswith("/")
+                or "?" in prefix
+                or "#" in prefix
+            ):
+                raise ValueError(
+                    f"Web route API prefix for '{name}' must start with "
+                    "'/api/' and end with '/'"
+                )
+            if not callable(registration.factory):
+                raise ValueError(
+                    f"Web route factory for '{name}' must be callable"
+                )
+            _unique(name, web_route_names, label="Web route name")
+            _unique(prefix, web_route_prefixes, label="Web route prefix")
+            web_routes.append(registration)
+
+        for registration in module.web_workers:
+            if not isinstance(registration, WebWorkerRegistration):
+                raise ValueError(
+                    "Web worker contribution must be WebWorkerRegistration"
+                )
+            name = _text(registration.name, label="Web worker name")
+            if not callable(registration.factory):
+                raise ValueError(
+                    f"Web worker factory for '{name}' must be callable"
+                )
+            _unique(name, web_worker_names, label="Web worker name")
+            web_workers.append(registration)
+
     if not isinstance(daemon_handler_order, tuple):
         raise ValueError("daemon handler order must be a tuple")
     normalized_order = tuple(
@@ -209,6 +259,8 @@ def build_application(
         cleanup=tuple(cleanup),
         actor_console_sections=tuple(actor_console_sections),
         inbound_sources=tuple(inbound_sources),
+        web_routes=tuple(web_routes),
+        web_workers=tuple(web_workers),
     )
 
 
@@ -242,5 +294,9 @@ def activate_application(
     )
     web_management.configure_actor_console_sections(
         application.actor_console_sections
+    )
+    web_management.configure_web_contributions(
+        application.web_routes,
+        application.web_workers,
     )
     return application

@@ -247,7 +247,7 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         self.assertIn("BUDDYSWITCH_CENTRAL_DAEMON_SOCKET", block)
         self.assertIn("return int(completed.returncode)", block)
 
-    def test_serve_with_imessage_worker_starts_stops_and_closes_server(self) -> None:
+    def test_serve_with_workers_starts_stops_and_closes_server(self) -> None:
         class StopServer(Exception):
             pass
 
@@ -278,14 +278,14 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         worker = FakeWorker()
 
         with self.assertRaises(StopServer):
-            WEB_MANAGEMENT.serve_with_imessage_worker(server, worker)
+            WEB_MANAGEMENT.serve_with_workers(server, (worker,))
 
         self.assertTrue(server.served)
         self.assertTrue(server.closed)
         self.assertEqual(worker.started, 1)
         self.assertEqual(worker.stopped, 1)
 
-    def test_serve_with_imessage_worker_keeps_server_available_when_worker_start_fails(self) -> None:
+    def test_serve_with_workers_keeps_server_available_when_worker_start_fails(self) -> None:
         class StopServer(Exception):
             pass
 
@@ -315,12 +315,12 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         worker = FakeWorker()
 
         with mock.patch("sys.stderr") as stderr, self.assertRaises(StopServer):
-            WEB_MANAGEMENT.serve_with_imessage_worker(server, worker)
+            WEB_MANAGEMENT.serve_with_workers(server, (worker,))
 
         self.assertTrue(server.served)
         self.assertTrue(server.closed)
         self.assertEqual(worker.stopped, 0)
-        stderr.write.assert_any_call("iMessage channel worker disabled: imsg unavailable\n")
+        stderr.write.assert_any_call("Web worker 'FakeWorker' disabled: imsg unavailable\n")
 
     def test_web_management_source_does_not_parse_imessage_control_messages(self) -> None:
         source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
@@ -350,7 +350,12 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
             runtime_files.refresh_runtime_roots_from_env()
 
             WEB_MANAGEMENT.bind_web_runtime_state()
-            service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
+            from buddyswitch.application.build import build_application
+
+            service = WEB_MANAGEMENT.WebManagementService(
+                host_control=RecordingHostControl(),
+                web_routes=build_application().web_routes,
+            )
             status, payload = service.handle_api("GET", "/api/im/session", b"", {})
 
             self.assertEqual(status, 200)
@@ -439,31 +444,9 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         self.assertEqual(result, 2)
         self.assertIn("local", stderr.getvalue())
 
-    def test_im_delivery_delegates_to_im_owned_delivery(self) -> None:
-        runner = RecordingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
-        payload = {
-            "type": "im.message.created",
-            "target_identity_id": "act-pm-demo",
-            "message_id": "msg-1",
-            "conversation_id": "conv-1",
-            "event_id": "imev-1",
-        }
-        with mock.patch.object(
-            WEB_MANAGEMENT.daemon_client,
-            "check_reachability",
-            side_effect=lambda **kwargs: {
-                "reachability_status": "online",
-                "target_identity_id": kwargs["target_identity_id"],
-                "record": {"identity_id": kwargs["target_identity_id"]},
-            },
-        ), mock.patch.object(
-            WEB_MANAGEMENT.im_actor_delivery,
-            "deliver",
-            return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
-        ) as deliver_im_actor:
-            result = service._deliver_im_actor(payload)
+    def test_web_host_does_not_own_im_delivery(self) -> None:
+        source = WEB_MANAGEMENT_PATH.read_text(encoding="utf-8")
 
-        self.assertEqual(result["actor_handling_status"], "submitted")
-        deliver_im_actor.assert_called_once_with(payload)
-        self.assertEqual(runner.calls, [])
+        self.assertNotIn("im_actor_delivery", source)
+        self.assertNotIn("check_reachability", source)
+        self.assertNotIn("_deliver_im_actor", source)

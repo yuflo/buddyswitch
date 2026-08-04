@@ -108,6 +108,7 @@ def test_evidence_is_one_passive_tool_contribution_selected_once() -> None:
         "artifact",
         "track",
         "evidence",
+        "communication",
     ]
     assert sum(component is EVIDENCE for component in COMPONENTS) == 1
     application = build_application()

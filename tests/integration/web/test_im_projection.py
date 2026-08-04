@@ -11,6 +11,27 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.launcher import web_management  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.web import registration as communication_web  # noqa: E402
+
+
+def _web_service_with_im(
+    session: object,
+    provider: object,
+) -> web_management.WebManagementService:
+    route = communication_web.CommunicationWebRoute(
+        web_management.WebHostAccess(list_instances=lambda: []),
+        im_session=session,
+        web_identity_provider=provider,
+    )
+    return web_management.WebManagementService(
+        web_routes=(
+            web_management.WebRouteRegistration(
+                name="communication-im-test",
+                prefix="/api/im/",
+                factory=lambda _access: route,
+            ),
+        ),
+    )
 
 
 class _FakeExternalImSession:
@@ -93,7 +114,10 @@ class _FakeWebIdentityProvider:
 class ImWebManagementProjectionTests(unittest.TestCase):
     def test_web_management_exposes_external_im_routes_for_bridge(self) -> None:
         session = _FakeExternalImSession()
-        service = web_management.WebManagementService(im_session=session)  # type: ignore[arg-type]
+        service = _web_service_with_im(
+            session,
+            _FakeWebIdentityProvider(),
+        )
 
         status, created = service.handle_api("POST", "/api/im/external-sessions", b'{"display_name":"Bridge"}', {})
         self.assertEqual(status, 200)
@@ -126,10 +150,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
     def test_web_management_exposes_browser_im_routes_through_shared_router(self) -> None:
         session = _FakeExternalImSession()
         provider = _FakeWebIdentityProvider()
-        service = web_management.WebManagementService(
-            im_session=session,  # type: ignore[arg-type]
-            web_im_identity_provider=provider,  # type: ignore[arg-type]
-        )
+        service = _web_service_with_im(session, provider)
 
         status, web_session = service.handle_api("GET", "/api/im/session", b"", {})
         self.assertEqual(status, 200)
@@ -203,9 +224,9 @@ class ImWebManagementProjectionTests(unittest.TestCase):
 
     def test_http_and_web_projections_do_not_own_external_im_session_semantics(self) -> None:
         surfaces = (
-            ROOT / "src" / "buddyswitch" / "launcher" / "im_http_router.py",
+            ROOT / "src/buddyswitch/modules/communication/private/adapters/web/im_http_router.py",
             ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py",
-            ROOT / "src" / "buddyswitch" / "launcher" / "web_im_identity.py",
+            ROOT / "src/buddyswitch/modules/communication/private/adapters/web/web_im_identity.py",
         )
         forbidden_fragments = (
             "from env.services import messages",

@@ -5,6 +5,7 @@ from buddyswitch.modules.demand.module import DEMAND
 from buddyswitch.modules.artifact import public as artifact_public
 from buddyswitch.modules.artifact.module import ARTIFACT
 from buddyswitch.modules.evidence.module import EVIDENCE
+from buddyswitch.modules.communication.module import build_communication_module
 from buddyswitch.modules.search.module import SEARCH
 from buddyswitch.modules.task import public as task_public
 from buddyswitch.modules.task.module import build_task_module
@@ -18,7 +19,18 @@ TRACK = build_track_module(
     resolve_publication_candidate=artifact_public.resolve_publication_candidate,
     read_reference_metadata=artifact_public.read_reference_metadata,
 )
-COMPONENTS = (DEMAND, TASK, SEARCH, ARTIFACT, TRACK, EVIDENCE)
+COMMUNICATION = build_communication_module(
+    enqueue_inbound=demand_public.enqueue_inbound,
+)
+COMPONENTS = (
+    DEMAND,
+    TASK,
+    SEARCH,
+    ARTIFACT,
+    TRACK,
+    EVIDENCE,
+    COMMUNICATION,
+)
 DAEMON_HANDLER_ORDER = (
     "demand_triage",
     "task_goal",

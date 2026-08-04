@@ -8,7 +8,7 @@ from typing import Any
 
 from buddyswitch.launcher import side_thread_registry
 from tests.support import task_fixtures
-from buddyswitch.env.services import messages as message_service
+from buddyswitch.modules.communication.private.domain import messages as message_service
 from buddyswitch.modules.demand.private.adapters.daemon import (
     demand_triage_runtime,
 )

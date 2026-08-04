@@ -153,6 +153,7 @@ def test_track_contributes_exact_surfaces_and_is_selected_once() -> None:
         "artifact",
         "track",
         "evidence",
+        "communication",
     ]
     assert [component.name for component in COMPONENTS].count("track") == 1
     application = build_application()

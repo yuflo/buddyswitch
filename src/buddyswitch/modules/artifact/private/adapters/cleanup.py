@@ -8,6 +8,7 @@ from typing import Any
 
 from buddyswitch.runtime_support.env_cleanup import (
     CleanupContribution,
+    CleanupIndexProjection,
     OwnedStatePath,
 )
 
@@ -80,11 +81,18 @@ def discover_artifact_records(root: Path) -> tuple[OwnedStatePath, ...]:
             warning = f"Artifact is missing id and cannot be role-attributed: {path.relative_to(root).as_posix()}."
         elif owner_role is None:
             warning = f"Artifact '{artifact_id}' has no attributable producer role."
+        relative_path = path.relative_to(root).as_posix()
         owned.append(
             OwnedStatePath(
-                relative_path=path.relative_to(root).as_posix(),
-                owner_role=owner_role,
-                object_id=artifact_id,
+                relative_path=relative_path,
+                owner_roles=(owner_role,) if owner_role is not None else (),
+                index_record={
+                    "id": artifact_id,
+                    "producer_role": owner_role,
+                    "object_path": relative_path,
+                }
+                if artifact_id is not None
+                else None,
                 warning=warning,
             )
         )
@@ -99,7 +107,9 @@ def discover_attachment_bytes(root: Path) -> tuple[OwnedStatePath, ...]:
     return tuple(
         OwnedStatePath(
             relative_path=path.relative_to(root).as_posix(),
-            owner_role=owners.get(path.parent.name),
+            owner_roles=(owners[path.parent.name],)
+            if owners.get(path.parent.name) is not None
+            else (),
         )
         for path in sorted(directory.glob("*/*"))
         if path.is_file() or path.is_symlink()
@@ -110,6 +120,10 @@ ARTIFACT_RECORDS_CONTRIBUTION = CleanupContribution(
     category="artifact_objects",
     discover=discover_artifact_records,
     required_directories=(_ARTIFACT_RECORDS.as_posix(),),
+    index_projection=CleanupIndexProjection(
+        object_ids_field="artifact_object_ids",
+        records_field="artifact_records",
+    ),
 )
 ARTIFACT_ATTACHMENTS_CONTRIBUTION = CleanupContribution(
     category="artifact_attachments",

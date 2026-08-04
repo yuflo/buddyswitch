@@ -4,16 +4,16 @@
 
 | Field | Current value |
 |---|---|
-| Communication READY | packet `BS-MM-S4-COMMUNICATION-R1-20260803-01`; direct `81501321bd0845149719c13e7d941d8b`; affected `7d8932ce647640e39068872988848089`; process/package `1872a4bf43f74d73bd16bd04a296e54a`; topology `S4COMMP-20260803-01` |
+| Communication acceptance | `communication/S4-COMMUNICATION-ACCEPTANCE.md`; R3 exact `935615ad05c443fb9c730fc18430fca3`; cleanup/architecture `97e2ed6734e34e39b967e1ab7369a0db`; CLI/package `9adbb959051643edb648678801b56d57`; FINAL `ffefbc012a5d45fa887cd10c9520229c` |
 | Evidence acceptance | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` |
-| Active stage | S4 — Independent Component Waves / Communication execution |
-| State | COMMUNICATION READY |
-| Runtime migration authorized | `BS-MM-S4-COMMUNICATION-R1-20260803-01` only |
+| Active stage | S4 — Independent Component Waves / Context preparation |
+| State | CONTEXT PREPARATION ONLY |
+| Runtime migration authorized | none until Context READY review |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent Communication R1 return and hub acceptance review |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact and Evidence modules |
+| Next gate | committed-source Context owner/consumer refresh, boundary preflight and READY review |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence and Communication modules |
 
 ## Stage ledger
 
@@ -23,7 +23,7 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | COMMUNICATION READY | S3 | coordinating hub | execute R1; Context blocked and last |
+| S4 Component waves | CONTEXT PREPARATION ONLY | S3 | coordinating hub | source-refresh and READY-review Context; no execution packet yet |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -352,6 +352,7 @@ state. Track–Artifact is accepted in
 | 2026-07-31 | S4 Evidence | READY — EVIDENCE R1 ONLY | REPLANNING — TERMINAL LOOP | coordinating hub | R1 structural candidate preserved and FINAL withheld; assertion audit proved the stable CLI had no real Broker success/failure proof |
 | 2026-07-31 | S4 Evidence | REPLANNING — TERMINAL LOOP | READY — EVIDENCE R2 ONLY | coordinating hub | real Broker preflight reproduced the latent nonexistent-`feedback` mismatch, selected canonical ToolResult projection, classified one adapter and one process-test write, and consumed R1 |
 | 2026-08-03 | S4 Evidence | READY — EVIDENCE R2 ONLY | ACCEPTED | coordinating hub | frozen source/runtime identities reproduced; canonical command result, real-Broker success/failure, architecture replacement, cleanup and one FINAL accepted; both packets consumed |
+| 2026-08-04 | S4 Communication | READY — R3 FIX_AFTER_FINAL ONLY | ACCEPTED | coordinating hub | exact source/runtime identity reproduced; Communication cutover, recursive cleanup, effect-time destructive authority, truthful results and one frozen replacement FINAL accepted; all packets consumed |
 
 ## Checkpoint record
 
@@ -392,6 +393,7 @@ state. Track–Artifact is accepted in
 | 2026-07-31 | S4 Evidence R1 return / R2 handoff | READY — CONTINUATION ONLY | `evidence/S4-EVIDENCE-R1-RETURN-AND-ROOT-CAUSE-REVIEW.md`; real Broker probes `EVIDENCE-CLI-PREFLIGHT-20260731-01/02`; packet `BS-MM-S4-EVIDENCE-R2-20260731-01` | preserve structural candidate, establish real-Broker CLI RED, repair canonical result projection, reprove and run one frozen FINAL |
 | 2026-08-03 | S4 Evidence acceptance | ACCEPTED | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` | checkpoint Evidence, then refresh Communication source and worker-lifecycle boundary; do not resume either packet |
 | 2026-08-03 | S4 Communication handoff | READY | `communication/S4-COMMUNICATION-READY-REVIEW.md`; direct `81501321bd0845149719c13e7d941d8b`; affected `7d8932ce647640e39068872988848089`; process/package `1872a4bf43f74d73bd16bd04a296e54a`; topology `S4COMMP-20260803-01`; packet `BS-MM-S4-COMMUNICATION-R1-20260803-01` | user starts one independent Communication task; hub pauses without polling |
+| 2026-08-04 | S4 Communication acceptance | ACCEPTED | `communication/S4-COMMUNICATION-ACCEPTANCE.md`; R3 exact `935615ad05c443fb9c730fc18430fca3`; affected `97e2ed6734e34e39b967e1ab7369a0db`, `9adbb959051643edb648678801b56d57`; FINAL `ffefbc012a5d45fa887cd10c9520229c` | checkpoint Communication, then refresh Context from the committed source; never resume R1–R3 |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -413,11 +415,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S4 / Communication execution
-Master state: COMMUNICATION READY
-Goal Packet: BS-MM-S4-COMMUNICATION-R1-20260803-01
+Stage: S4 / Context preparation
+Master state: CONTEXT PREPARATION ONLY
+Goal Packet: none
 Execution session: none
-Last hub checkpoint: Communication source refresh, design preflight and READY review complete
-Next action: execute the sole Communication R1 packet in one independent task and return its result
+Last hub checkpoint: Communication accepted; R1–R3 consumed
+Next action: commit and push the Communication checkpoint, then refresh Context source/consumers from that committed HEAD
 No-polling state: inactive
 ```

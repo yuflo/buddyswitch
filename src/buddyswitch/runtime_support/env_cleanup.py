@@ -9,6 +9,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Callable
 
 from buddyswitch.env.repos import actor_private_files as actor_private_repo
@@ -26,21 +27,21 @@ CATEGORY_ORDER = (
 )
 
 
-def _runtime_relative_path(path: Path) -> str:
-    return path.relative_to(runtime_files.STATE_ROOT).as_posix()
-
-
-MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.STATE_ROOT / "im" / "messages")
-RETIRED_MESSAGE_OBJECTS_RELATIVE_DIR = _runtime_relative_path(runtime_files.MESSAGES_DIR)
 ACTOR_PRIVATE_RELATIVE_DIR = "private"
 
 
 @dataclass(frozen=True)
 class OwnedStatePath:
     relative_path: str
-    owner_role: str | None
-    object_id: str | None = None
+    owner_roles: tuple[str, ...] = ()
+    index_record: Mapping[str, Any] | None = None
     warning: str | None = None
+
+
+@dataclass(frozen=True)
+class CleanupIndexProjection:
+    object_ids_field: str
+    records_field: str
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class CleanupContribution:
     category: str
     discover: Callable[[Path], tuple[OwnedStatePath, ...]]
     required_directories: tuple[str, ...] = ()
+    index_projection: CleanupIndexProjection | None = None
 
 
 def rel(root: Path, path: Path) -> str:
@@ -126,68 +128,11 @@ def resolve_guarded_relative_dir(
     return target_dir, None
 
 
-def resolve_guarded_object_json_path(
-    root: Path,
-    *,
-    relative_dir: str,
-    object_id: str,
-) -> tuple[Path | None, str | None]:
-    object_name = Path(f"{object_id}.json")
-    if object_name.is_absolute() or ".." in object_name.parts or len(object_name.parts) != 1:
-        return None, f"invalid cleanup object id '{object_id}'."
-
-    target_dir, blocked_reason = resolve_guarded_relative_dir(root, relative_dir)
-    if target_dir is None:
-        return None, blocked_reason
-
-    target_path = target_dir / object_name.name
-    if target_path.is_symlink():
-        return None, f"cleanup target '{rel(root, target_path)}' is a symlink."
-
-    resolved_root = root.resolve(strict=False)
-    resolved_target_path = target_path.resolve(strict=False)
-    if not is_path_within(resolved_target_path, resolved_root):
-        return None, "cleanup path resolves outside repo root."
-    return target_path, None
-
-
-def iter_files(root: Path, relative_dir: str) -> list[Path]:
-    target_dir, _ = resolve_guarded_relative_dir(root, relative_dir)
-    if target_dir is None:
-        return []
-    return iter_directory_files(target_dir)
-
-
 def read_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("JSON payload must be an object")
     return payload
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-
-
-def _identity_id_from_ref(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    if isinstance(value, dict):
-        if isinstance(value.get("id"), str) and value["id"].strip():
-            return value["id"].strip()
-        identity = value.get("identity")
-        if isinstance(identity, dict) and isinstance(identity.get("id"), str) and identity["id"].strip():
-            return identity["id"].strip()
-    return None
-
-
-def _role_from_actor_identity_id(identity_id: str) -> str | None:
-    if not identity_id.startswith("act-"):
-        return None
-    role_id, separator, _suffix = identity_id.removeprefix("act-").partition("-")
-    if not separator or not role_id:
-        return None
-    return role_id
 
 
 def append_warning(warnings: list[str] | None, message: str) -> None:
@@ -246,59 +191,6 @@ def add_external_path(plan: dict[str, Any], *, display_path: str, absolute_path:
     if display_path not in plan["external_delete_paths"]:
         plan["external_delete_paths"][display_path] = str(absolute_path)
         plan["direct_delete_paths"].append(display_path)
-
-
-def discover_message_objects(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    valid: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
-    for path in iter_files(root, MESSAGE_OBJECTS_RELATIVE_DIR):
-        relative = rel(root, path)
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "reason": f"invalid message object JSON: {exc}"})
-            continue
-
-        msg_id = payload.get("id")
-        if not isinstance(msg_id, str) or not msg_id:
-            invalid.append({"path": relative, "reason": "message object is missing id"})
-            continue
-        conversation_id = payload.get("conversation_id")
-        if not isinstance(conversation_id, str) or not conversation_id:
-            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing conversation_id"})
-            continue
-        sender_identity_id = _identity_id_from_ref(payload.get("sender_identity"))
-        target_identity_id = _identity_id_from_ref(payload.get("target_identity"))
-        if sender_identity_id is None:
-            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing sender_identity.id"})
-            continue
-        if target_identity_id is None:
-            invalid.append({"path": relative, "reason": f"message '{msg_id}' is missing target_identity.id"})
-            continue
-
-        valid.append({
-            "id": msg_id,
-            "conversation_id": conversation_id,
-            "sender_identity_id": sender_identity_id,
-            "target_identity_id": target_identity_id,
-            "from_role": _role_from_actor_identity_id(sender_identity_id),
-            "to_role": _role_from_actor_identity_id(target_identity_id),
-            "object_path": relative,
-        })
-    for path in iter_files(root, RETIRED_MESSAGE_OBJECTS_RELATIVE_DIR):
-        relative = rel(root, path)
-        try:
-            payload = read_json(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            invalid.append({"path": relative, "reason": f"invalid retired message object JSON: {exc}"})
-            continue
-        msg_id = payload.get("id")
-        label = f"message '{msg_id}'" if isinstance(msg_id, str) and msg_id else "message object"
-        invalid.append({
-            "path": relative,
-            "reason": f"{label} uses retired message object schema; current IM messages live under {MESSAGE_OBJECTS_RELATIVE_DIR}",
-        })
-    return valid, invalid
 
 
 def add_dir_files(plan: dict[str, Any], relative_dir: str, category: str) -> None:
@@ -456,84 +348,128 @@ def add_instance_workspace_dir_files(
         add_external_path(plan, display_path=display_path, absolute_path=path, category=category)
 
 
-def message_object_json_path(root: Path, *, object_id: str) -> tuple[Path | None, str | None]:
-    return resolve_guarded_object_json_path(
-        root,
-        relative_dir=MESSAGE_OBJECTS_RELATIVE_DIR,
-        object_id=object_id,
-    )
+def _validated_execution_root(root: Path, *, label: str) -> Path:
+    if root.is_symlink():
+        raise ValueError(f"Refusing cleanup execution: {label} is a symlink ({root}).")
+    if not root.exists():
+        raise ValueError(f"Refusing cleanup execution: {label} is missing ({root}).")
+    if not root.is_dir():
+        raise ValueError(f"Refusing cleanup execution: {label} is not a directory ({root}).")
+    return root.resolve(strict=True)
 
 
-def _parse_actor_private_owner_path(path: Path) -> tuple[Path, str] | None:
-    parts = path.resolve(strict=False).parts
-    marker = tuple(Path(ACTOR_PRIVATE_RELATIVE_DIR).parts)
-    if not marker:
+def _guard_execution_target(
+    root: Path,
+    *,
+    resolved_root: Path,
+    relative_path: str,
+) -> tuple[Path | None, str | None]:
+    relative = Path(relative_path)
+    if (
+        not relative.parts
+        or relative.is_absolute()
+        or ".." in relative.parts
+    ):
+        return None, "planned path is not a safe relative path"
+
+    current = root
+    for part in relative.parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            return None, f"parent '{current.relative_to(root).as_posix()}' is a symlink"
+        if not current.exists():
+            return None, "target is missing"
+        if not current.is_dir():
+            return None, f"parent '{current.relative_to(root).as_posix()}' is not a directory"
+
+    target = root / relative
+    if target.is_symlink():
+        return target, None
+    if not target.exists():
+        return None, "target is missing"
+    if not is_path_within(target.resolve(strict=True), resolved_root):
+        return None, "target resolves outside its cleanup root"
+    return target, None
+
+
+def _actor_private_owner(
+    root: Path,
+    *,
+    relative_path: str,
+    external: bool,
+) -> tuple[Path, str] | None:
+    parts = Path(relative_path).parts
+    if external:
+        if (
+            len(parts) < 5
+            or parts[0] != "instances"
+            or parts[2] != "workspace"
+            or parts[3] != ACTOR_PRIVATE_RELATIVE_DIR
+        ):
+            return None
+        private_root_parts = parts[:4]
+        logical_parts = parts[4:]
+    else:
+        private_marker = Path(ACTOR_PRIVATE_RELATIVE_DIR).parts
+        if not private_marker or tuple(parts[: len(private_marker)]) != private_marker:
+            return None
+        private_root_parts = parts[: len(private_marker)]
+        logical_parts = parts[len(private_marker) :]
+
+    if not logical_parts:
         return None
-    window = len(marker)
-    for index in range(0, len(parts) - window + 1):
-        if tuple(parts[index : index + window]) != marker:
-            continue
-        marker_end = index + window
-        if marker_end >= len(parts):
-            return None
-        logical_parts = parts[marker_end:]
-        if not logical_parts:
-            return None
-        private_root = Path(*parts[:marker_end])
-        logical_name = "/".join(logical_parts)
-        return private_root, logical_name
-    return None
+    return root.joinpath(*private_root_parts), "/".join(logical_parts)
 
 
-def delete_actor_private_path(path: Path) -> bool:
-    owner = _parse_actor_private_owner_path(path)
-    if owner is None:
-        return False
-    private_root, logical_name = owner
+def _delete_actor_private_target(
+    target: Path,
+    *,
+    private_root: Path,
+    logical_name: str,
+) -> tuple[bool, str | None]:
+    if target.is_symlink():
+        return delete_absolute_path(target), None
+    if not target.is_file():
+        if not target.exists():
+            return False, "target is missing"
+        return False, "actor-private target is not a regular file"
     try:
-        actor_private_repo.delete_private_file(root=private_root, logical_name=logical_name)
-    except (actor_private_repo.ActorPrivateBoundaryError, IsADirectoryError, OSError):
+        deleted = actor_private_repo.delete_private_file(
+            root=private_root,
+            logical_name=logical_name,
+        )
+    except (actor_private_repo.ActorPrivateBoundaryError, IsADirectoryError) as exc:
+        return False, f"actor-private owner rejected the path: {exc}"
+    if not deleted:
+        return False, "actor-private owner reported no deletion"
+    return True, None
+
+
+def delete_relative_path(root: Path, relative_path: str) -> bool:
+    resolved = repo_path(root, relative_path)
+    if resolved is None or (not resolved.exists() and not resolved.is_symlink()):
         return False
+    if resolved.is_dir() and not resolved.is_symlink():
+        shutil.rmtree(resolved)
+        return True
+    resolved.unlink()
     return True
 
 
-def add_indexed_message(plan: dict[str, Any], record: dict[str, Any]) -> None:
-    root = Path(plan["repo_root"])
-    if record["id"] not in plan["message_object_ids"]:
-        plan["message_object_ids"].append(record["id"])
-        plan["message_records"].append(record)
-
-    object_path, blocked_reason = message_object_json_path(root, object_id=str(record["id"]))
-    if object_path is None:
-        if blocked_reason is not None:
-            add_warning(plan, f"Skipping message cleanup for '{record['id']}': {blocked_reason}")
-        return
-    add_path(plan, object_path, "message_objects")
-
-
-def delete_relative_path(root: Path, relative_path: str) -> None:
-    resolved = repo_path(root, relative_path)
-    if resolved is None or (not resolved.exists() and not resolved.is_symlink()):
-        return
-    if resolved.is_dir() and not resolved.is_symlink():
-        shutil.rmtree(resolved)
-        return
-    resolved.unlink()
-
-
-def delete_absolute_path(path: Path) -> None:
+def delete_absolute_path(path: Path) -> bool:
     if not path.exists() and not path.is_symlink():
-        return
+        return False
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
-        return
+        return True
     path.unlink()
+    return True
 
 
 def _required_directories(
     contributions: tuple[CleanupContribution, ...],
 ) -> tuple[str, ...]:
-    directories = [MESSAGE_OBJECTS_RELATIVE_DIR]
+    directories: list[str] = []
     for contribution in contributions:
         if not isinstance(contribution.required_directories, tuple):
             raise ValueError(
@@ -612,7 +548,7 @@ def build_cleanup_plan(
     plan["repo_root"] = str(repo_root)
     plan["shared_root"] = str(shared_root) if shared_root is not None else None
     plan["_path_categories"] = {}
-    contribution_categories: set[str] = set(CATEGORY_ORDER)
+    contribution_categories: set[str] = set()
     for contribution in contributions:
         if not isinstance(contribution, CleanupContribution):
             raise ValueError(
@@ -622,6 +558,7 @@ def build_cleanup_plan(
         if (
             not isinstance(category, str)
             or not category.strip()
+            or category == "actor_private_files"
             or category in contribution_categories
         ):
             raise ValueError(f"invalid or duplicate cleanup category: {category}")
@@ -630,14 +567,29 @@ def build_cleanup_plan(
                 f"cleanup discoverer for '{category}' must be callable"
             )
         contribution_categories.add(category)
-        plan["counts_by_category"][category] = 0
+        plan["counts_by_category"].setdefault(category, 0)
+        projection = contribution.index_projection
+        if projection is not None:
+            if not isinstance(projection, CleanupIndexProjection):
+                raise ValueError(
+                    f"cleanup index projection for '{category}' must be "
+                    "CleanupIndexProjection"
+                )
+            for field_name, label in (
+                (projection.object_ids_field, "object ids"),
+                (projection.records_field, "records"),
+            ):
+                if (
+                    not isinstance(field_name, str)
+                    or not field_name.strip()
+                    or not isinstance(plan.get(field_name), list)
+                ):
+                    raise ValueError(
+                        f"cleanup {label} field for '{category}' is invalid"
+                    )
     _required_directories(contributions)
 
-    message_objects, invalid_message_objects = discover_message_objects(repo_root)
     if scope == "role":
-        for record in message_objects:
-            if record.get("from_role") == role or record.get("to_role") == role:
-                add_indexed_message(plan, record)
         actor_private_relative_dir = ACTOR_PRIVATE_RELATIVE_DIR
         if shared_root is not None:
             resolved_shared_root = shared_root.resolve(strict=False)
@@ -655,14 +607,8 @@ def build_cleanup_plan(
                 )
         else:
             add_dir_files(plan, actor_private_relative_dir, "actor_private_files")
-        for item in invalid_message_objects:
-            add_warning(
-                plan,
-                f"{item['path']} cannot be safely attributed to role '{role}' and will be skipped in scoped cleanup ({item['reason']}).",
-            )
 
     elif scope == "all-data":
-        add_dir_files(plan, MESSAGE_OBJECTS_RELATIVE_DIR, "message_objects")
         if shared_root is not None:
             resolved_shared_root = shared_root.resolve(strict=False)
             for workspace_dir in discover_instance_workspaces(
@@ -679,12 +625,6 @@ def build_cleanup_plan(
                 )
         else:
             add_dir_files(plan, ACTOR_PRIVATE_RELATIVE_DIR, "actor_private_files")
-        for record in message_objects:
-            if record["id"] not in plan["message_object_ids"]:
-                plan["message_object_ids"].append(record["id"])
-                plan["message_records"].append(record)
-        for item in invalid_message_objects:
-            add_warning(plan, f"All-data cleanup will delete malformed message object: {item['path']} ({item['reason']}).")
     else:
         raise ValueError(f"Unsupported cleanup scope: {scope}")
 
@@ -699,6 +639,14 @@ def build_cleanup_plan(
             relative_path = owned_path.relative_path
             if isinstance(owned_path.warning, str) and owned_path.warning:
                 add_warning(plan, owned_path.warning)
+            if not isinstance(owned_path.owner_roles, tuple) or not all(
+                isinstance(owner_role, str) and owner_role.strip()
+                for owner_role in owned_path.owner_roles
+            ):
+                raise ValueError(
+                    f"cleanup contribution '{contribution.category}' returned "
+                    "invalid owner_roles"
+                )
             candidate = repo_path(repo_root, relative_path)
             if candidate is None:
                 add_warning(
@@ -709,14 +657,18 @@ def build_cleanup_plan(
                 continue
             current = repo_root
             unsafe = False
-            for part in Path(relative_path).parts:
+            for part in Path(relative_path).parts[:-1]:
                 current = current / part
                 if current.is_symlink():
                     unsafe = True
                     break
-            if unsafe or not is_path_within(
-                candidate.resolve(strict=False),
-                resolved_repo_root,
+            candidate_is_symlink = candidate.is_symlink()
+            if unsafe or (
+                not candidate_is_symlink
+                and not is_path_within(
+                    candidate.resolve(strict=False),
+                    resolved_repo_root,
+                )
             ):
                 add_warning(
                     plan,
@@ -725,7 +677,7 @@ def build_cleanup_plan(
                 )
                 continue
             if scope == "role":
-                if owned_path.owner_role is None:
+                if not owned_path.owner_roles:
                     if owned_path.warning is None:
                         add_warning(
                             plan,
@@ -733,40 +685,32 @@ def build_cleanup_plan(
                             f"'{role}' and will be skipped in scoped cleanup.",
                         )
                     continue
-                if owned_path.owner_role != role:
+                if role not in owned_path.owner_roles:
                     continue
-            if not candidate.exists():
+            if not candidate.exists() and not candidate_is_symlink:
                 continue
             add_path(plan, candidate, contribution.category)
             plan["direct_delete_paths"].append(relative_path)
-            if (
-                contribution.category == "artifact_objects"
-                and isinstance(owned_path.object_id, str)
-                and owned_path.object_id
-                and owned_path.object_id not in plan["artifact_object_ids"]
-            ):
-                plan["artifact_object_ids"].append(owned_path.object_id)
-                plan["artifact_records"].append(
-                    {
-                        "id": owned_path.object_id,
-                        "producer_role": owned_path.owner_role,
-                        "object_path": relative_path,
-                    }
+            projection = contribution.index_projection
+            record = owned_path.index_record
+            if projection is None or record is None:
+                continue
+            if not isinstance(record, Mapping):
+                raise ValueError(
+                    f"cleanup contribution '{contribution.category}' returned "
+                    "a non-mapping index record"
                 )
-            if (
-                contribution.category == "comment_objects"
-                and isinstance(owned_path.object_id, str)
-                and owned_path.object_id
-                and owned_path.object_id not in plan["comment_object_ids"]
-            ):
-                plan["comment_object_ids"].append(owned_path.object_id)
-                plan["comment_records"].append(
-                    {
-                        "id": owned_path.object_id,
-                        "author_role": owned_path.owner_role,
-                        "object_path": relative_path,
-                    }
+            object_id = record.get("id")
+            if not isinstance(object_id, str) or not object_id:
+                raise ValueError(
+                    f"cleanup contribution '{contribution.category}' returned "
+                    "an index record without id"
                 )
+            object_ids = plan[projection.object_ids_field]
+            records = plan[projection.records_field]
+            if object_id not in object_ids:
+                object_ids.append(object_id)
+                records.append(dict(record))
 
     plan["delete_paths"].sort()
     plan["artifact_object_ids"].sort()
@@ -784,85 +728,249 @@ def build_cleanup_plan(
     return plan
 
 
+def _append_execution_warning(
+    warnings: list[str],
+    *,
+    relative_path: str,
+    reason: str,
+) -> None:
+    append_warning(
+        warnings,
+        f"Skipping cleanup path '{relative_path}' during execution: {reason}.",
+    )
+
+
+def _actual_index_object_ids(
+    plan: dict[str, Any],
+    *,
+    contributions: tuple[CleanupContribution, ...],
+    deleted_paths: set[str],
+    path_categories: dict[str, Any],
+) -> dict[str, list[str]]:
+    fields = (
+        "artifact_object_ids",
+        "message_object_ids",
+        "comment_object_ids",
+    )
+    deleted_ids_by_field: dict[str, set[str]] = {field: set() for field in fields}
+    for contribution in contributions:
+        projection = contribution.index_projection
+        if projection is None or projection.object_ids_field not in deleted_ids_by_field:
+            continue
+        records = plan.get(projection.records_field, [])
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, Mapping):
+                continue
+            object_id = record.get("id")
+            object_path = record.get("object_path")
+            if (
+                isinstance(object_id, str)
+                and object_id
+                and isinstance(object_path, str)
+                and object_path in deleted_paths
+                and path_categories.get(object_path) == contribution.category
+            ):
+                deleted_ids_by_field[projection.object_ids_field].add(object_id)
+
+    actual: dict[str, list[str]] = {}
+    for field in fields:
+        planned_ids = plan.get(field, [])
+        if not isinstance(planned_ids, list):
+            planned_ids = []
+        actual[field] = [
+            object_id
+            for object_id in planned_ids
+            if isinstance(object_id, str) and object_id in deleted_ids_by_field[field]
+        ]
+    return actual
+
+
 def execute_cleanup_plan(
     plan: dict[str, Any],
     *,
     contributions: tuple[CleanupContribution, ...] = (),
 ) -> dict[str, Any]:
     root = Path(plan["repo_root"])
-    deleted_paths: list[str] = []
-    warnings = plan.get("warnings")
-    if not isinstance(warnings, list):
-        warnings = None
-
+    planned_warnings = plan.get("warnings")
+    warnings = list(planned_warnings) if isinstance(planned_warnings, list) else []
     path_categories = plan.get("path_categories", {})
     if not isinstance(path_categories, dict):
         path_categories = {}
+    external_delete_paths = plan.get("external_delete_paths", {})
+    if not isinstance(external_delete_paths, dict):
+        external_delete_paths = {}
+    direct_delete_paths = plan.get("direct_delete_paths", [])
+    if not isinstance(direct_delete_paths, list) or not all(
+        isinstance(path, str) and path for path in direct_delete_paths
+    ):
+        raise ValueError("Refusing cleanup execution: planned delete paths are invalid.")
+
+    shared_root_value = plan.get("shared_root")
+    shared_root: Path | None = None
+    resolved_shared_root: Path | None = None
+    if shared_root_value is not None:
+        if not isinstance(shared_root_value, str) or not shared_root_value:
+            raise ValueError("Refusing cleanup execution: shared root is invalid.")
+        shared_root = Path(shared_root_value)
+        resolved_shared_root = _validated_execution_root(
+            shared_root,
+            label="shared root",
+        )
+
+    if not root.exists() and not root.is_symlink():
+        state_relative_paths = [
+            path for path in direct_delete_paths if path not in external_delete_paths
+        ]
+        expected_state_root = shared_root / "state" if shared_root is not None else None
+        may_initialize_empty_state = (
+            expected_state_root is not None
+            and Path(os.path.abspath(root))
+            == Path(os.path.abspath(expected_state_root))
+            and not state_relative_paths
+            and bool(_required_directories(contributions))
+        )
+        if may_initialize_empty_state:
+            root.mkdir()
+    resolved_root = _validated_execution_root(root, label="state root")
+
+    execution_paths = sorted(
+        set(direct_delete_paths),
+        key=lambda path: (-len(Path(path).parts), path),
+    )
+    deleted_paths: list[str] = []
     deleted_set: set[str] = set()
 
-    indexed_sets: tuple[tuple[str, str], ...] = (
-        ("artifact_objects", "artifact_records"),
-        ("message_objects", "message_records"),
-        ("comment_objects", "comment_records"),
-    )
-    for category, records_key in indexed_sets:
-        records = plan.get(records_key, [])
-        if not isinstance(records, list):
-            continue
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            object_id = record.get("id")
-            if not isinstance(object_id, str) or not object_id:
-                continue
-            raw_object_path = record.get("object_path")
-            if isinstance(raw_object_path, str) and raw_object_path:
-                relative_path = raw_object_path
-            else:
-                continue
-            if relative_path in deleted_set:
-                continue
-            delete_relative_path(root, relative_path)
-            deleted_paths.append(relative_path)
-            deleted_set.add(relative_path)
-
-    for relative_path in plan["direct_delete_paths"]:
-        if relative_path in deleted_set:
-            continue
+    for relative_path in execution_paths:
         category = path_categories.get(relative_path)
-        external_path = plan.get("external_delete_paths", {}).get(relative_path)
-        if external_path is not None:
-            target_path = Path(external_path)
-            if category == "actor_private_files" and delete_actor_private_path(target_path):
-                pass
-            else:
-                delete_absolute_path(target_path)
+        has_external_path = relative_path in external_delete_paths
+
+        if has_external_path:
+            stored_external_path = external_delete_paths[relative_path]
+            if (
+                shared_root is None
+                or resolved_shared_root is None
+                or category != "actor_private_files"
+            ):
+                _append_execution_warning(
+                    warnings,
+                    relative_path=relative_path,
+                    reason="external path has no current actor-private shared-root authority",
+                )
+                continue
+            if not isinstance(stored_external_path, str):
+                _append_execution_warning(
+                    warnings,
+                    relative_path=relative_path,
+                    reason="stored external path is invalid",
+                )
+                continue
+            expected_external_path = shared_root / relative_path
+            actual_external_path = Path(stored_external_path)
+            if (
+                not actual_external_path.is_absolute()
+                or Path(os.path.abspath(actual_external_path))
+                != Path(os.path.abspath(expected_external_path))
+            ):
+                _append_execution_warning(
+                    warnings,
+                    relative_path=relative_path,
+                    reason="stored external path no longer agrees with the shared-root derivation",
+                )
+                continue
+            target_path, blocked_reason = _guard_execution_target(
+                shared_root,
+                resolved_root=resolved_shared_root,
+                relative_path=relative_path,
+            )
+            owner = _actor_private_owner(
+                shared_root,
+                relative_path=relative_path,
+                external=True,
+            )
         else:
-            target_path = root / relative_path
-            if category == "actor_private_files" and delete_actor_private_path(target_path):
-                pass
+            if category == "actor_private_files" and shared_root is not None:
+                _append_execution_warning(
+                    warnings,
+                    relative_path=relative_path,
+                    reason="actor-private path is missing its shared-root derivation",
+                )
+                continue
+            target_path, blocked_reason = _guard_execution_target(
+                root,
+                resolved_root=resolved_root,
+                relative_path=relative_path,
+            )
+            owner = (
+                _actor_private_owner(
+                    root,
+                    relative_path=relative_path,
+                    external=False,
+                )
+                if category == "actor_private_files"
+                else None
+            )
+
+        if target_path is None:
+            _append_execution_warning(
+                warnings,
+                relative_path=relative_path,
+                reason=blocked_reason or "path is not executable",
+            )
+            continue
+
+        deleted = False
+        owner_reason: str | None = None
+        if category == "actor_private_files":
+            if owner is None:
+                owner_reason = "path does not identify a current actor-private owner"
             else:
-                delete_relative_path(root, relative_path)
+                private_root, logical_name = owner
+                deleted, owner_reason = _delete_actor_private_target(
+                    target_path,
+                    private_root=private_root,
+                    logical_name=logical_name,
+                )
+        elif has_external_path:
+            owner_reason = "external path category is not actor-private"
+        else:
+            deleted = delete_relative_path(root, relative_path)
+            if not deleted:
+                owner_reason = "target changed before deletion"
+
+        if not deleted:
+            _append_execution_warning(
+                warnings,
+                relative_path=relative_path,
+                reason=owner_reason or "deletion produced no effect",
+            )
+            continue
         deleted_paths.append(relative_path)
         deleted_set.add(relative_path)
 
+    actual_object_ids = _actual_index_object_ids(
+        plan,
+        contributions=contributions,
+        deleted_paths=deleted_set,
+        path_categories=path_categories,
+    )
     ensure_required_skeleton(
         root,
         contributions=contributions,
         warnings=warnings,
     )
-    if isinstance(warnings, list):
-        warnings.sort()
+    warnings.sort()
     return {
         "ok": True,
         "scope": plan["scope"],
         "role": plan["role"],
         "deleted_paths": deleted_paths,
         "deleted_count": len(deleted_paths),
-        "artifact_object_ids": plan["artifact_object_ids"],
-        "message_object_ids": plan["message_object_ids"],
-        "comment_object_ids": plan["comment_object_ids"],
-        "warnings": plan["warnings"],
+        "artifact_object_ids": actual_object_ids["artifact_object_ids"],
+        "message_object_ids": actual_object_ids["message_object_ids"],
+        "comment_object_ids": actual_object_ids["comment_object_ids"],
+        "warnings": warnings,
     }
 
 

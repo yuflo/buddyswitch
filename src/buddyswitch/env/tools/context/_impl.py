@@ -12,6 +12,7 @@ from buddyswitch.env.tool_runtime import results as tool_results
 from buddyswitch.modules.artifact import public as artifact_public
 from buddyswitch.modules.task import public as task_public
 from buddyswitch.modules.track import public as track_public
+from buddyswitch.modules.communication import public as communication_public
 from .tool import DEFINITION
 
 
@@ -381,7 +382,9 @@ def _message_cues(*, limit_value: int, context: ContextServiceContext) -> dict[s
     if active_identity_id is None:
         inbox: list[dict[str, Any]] = []
     else:
-        events = context.repos.message.list_im_events_for_identity(context["current_identity"])
+        events = communication_public.list_im_events_for_identity(
+            context["current_identity"]
+        )
         inbox = [
             row
             for row in events

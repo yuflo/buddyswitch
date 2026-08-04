@@ -3,7 +3,10 @@ from tests.integration.web.management_harness import *  # noqa: F401,F403
 
 class WebManagementStableImIdentityTests(RuntimeWorkspaceTestCase):
     def _service(self, host_control: RecordingHostControl | None = None) -> WEB_MANAGEMENT.WebManagementService:
-        return WEB_MANAGEMENT.WebManagementService(host_control=host_control or RecordingHostControl())
+        return WEB_MANAGEMENT.WebManagementService(
+            host_control=host_control or RecordingHostControl(),
+            web_routes=WEB_ROUTES,
+        )
 
     def _identity_path(self) -> Path:
         return self.runtime_state_root / "buddyswitch" / "local" / "web-management" / "im-session.json"
@@ -129,7 +132,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestCase):
         web_identity = session["identity"]
 
         with mock.patch.object(
-            WEB_MANAGEMENT.daemon_client,
+            communication_web.daemon_client,
             "check_reachability",
             side_effect=lambda **kwargs: {
                 "reachability_status": "online",
@@ -137,7 +140,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestCase):
                 "record": {"identity_id": kwargs["target_identity_id"]},
             },
         ), mock.patch.object(
-            WEB_MANAGEMENT.im_actor_delivery,
+            communication_web.im_actor_delivery,
             "deliver",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
         ) as deliver_im_actor:
@@ -240,7 +243,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestCase):
         web_identity = session["identity"]
         sent_by_actor: dict[str, dict[str, object]] = {}
         with mock.patch.object(
-            WEB_MANAGEMENT.daemon_client,
+            communication_web.daemon_client,
             "check_reachability",
             side_effect=lambda **kwargs: {
                 "reachability_status": "online",

@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Current state: COMMUNICATION READY
+> Current state: CONTEXT PREPARATION ONLY
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: `BS-MM-S4-COMMUNICATION-R1-20260803-01`
+> Execution authority: none until Context READY review
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -16,20 +16,20 @@
 |---|---|---|
 | Track | Track/comments/state/inbound/Skill/projections | ACCEPTED with two Artifact Public callables injected into Track-owned ports |
 | Artifact | artifacts/relations/visibility/config/Skill | ACCEPTED with read-only Track Public dependency |
-| Communication | Message/IM/delivery/external session/channel worker | READY; passive Web route/worker contributions and cleanup edge frozen |
+| Communication | Message/IM/delivery/external session/channel worker | ACCEPTED; passive Web route/worker contributions and effect-safe cleanup |
 | Search | bounded non-opening Actor search capability | existing Tool contribution; Browser remains foundation |
 | Evidence | transient evidence/downgrade capability | ACCEPTED; one stateless module and canonical broker-backed command result |
 | Context | application read projection and context Tool | last; consumes other Public reads |
 
 Browser is not a product lane. It remains an Actor foundation capability.
 
-Search, the atomic Track–Artifact pair and Evidence are accepted. See
+Search, the atomic Track–Artifact pair, Evidence and Communication are accepted. See
 `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` and
 `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`
-and `04-independent-component-waves-plan/evidence/S4-EVIDENCE-ACCEPTANCE.md`.
-Communication is READY through its own committed source snapshot, boundary
-design and packet under `04-independent-component-waves-plan/communication/`.
-Context remains last and may not begin until Communication is accepted.
+`04-independent-component-waves-plan/evidence/S4-EVIDENCE-ACCEPTANCE.md` and
+`04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md`.
+Context remains last. Its source refresh and READY preparation are unlocked,
+but no Context implementation packet exists yet.
 
 ## Lane protocol
 

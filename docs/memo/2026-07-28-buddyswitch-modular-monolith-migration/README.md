@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 COMMUNICATION READY
-> Runtime authorization: `BS-MM-S4-COMMUNICATION-R1-20260803-01`
+> Current state: S0–S3 ACCEPTED; S4 CONTEXT PREPARATION ONLY
+> Runtime authorization: none until Context READY review
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -22,7 +22,7 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | COMMUNICATION READY |
+| S4 | `04-independent-component-waves.md` | CONTEXT PREPARATION ONLY |
 | S5 | `05-foundation-convergence.md` | BLOCKED |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
@@ -93,9 +93,8 @@ reviewed the one-owner/Public/contribution boundaries and accepted S3 in
 consumed.
 
 The S4 source refresh then separated the six lanes by real host and dependency
-boundaries. Search is stateless and needs only the existing Tool contribution;
-Track, Artifact, Communication, Evidence and Context still require independent
-boundary decisions and remain preparation-only. The affected Search
+boundaries. Search is stateless and needs only the existing Tool contribution.
+The affected Search
 preservation group passed as `b96f488146524dbc97eb14463aea7780`, and
 representative final-topology probe `S4SEARCHP-20260730-02` proved explicit
 dispatch, atomic old/new registration failure, duplicate-module rejection and
@@ -137,9 +136,13 @@ Evidence packets are consumed. The committed Communication refresh froze its
 owner/consumer map, the two earned passive WebHost contributions, the acyclic
 Demand input edge and generic multi-owner cleanup projection. Direct,
 affected and process/package preservation baselines plus topology preflight
-`S4COMMP-20260803-01` passed. Packet
-`BS-MM-S4-COMMUNICATION-R1-20260803-01` is the sole executable authority.
-Context remains blocked and last.
+`S4COMMP-20260803-01` passed. R1 produced the complete Communication cutover;
+R2 corrected recursive Message cleanup; R3 corrected effect-time cleanup
+authority and truthful deletion projection. The final candidate passed exact,
+affected and one frozen replacement FINAL and is accepted in
+`04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md`.
+All Communication packets are consumed. Context remains last and is unlocked
+for source refresh and READY preparation only.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

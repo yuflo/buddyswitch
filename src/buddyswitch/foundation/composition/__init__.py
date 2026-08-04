@@ -10,7 +10,11 @@ if TYPE_CHECKING:
     from buddyswitch.launcher.cli_contract import CliCommandRegistration
     from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
     from buddyswitch.launcher.notification_center import InboundSourceRegistration
-    from buddyswitch.launcher.web_contracts import ActorConsoleSectionRegistration
+    from buddyswitch.launcher.web_contracts import (
+        ActorConsoleSectionRegistration,
+        WebRouteRegistration,
+        WebWorkerRegistration,
+    )
     from buddyswitch.runtime_support.env_cleanup import CleanupContribution
     from buddyswitch.runtime_support.skill_contracts import SkillExport
 
@@ -25,3 +29,5 @@ class ModuleAssembly:
     cleanup: tuple[CleanupContribution, ...] = ()
     actor_console_sections: tuple[ActorConsoleSectionRegistration, ...] = ()
     inbound_sources: tuple[InboundSourceRegistration, ...] = ()
+    web_routes: tuple[WebRouteRegistration, ...] = ()
+    web_workers: tuple[WebWorkerRegistration, ...] = ()

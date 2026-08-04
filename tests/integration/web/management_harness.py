@@ -30,9 +30,16 @@ WEB_MANAGEMENT_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "web_managemen
 WEB_MANAGEMENT = importlib.import_module("buddyswitch.launcher.web_management")
 NO_PROXY_OPENER = build_opener(ProxyHandler({}))
 
-from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.web import registration as communication_web  # noqa: E402
+from buddyswitch.application.build import build_application  # noqa: E402
 from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
 from buddyswitch.launcher import actor_capability  # noqa: E402
+
+
+APPLICATION = build_application()
+WEB_ROUTES = APPLICATION.web_routes
+ACTOR_CONSOLE_SECTIONS = APPLICATION.actor_console_sections
 
 
 def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:

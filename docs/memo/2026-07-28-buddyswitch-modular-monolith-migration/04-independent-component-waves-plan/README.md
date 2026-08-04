@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `COMMUNICATION READY`
-> Executable packet: `BS-MM-S4-COMMUNICATION-R1-20260803-01`
-> Other lane: Context remains `PREPARATION ONLY` and last
+> Stage state: `CONTEXT PREPARATION ONLY`
+> Executable packet: none
+> Current lane: Context source refresh and READY preparation; remains last
 > Merge unit: one accepted lane at a time
 
 S4 is not one mechanical directory migration. Its six lanes share the same
@@ -11,10 +11,10 @@ Accordingly, Search was accepted independently. Current-source review then
 proved that Track and Artifact must cut over as one atomic migration candidate
 while remaining two independent final modules. The next refresh selected
 Evidence because it needs only the existing Tool contribution and accepted
-Artifact Public. At that checkpoint Communication still lacked an exact
-worker boundary. Context remains last. Evidence is accepted. Communication's
-route/worker boundary, source refresh, preflight and READY review are now
-complete; only its R1 packet may run.
+Artifact Public. Communication then completed its route/worker boundary,
+physical cutover and generic cleanup execution repair. Search, Track,
+Artifact, Evidence and Communication are accepted. Context remains last and
+is now the only lane eligible for source refresh and READY preparation.
 
 ## Read order for the current lane
 
@@ -51,7 +51,7 @@ adds current-source execution facts; it does not broaden S4.
 | Search | ACCEPTED | `search/S4-SEARCH-ACCEPTANCE.md` |
 | Track | ACCEPTED WITH ARTIFACT | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
-| Communication | READY | `communication/S4-COMMUNICATION-GOAL-PACKET.md` |
+| Communication | ACCEPTED | `communication/S4-COMMUNICATION-ACCEPTANCE.md` |
 | Evidence | ACCEPTED | `evidence/S4-EVIDENCE-ACCEPTANCE.md` |
 | Context | PREPARATION ONLY | last; composes accepted Public reads from other lanes |
 
@@ -93,11 +93,12 @@ consumed permanently.
 
 ## Later-lane admission rule
 
-Communication and Context may not reuse an Evidence snapshot or packet.
-Communication now has its own exact snapshot and R1 authority. Context remains
-blocked until the Communication lane is accepted.
+Context may not reuse an Evidence or Communication snapshot or packet. It
+requires a fresh committed-source owner/consumer trace and its own reviewed
+execution authority.
 
 ## Checkpoint protocol
 
-No S4 packet is executable. Communication preparation does not authorize
-Communication implementation, Context, S5, S6 or S7.
+No S4 packet is executable. Communication acceptance authorizes Context source
+refresh and READY preparation only; it does not authorize Context
+implementation, S5, S6 or S7.

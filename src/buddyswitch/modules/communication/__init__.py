@@ -1,0 +1,1 @@
+"""Communication product module."""

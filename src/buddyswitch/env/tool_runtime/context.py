@@ -17,10 +17,8 @@ from buddyswitch.env.domain.identity import actor_identity
 from buddyswitch.runtime_support import env_profiles
 from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST
 from buddyswitch.env.repos import actor_private_files as _actor_private_repo
-from buddyswitch.env.repos import messages as _message_repo
 from buddyswitch.env.repos import runtime_files
 from buddyswitch.env.tool_runtime import daemon_client
-from buddyswitch.env.tool_runtime import im_actor_delivery
 from buddyswitch.env.tool_runtime import role_auth as _role_auth
 import re
 
@@ -235,13 +233,6 @@ class SignalDeliveryAccess:
         return daemon_client.deliver_signal(signal=signal)
 
 
-class ImActorDeliveryAccess:
-    """IM product delivery capability for actor-side clients."""
-
-    def deliver(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return im_actor_delivery.deliver(payload)
-
-
 @dataclass(frozen=True)
 class DomainAccess:
     """Host-owned domain validator/normalizer access."""
@@ -254,7 +245,6 @@ class RepoAccess:
     """Host-owned repository and runtime-file access."""
 
     actor_private: Any = field(default_factory=lambda: _actor_private_repo)
-    message: Any = field(default_factory=lambda: _message_repo)
     runtime_files: Any = field(default_factory=lambda: runtime_files)
 
 
@@ -318,12 +308,6 @@ class ToolContext(Mapping[str, Any]):
                 role_id=self.role_id,
             ),
         )
-        object.__setattr__(
-            self,
-            "im_actor_delivery",
-            ImActorDeliveryAccess(),
-        )
-
     @classmethod
     def from_identity_profile(
         cls,

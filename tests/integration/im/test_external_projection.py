@@ -12,8 +12,29 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.launcher import im_http_router  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.web import im_http_router  # noqa: E402
+from buddyswitch.modules.communication.private.adapters.web import registration as communication_web  # noqa: E402
 from buddyswitch.launcher import web_management  # noqa: E402
+
+
+def _web_service_with_im(
+    session: Any,
+    provider: Any,
+) -> web_management.WebManagementService:
+    route = communication_web.CommunicationWebRoute(
+        web_management.WebHostAccess(list_instances=lambda: []),
+        im_session=session,
+        web_identity_provider=provider,
+    )
+    return web_management.WebManagementService(
+        web_routes=(
+            web_management.WebRouteRegistration(
+                name="communication-im-test",
+                prefix="/api/im/",
+                factory=lambda _access: route,
+            ),
+        ),
+    )
 
 
 class _FakeExternalImSession:
@@ -300,9 +321,9 @@ class ExternalImProjectionContractTests(unittest.TestCase):
             session.calls.append(("get_direct_conversation", dict(kwargs)))
             or {"ok": True, "conversation": {"id": "conv-direct"}, "messages": [], "count": 0}
         )
-        service = web_management.WebManagementService(
-            web_im_identity_provider=_FakeWebIdentityProvider(session.external_session),
-            im_session=session,
+        service = _web_service_with_im(
+            session,
+            _FakeWebIdentityProvider(session.external_session),
         )
 
         status, events = service.handle_api(

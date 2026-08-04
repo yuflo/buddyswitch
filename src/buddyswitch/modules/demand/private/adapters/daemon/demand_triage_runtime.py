@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 
 from buddyswitch.launcher import side_thread_registry  # noqa: E402
-from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.modules.communication import public as communication_public  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
 
 
@@ -186,7 +186,7 @@ def _handled_source(
         ref.get("conversation_id"),
         "source.conversation_id",
     )
-    response = message_service.get_im_message(
+    response = communication_public.get_im_message(
         identity={"id": actor_id, "type": "actor"},
         message_id=message_id,
     )
@@ -244,7 +244,7 @@ def _ensure_handled_reply(
         actor_id=actor_id,
         receipt=receipt,
     )
-    replies = message_service.list_im_replies(
+    replies = communication_public.list_im_replies(
         identity={"id": actor_id, "type": "actor"},
         message_id=str(source_message["id"]),
     )
@@ -263,7 +263,7 @@ def _ensure_handled_reply(
         ):
             return _required_text(reply.get("id"), "reply.id")
 
-    sent = message_service.send_im_message(
+    sent = communication_public.send_im_message(
         sender_identity={"id": actor_id, "type": "actor"},
         target_identity=dict(target),
         content=content,
@@ -288,7 +288,7 @@ def _ensure_handled_reply(
         else None,
         "reply.id",
     )
-    stored = message_service.get_im_message(
+    stored = communication_public.get_im_message(
         identity={"id": actor_id, "type": "actor"},
         message_id=message_id,
     )

@@ -24,7 +24,11 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         return shared_root
 
     def _service(self, host_control: RecordingHostControl | None = None) -> WEB_MANAGEMENT.WebManagementService:
-        return WEB_MANAGEMENT.WebManagementService(host_control=host_control or RecordingHostControl())
+        return WEB_MANAGEMENT.WebManagementService(
+            host_control=host_control or RecordingHostControl(),
+            web_routes=WEB_ROUTES,
+            actor_console_sections=ACTOR_CONSOLE_SECTIONS,
+        )
 
     @staticmethod
     def _instance_list_payload() -> dict[str, object]:
@@ -451,7 +455,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         service = self._service(runner)
 
         with mock.patch.object(
-            WEB_MANAGEMENT.daemon_client,
+            communication_web.daemon_client,
             "check_reachability",
             return_value={
                 "reachability_status": "online",
@@ -459,7 +463,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                 "record": {"identity_id": target_identity_id},
             },
         ), mock.patch.object(
-            WEB_MANAGEMENT.im_actor_delivery,
+            communication_web.im_actor_delivery,
             "deliver",
             return_value={"actor_handling_status": "submitted", "runtime_target": "parent", "error": None},
         ) as deliver_im_actor:

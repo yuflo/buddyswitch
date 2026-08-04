@@ -14,7 +14,7 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.repos import messages as message_repo
+from buddyswitch.modules.communication.private.state import messages as message_repo
 from buddyswitch.env.repos import runtime_files
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo

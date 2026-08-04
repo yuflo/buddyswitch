@@ -24,6 +24,11 @@ roles, and adding actors does not create new test obligations.
 - Before adding another cleanup call to one return/exception branch, inspect
   every terminal exit and relevant current history for the same invariant;
   repair the lifecycle owner instead of stacking branch-local patches.
+- For a destructive two-phase boundary such as discover/plan then execute,
+  require the effect owner to revalidate safety at execution time. Proof must
+  change the relevant path or ownership state between the phases and assert the
+  real external effect and reported result; planner rejection alone does not
+  prove executor safety.
 
 ## Controller
 

@@ -23,7 +23,7 @@ from tests.support import object_builders
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
-from buddyswitch.env.services import messages as message_service  # noqa: E402
+from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
 from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
 from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
@@ -51,11 +51,13 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertFalse(hasattr(context, "task_goal_runtime"))
         self.assertFalse(hasattr(runtime_context, "TaskGoalRuntimeAccess"))
         self.assertFalse(hasattr(context, "task_sys_runtime"))
-        self.assertIsInstance(context.im_actor_delivery, runtime_context.ImActorDeliveryAccess)
+        self.assertFalse(hasattr(context, "im_actor_delivery"))
+        self.assertFalse(hasattr(runtime_context, "ImActorDeliveryAccess"))
         self.assertFalse(hasattr(context.rules, "task_sys"))
         self.assertFalse(hasattr(context.rules, "demand_sys"))
         self.assertFalse(hasattr(context.repos, "demand"))
         self.assertFalse(hasattr(context.repos, "demands"))
+        self.assertFalse(hasattr(context.repos, "message"))
         self.assertFalse(hasattr(context, "daemon"))
         self.assertFalse(hasattr(runtime_context, "Daemon" + "Access"))
 

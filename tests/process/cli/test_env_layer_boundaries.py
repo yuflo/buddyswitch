@@ -124,22 +124,19 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
-                            if alias.name.startswith("buddyswitch.env.services") and alias.name != "buddyswitch.env.services.messages":
+                            if alias.name.startswith("buddyswitch.env.services"):
                                 import_violations.append(f"{rel}:{node.lineno}: import {alias.name}")
                     elif isinstance(node, ast.ImportFrom):
                         module = node.module or ""
                         if module == "buddyswitch.env.services":
-                            for alias in node.names:
-                                if alias.name != "messages":
-                                    import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
-                        elif module.startswith("buddyswitch.env.services") and module != "buddyswitch.env.services.messages":
+                            import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
+                        elif module.startswith("buddyswitch.env.services"):
                             import_violations.append(f"{rel}:{node.lineno}: from {module} import ...")
         self.assertEqual(import_violations, [], msg="\n".join(import_violations))
 
         service_dir = ROOT / "src" / "buddyswitch" / "env" / "services"
         allowed_service_files = {
             "src/buddyswitch/env/services/__init__.py",
-            "src/buddyswitch/env/services/messages.py",
         }
         if service_dir.exists():
             service_files = {

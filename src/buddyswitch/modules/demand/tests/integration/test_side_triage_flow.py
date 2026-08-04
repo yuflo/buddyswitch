@@ -9,7 +9,7 @@ from typing import Any
 from unittest.mock import patch
 
 from buddyswitch.launcher import side_thread_registry
-from buddyswitch.env.services import messages as message_service
+from buddyswitch.modules.communication import public as communication_public
 from buddyswitch.launcher import daemon_state
 from buddyswitch.modules.demand.private.adapters.daemon import (
     demand_sys_daemon_adapter,
@@ -415,7 +415,7 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
     def _im_fact(self) -> tuple[dict[str, Any], dict[str, Any]]:
         external = {"id": "ext-triage-source", "type": "external"}
         actor = {"id": self.actor_id, "type": "actor"}
-        inbound = message_service.send_im_message(
+        inbound = communication_public.send_im_message(
             sender_identity=external,
             target_identity=actor,
             content="What is the status?",
@@ -452,7 +452,7 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         )
 
         self.assertEqual(result["decision"], "handled")
-        replies = message_service.list_im_replies(
+        replies = communication_public.list_im_replies(
             identity={"id": self.actor_id, "type": "actor"},
             message_id=inbound["message"]["id"],
         )
@@ -478,7 +478,7 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
         with self.assertRaises(demand_sys.DemandPayloadError):
             self._resolve(token, invalid)
 
-        replies = message_service.list_im_replies(
+        replies = communication_public.list_im_replies(
             identity={"id": self.actor_id, "type": "actor"},
             message_id=inbound["message"]["id"],
         )
@@ -524,7 +524,7 @@ class DemandSideTriageFlowTests(RuntimeWorkspaceTestCase):
             result = self._resolve(token, proposal)
 
         self.assertEqual(result["decision"], "handled")
-        replies = message_service.list_im_replies(
+        replies = communication_public.list_im_replies(
             identity={"id": self.actor_id, "type": "actor"},
             message_id=inbound["message"]["id"],
         )

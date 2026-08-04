@@ -9,10 +9,14 @@ import time
 from typing import Any
 
 from buddyswitch.env.repos import identities as identity_repo
-from buddyswitch.env.services import messages as message_service
+from buddyswitch.modules.communication.private.domain import messages as message_service
 from tests.support.cli import wait_until
 from tests.support.runtime import RuntimeWorkspaceTestCase
-from buddyswitch.launcher import im_http_router, imessage_channel, web_management
+from buddyswitch.launcher import web_management
+from buddyswitch.modules.communication.private.adapters.web import (
+    im_http_router,
+    imessage_channel,
+)
 
 
 CONTACT_COUNT = 100

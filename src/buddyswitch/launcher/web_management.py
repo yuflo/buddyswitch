@@ -21,17 +21,16 @@ from uuid import uuid4
 HELPER_DIR = Path(__file__).resolve().parent
 
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
-from buddyswitch.launcher import web_im_identity
-from buddyswitch.launcher import im_http_router
-from buddyswitch.launcher import imessage_channel
 from buddyswitch.launcher import host_control as host_control_module
 from buddyswitch.launcher import cli_contract
 from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.tool_runtime import daemon_client
-from buddyswitch.env.tool_runtime import im_actor_delivery
-from buddyswitch.launcher import external_im_session
-from buddyswitch.launcher.web_contracts import ActorConsoleSectionRegistration
+from buddyswitch.launcher.web_contracts import (
+    ActorConsoleSectionRegistration,
+    WebHostAccess,
+    WebRouteRegistration,
+    WebWorkerRegistration,
+)
 from buddyswitch.modules.track import public as track_public
 
 
@@ -46,6 +45,8 @@ STATIC_CONTENT_TYPES = {
 }
 LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost"}
 _ACTOR_CONSOLE_SECTIONS: tuple[ActorConsoleSectionRegistration, ...] = ()
+_WEB_ROUTES: tuple[WebRouteRegistration, ...] = ()
+_WEB_WORKERS: tuple[WebWorkerRegistration, ...] = ()
 
 
 def _validated_actor_console_sections(
@@ -80,6 +81,25 @@ def configure_actor_console_sections(
 ) -> None:
     global _ACTOR_CONSOLE_SECTIONS
     _ACTOR_CONSOLE_SECTIONS = _validated_actor_console_sections(registrations)
+
+
+def configure_web_contributions(
+    routes: tuple[WebRouteRegistration, ...],
+    workers: tuple[WebWorkerRegistration, ...],
+) -> None:
+    global _WEB_ROUTES, _WEB_WORKERS
+    if not isinstance(routes, tuple) or not all(
+        isinstance(registration, WebRouteRegistration)
+        for registration in routes
+    ):
+        raise ValueError("Web route registrations must be a typed tuple")
+    if not isinstance(workers, tuple) or not all(
+        isinstance(registration, WebWorkerRegistration)
+        for registration in workers
+    ):
+        raise ValueError("Web worker registrations must be a typed tuple")
+    _WEB_ROUTES = routes
+    _WEB_WORKERS = workers
 
 
 @dataclass(frozen=True)
@@ -296,28 +316,54 @@ def create_server(host: str, port: int, service: "WebManagementService") -> Thre
     return WebManagementServer((host, port), Handler)
 
 
-def create_imessage_channel_worker(server_url: str) -> imessage_channel.ImessageChannelWorker:
-    config = imessage_channel.ChannelConfig(server=server_url)
-    controller = imessage_channel.ImessageChannelController(config=config)
-    return imessage_channel.ImessageChannelWorker(controller)
+@dataclass(frozen=True)
+class ConfiguredWebWorker:
+    name: str
+    worker: Any
 
 
-def serve_with_imessage_worker(server: Any, worker: Any) -> None:
-    worker_started = False
+def instantiate_web_workers(
+    registrations: tuple[WebWorkerRegistration, ...],
+    server_url: str,
+) -> tuple[ConfiguredWebWorker, ...]:
+    configured: list[ConfiguredWebWorker] = []
+    for registration in registrations:
+        worker = registration.factory(server_url)
+        if not callable(getattr(worker, "start", None)) or not callable(
+            getattr(worker, "stop", None)
+        ):
+            raise ValueError(
+                f"Web worker '{registration.name}' must expose start() and stop()"
+            )
+        configured.append(
+            ConfiguredWebWorker(name=registration.name, worker=worker)
+        )
+    return tuple(configured)
+
+
+def serve_with_workers(server: Any, workers: tuple[Any, ...]) -> None:
+    started: list[ConfiguredWebWorker] = []
     try:
-        try:
-            worker.start()
-            worker_started = True
-        except Exception as exc:
-            sys.stderr.write(f"iMessage channel worker disabled: {exc}\n")
-            sys.stderr.flush()
+        for configured in workers:
+            if isinstance(configured, ConfiguredWebWorker):
+                name = configured.name
+                worker = configured.worker
+            else:
+                name = str(getattr(configured, "name", type(configured).__name__))
+                worker = configured
+            try:
+                worker.start()
+                started.append(ConfiguredWebWorker(name=name, worker=worker))
+            except Exception as exc:
+                sys.stderr.write(f"Web worker '{name}' disabled: {exc}\n")
+                sys.stderr.flush()
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
     finally:
-        if worker_started:
-            worker.stop()
+        for configured in reversed(started):
+            configured.worker.stop()
         server.server_close()
 
 
@@ -327,13 +373,12 @@ class WebManagementService:
         *,
         host_control: host_control_module.HostControl | None = None,
         terminal_opener: Callable[[str], None] | None = None,
-        web_im_identity_provider: web_im_identity.WebImIdentityProvider | None = None,
-        im_session: external_im_session.ExternalImSession | None = None,
         platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
         actor_console_sections: tuple[
             ActorConsoleSectionRegistration, ...
         ] | None = None,
+        web_routes: tuple[WebRouteRegistration, ...] | None = None,
     ) -> None:
         self._host_control = host_control or host_control_module.HostControl()
         self._terminal_opener = terminal_opener or open_macos_terminal_app
@@ -349,21 +394,30 @@ class WebManagementService:
         self._operation_commands: dict[str, Callable[[], dict[str, Any]]] = {}
         self._lifecycle_queue: list[str] = []
         self._lifecycle_running_operation_id: str | None = None
-        self._im_session = im_session or external_im_session.ExternalImSession(
-            actor_lister=self._external_im_actor_rows,
-            actor_reachability_checker=self._check_im_actor_reachability,
-            actor_delivery_handler=self._deliver_im_actor,
+        self._web_routes = self._instantiate_web_routes(
+            _WEB_ROUTES if web_routes is None else web_routes
         )
-        self._web_im_identity = web_im_identity_provider or web_im_identity.WebImIdentityProvider(
-            im_session=self._im_session
-        )
-        self._im_router = im_http_router.ImHttpRouter(
-            actor_lister=self._external_im_actor_rows,
-            actor_reachability_checker=self._check_im_actor_reachability,
-            actor_delivery_handler=self._deliver_im_actor,
-            im_session=self._im_session,
-            web_external_session_provider=self.ensure_web_im_identity,
-        )
+
+    def _instantiate_web_routes(
+        self,
+        registrations: tuple[WebRouteRegistration, ...],
+    ) -> tuple[tuple[WebRouteRegistration, Any], ...]:
+        access = WebHostAccess(list_instances=self._list_instances)
+        configured: list[tuple[WebRouteRegistration, Any]] = []
+        for registration in registrations:
+            route = registration.factory(access)
+            if not callable(getattr(route, "prepare", None)) or not callable(
+                getattr(route, "handle", None)
+            ):
+                raise ValueError(
+                    f"Web route '{registration.name}' must expose prepare() and handle()"
+                )
+            configured.append((registration, route))
+        return tuple(configured)
+
+    def prepare_routes(self) -> None:
+        for _registration, route in self._web_routes:
+            route.prepare()
 
     def handle_api(
         self,
@@ -408,8 +462,9 @@ class WebManagementService:
             if detail is None:
                 raise HttpError(status=404, code="NOT_FOUND", message=f"track not found: {track_id}")
             return 200, {"ok": True, "track": detail}
-        if route.startswith("/api/im/"):
-            return self._im_router.handle(method, path, body, headers)
+        for registration, contributed_route in self._web_routes:
+            if route.startswith(registration.prefix):
+                return contributed_route.handle(method, path, body, headers)
 
         instance_action = self._parse_instance_action_path(path)
         if instance_action is None:
@@ -499,14 +554,6 @@ class WebManagementService:
             if "/" not in track_id:
                 return track_id
         return None
-
-    def ensure_web_im_identity(self) -> dict[str, Any]:
-        try:
-            return self._web_im_identity.ensure()
-        except web_im_identity.WebImIdentityError as exc:
-            raise HttpError(status=502, code="IM_IDENTITY_FAILED", message=str(exc)) from exc
-        except ValueError as exc:
-            raise HttpError(status=409, code="IM_IDENTITY_BLOCKED", message=str(exc)) from exc
 
     def _create_instance(self, body: bytes) -> dict[str, Any]:
         payload = self._parse_json_body(body)
@@ -870,26 +917,6 @@ class WebManagementService:
             }
         )
 
-    def _external_im_actor_rows(self, role_id: str | None) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        for instance in self._list_instances():
-            row = self._actor_row_from_instance(instance)
-            if role_id is not None and row.get("role") != role_id:
-                continue
-            identity_id = row.get("actor_id")
-            normalized_role = row.get("role")
-            if not isinstance(identity_id, str) or not isinstance(normalized_role, str):
-                continue
-            rows.append(
-                {
-                    "identity_id": identity_id,
-                    "identity": {"id": identity_id, "type": "actor"},
-                    "role_id": normalized_role,
-                    "status": row.get("status") if isinstance(row.get("status"), str) else "online",
-                }
-            )
-        return rows
-
     def _actor_console(self, actor_id: str) -> dict[str, Any]:
         instance = self._get_instance_status(actor_id)
         role = instance.get("role")
@@ -903,13 +930,6 @@ class WebManagementService:
         console: dict[str, Any] = {
             "actor": {"actor_id": actor_id, "role": role},
             "runtime": self._runtime_row(instance),
-            "im": {
-                "target": {
-                    "identity": {"id": actor_id, "type": "actor"},
-                    "identity_id": actor_id,
-                    "role_id": role,
-                }
-            },
             "capabilities": self._read_actor_capabilities(actor_id)["capabilities"],
         }
         for registration in self._actor_console_sections:
@@ -947,12 +967,6 @@ class WebManagementService:
         if not isinstance(parent, str) or not isinstance(side, str):
             raise HttpError(status=400, code="INVALID_REQUEST", message="capability levels must be strings.")
         return self._call_host_control(lambda: self._host_control.capabilities_set(actor_id, parent, side))
-
-    def _deliver_im_actor(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return im_actor_delivery.deliver(payload)
-
-    def _check_im_actor_reachability(self, *, target_identity_id: str) -> dict[str, Any]:
-        return daemon_client.check_reachability(target_identity_id=target_identity_id)
 
     def _get_instance_status(self, actor_id: str) -> dict[str, Any]:
         return self._call_host_control(lambda: self._host_control.status(actor_id))
@@ -1226,11 +1240,11 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr, flush=True)
         return 2
     bind_web_runtime_state()
-    service = WebManagementService()
     try:
-        service.ensure_web_im_identity()
-    except HttpError as exc:
-        print(exc.message, file=sys.stderr, flush=True)
+        service = WebManagementService()
+        service.prepare_routes()
+    except Exception as exc:
+        print(str(exc), file=sys.stderr, flush=True)
         return 1
     server = create_server(args.host, args.port, service)
     url = f"http://{args.host}:{server.server_port}"
@@ -1243,6 +1257,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     sys.stdout.flush()
     print(f"BuddySwitch web management listening on {url}", file=sys.stderr, flush=True)
-    worker = create_imessage_channel_worker(f"http://{args.host}:{server.server_port}")
-    serve_with_imessage_worker(server, worker)
+    workers = instantiate_web_workers(_WEB_WORKERS, url)
+    serve_with_workers(server, workers)
     return 0
