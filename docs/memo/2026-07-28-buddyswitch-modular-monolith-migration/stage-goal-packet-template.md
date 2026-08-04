@@ -31,6 +31,10 @@ Execution branch/worktree:
 Predecessor acceptance:
 ```
 
+Any custom patch or manifest digest must define the exact path set,
+exclusions, ordering, byte framing and command used to reproduce it. Prefer a
+commit/tree plus explicit diff when that already identifies the clean source.
+
 ## 3. Goal and acceptance
 
 ```text
@@ -61,6 +65,11 @@ Every referenced proof must already exist. A planned executor RED does not
 replace hub-owned preflight. If any semantic owner, public/foundation contract,
 state identity, packaging boundary or selected mechanism remains undecided,
 the packet is not READY.
+
+Cross-session evidence reuse additionally requires the canonical public
+command with explicit targets, material runtime/toolchain identity, result,
+cleanup and contrary-signal disposition. A run ID, filename, suite label or
+test count by itself is not reusable evidence.
 
 For a protected CLI, process, socket or broker-backed contract, identify the
 exact assertions that observe one terminal success and each material
@@ -129,7 +138,9 @@ Cleanup:
 Link checkpoint documents and state the required dependency order. For each
 checkpoint name:
 
-- first RED or preservation proof;
+- intent-appropriate entry proof: attributable RED for changed/repaired
+  behavior, or identity-valid current GREEN for a behavior-preserving
+  refactor;
 - exact files/disposition;
 - declared environment and, after any `src/buddyswitch/**` mutation, the
   rebuild/install/activate/verify gate before another public-runner command;

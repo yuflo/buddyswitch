@@ -3,7 +3,7 @@
 > Use root `AGENTS.md`, `$buddyswitch-testing` and
 > `superpowers:executing-plans`.
 > Plan state: `READY`
-> Packet: `BS-MM-S4-CONTEXT-R1-20260804-01`
+> Packet: `BS-MM-S4-CONTEXT-R1-20260804-02`
 
 ## 1. Acceptance sentence
 
@@ -15,7 +15,7 @@
 
 ### S4.CONTEXT.0 — Identity and scope
 
-- Verify the hub preparation checkpoint and its product parent
+- Verify the hub preparation checkpoint and its product-base ancestor
   `84734395f7b9088ad130ae8ace310cb55220865f`.
 - Verify the preparation delta is coordinating documents only.
 - Verify clean product/index/untracked state, installed runtime identity and
@@ -31,12 +31,15 @@
 - Retain the zero-collection run as non-evidence; do not copy its node IDs.
 - Do not manufacture a product-behavior RED for this refactor.
 
-### S4.CONTEXT.2 — Structural RED
+### S4.CONTEXT.2 — Define final structural proof
 
-- Add the Context architecture proof in its classified root-owned file.
-- Its first run must detect the old dynamic owner, missing explicit Context
-  module/composition, and Context-only shared-host residue.
-- Record the exact RED identity and cleanup.
+- Add the Context architecture proof in its classified root-owned file, but do
+  not run it against the old topology.
+- The proof must detect the old dynamic owner, require the final explicit
+  Context module/composition and reject Context-only shared-host residue.
+- This is a behavior-preserving refactor. The current behavior GREEN is the
+  entry proof; a future-topology failure against the old tree would be a
+  manufactured RED.
 
 ### S4.CONTEXT.3 — One no-test cutover block
 
@@ -70,7 +73,7 @@ repair repeats this boundary before another public-runner proof.
 The executor owns valid target discovery and grouping through the public
 runner. Proof breadth must include:
 
-- the new Context architecture RED turned GREEN;
+- the new Context architecture proof on the final topology;
 - the complete Context binding file;
 - Context catalog/decision/runless/process observables from the direct
   preservation group;
@@ -117,7 +120,7 @@ Stop once and return when:
   change;
 - a compatibility path, discovery exception or framework appears necessary;
 - any required write is unclassified or evidence is unexplained;
-- cleanup is not attributable and clean;
+- cleanup residue cannot be attributed and restored to clean state;
 - a replacement FINAL fails.
 
 Do not wait, blind-retry, stack repair packets, edit the Goal Packet, commit or
@@ -132,7 +135,7 @@ Final tracked/index/untracked identities:
 Final activation/source/distribution identity:
 Completed checkpoints:
 Changed/created/deleted files by manifest class:
-Structural RED command, run ID and detected claims:
+Final structure proof command, run ID and detected claims:
 Reused or rerun entry evidence:
 Focused GREEN and affected commands, run IDs, results and durations:
 Every FINAL identity, command, run ID, result and duration:

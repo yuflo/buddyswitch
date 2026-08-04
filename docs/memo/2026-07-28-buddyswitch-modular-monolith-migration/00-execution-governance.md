@@ -151,7 +151,7 @@ Required evidence:
 | Mechanism | packaging, filesystem, process or framework assumptions have an isolated representative final-topology probe |
 | Declared environment | the build, test and runtime environment is reproducible from committed declarations; no ad hoc package or hidden local mutation is required |
 | Execution order | every environment-consuming proof follows the source mutation and rebuild/install/activate/verify step that makes its runtime current |
-| Identity | every proof records source/diff, fixture, exact probe, result, cleanup and residual risk |
+| Identity | every proof records source/diff, canonical command with explicit targets, fixture/environment, result, cleanup and residual risk; any custom digest defines its exact path set, exclusions, ordering and byte framing |
 | Handoff | no semantic owner, public/foundation contract, state identity or boundary decision remains for the executor to infer; suggested commands are checked against current runner semantics or explicitly left to executor discovery |
 
 For every protected consumer interface, READY evidence is assertion-level:
@@ -175,7 +175,10 @@ The ordinary READY questions still apply:
 - Do generic proofs derive expected topology from their semantic owner or
   explicit composition instead of accumulating product-specific exceptions?
 - Does each new contract have one owner?
-- Can the selected RED distinguish the target from the current behavior?
+- Does the entry proof match the change intent: an attributable RED for new or
+  repaired behavior, or an identity-valid current GREEN for a
+  behavior-preserving refactor? A structural refactor must not manufacture a
+  RED merely to make the future topology fail against the current topology.
 - Is every removal target explicit?
 - Can the stage merge without a later stage repairing its runtime truth?
 - Are shared files and their integration owner named?
@@ -197,7 +200,7 @@ return the packet to READY review.
 Checkpoints occur:
 
 - after current-source trace;
-- after RED;
+- after RED or the behavior-preserving refactor baseline;
 - after each coherent GREEN block;
 - before deleting the old path;
 - after residue removal;

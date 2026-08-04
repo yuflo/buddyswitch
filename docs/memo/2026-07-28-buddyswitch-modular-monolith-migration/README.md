@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
 > Current state: S0–S3 ACCEPTED; S4 CONTEXT READY
-> Runtime authorization: `BS-MM-S4-CONTEXT-R1-20260804-01` only
+> Runtime authorization: `BS-MM-S4-CONTEXT-R1-20260804-02` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -144,11 +144,14 @@ affected and one frozen replacement FINAL and is accepted in
 All Communication packets are consumed. The committed Context refresh proved
 that the projection already consumes Track, Task, Artifact and Communication
 Public, while three unused/Context-only access surfaces remain on shared
-`ToolContext`. Direct baseline `f905a017ab6f455b9efd04dda9c2bcb3`, affected
-baseline `0b6cafba442b403ea441df38b6393241` and topology probe
-`S4CONTEXTP-20260804-01` passed. D-056 selects one final passive Context Tool
+`ToolContext`. The second pre-handoff audit rejected the unexecuted first
+packet, removed its manufactured structural RED and opaque evidence
+identities, and recorded assertion-level reusable proof. Direct baseline
+`ec4ae6b40a3d4fcaa8494049c609d35c`, affected baseline
+`58658371b1244b428ea3cccfb24eb393` and reproducible topology probe
+`S4CONTEXTP-20260804-02` passed. D-056 selects one final passive Context Tool
 module with no Public/state/test subtree and exact host-residue removal. The
-reviewed plan authorizes only `BS-MM-S4-CONTEXT-R1-20260804-01`.
+reviewed plan authorizes only `BS-MM-S4-CONTEXT-R1-20260804-02`.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

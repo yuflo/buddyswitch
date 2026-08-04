@@ -1,7 +1,7 @@
 # S4 Context Lane
 
 > State: `READY`
-> Executable packet: `BS-MM-S4-CONTEXT-R1-20260804-01`
+> Executable packet: `BS-MM-S4-CONTEXT-R1-20260804-02`
 > Product base: `84734395f7b9088ad130ae8ace310cb55220865f`
 > Acceptance owner: coordinating hub
 
@@ -14,10 +14,12 @@ Read in this order:
 1. `S4-CONTEXT-SOURCE-AND-CONSUMER-SNAPSHOT.md`;
 2. `S4-CONTEXT-OWNER-CONSUMER-MANIFEST.md`;
 3. `S4-CONTEXT-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
-4. `S4-CONTEXT-IMPLEMENTATION-PLAN.md`;
-5. `S4-CONTEXT-READY-REVIEW.md`;
-6. `S4-CONTEXT-GOAL-PACKET.md`.
+4. `S4-CONTEXT-PRE-HANDOFF-AUDIT.md`;
+5. `S4-CONTEXT-IMPLEMENTATION-PLAN.md`;
+6. `S4-CONTEXT-READY-REVIEW.md`;
+7. `S4-CONTEXT-GOAL-PACKET.md`.
 
-The packet authorizes one atomic Context cutover. It does not authorize S5,
+The first preparation packet is rejected before execution. The current packet
+authorizes one atomic Context cutover. It does not authorize S5,
 Foundation convergence, a Public Context facade, test relocation, compatibility,
 commit/push, or migration-master-truth edits.

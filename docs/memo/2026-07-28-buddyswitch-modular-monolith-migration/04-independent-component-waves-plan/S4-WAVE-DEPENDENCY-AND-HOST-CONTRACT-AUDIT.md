@@ -117,7 +117,7 @@ host fields earned by current `/api/im/*` and iMessage worker behavior.
 
 Context was admitted last by a fresh committed-source trace. It already reads
 Track, Task, Artifact and Communication exclusively through Public operations.
-Probe `S4CONTEXTP-20260804-01` proved the passive last-selected Tool module,
+Reproducible probe `S4CONTEXTP-20260804-02` proved the passive last-selected Tool module,
 unchanged Daemon order, explicit dispatch and fail-closed old/new registration.
 Its lane removes only `RuntimeObjectAccess`, `RegistryCatalogAccess` and the
 Context-only Role policy preview method from shared `ToolContext`; every other

@@ -43,6 +43,11 @@ A stage retrospective is historical rationale only.
   deleting attribution;
 - repeated branch-local lifecycle repair: inspect all terminal exits and
   relevant history before editing.
+- behavior-preserving refactor: establish or reuse identity-valid current
+  GREEN; do not manufacture a structural RED;
+- cross-session evidence reuse: require the canonical command, explicit
+  targets, material environment, result and cleanup; a run ID and test count
+  alone are not reusable evidence.
 
 ## Allowed work
 

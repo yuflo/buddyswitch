@@ -1,7 +1,7 @@
 # S4 Context READY Review
 
 > Determination: `READY`
-> Packet: `BS-MM-S4-CONTEXT-R1-20260804-01`
+> Packet: `BS-MM-S4-CONTEXT-R1-20260804-02`
 > Product base: `84734395f7b9088ad130ae8ace310cb55220865f`
 
 ## 1. READY gates
@@ -9,15 +9,16 @@
 | Gate | Evidence | Result |
 |---|---|---|
 | committed current truth | clean HEAD/tree and source/consumer manifests | PASS |
-| direct behavior | `f905a017ab6f455b9efd04dda9c2bcb3` | 34 passed, 23 subtests |
-| affected architecture/package | `0b6cafba442b403ea441df38b6393241` | 68 passed, 41 subtests |
-| positive topology | `S4CONTEXTP-20260804-01` explicit dispatch | PASS |
+| direct behavior | `ec4ae6b40a3d4fcaa8494049c609d35c` with exact targets in the snapshot | 34 passed, 23 subtests |
+| affected architecture/package | `58658371b1244b428ea3cccfb24eb393` with exact targets in the snapshot | 68 passed, 41 subtests |
+| positive topology | `S4CONTEXTP-20260804-02` reproducible explicit dispatch | PASS |
 | negative topology | old discovery plus explicit Context | fail-closed duplicate |
 | dependency direction | four accepted Public reads; no component Private | PASS |
 | host boundary | three exact Context-only shared surfaces; no other scope | PASS |
 | test ownership | every current behavior test is root cross-boundary | PASS |
 | runtime correspondence | activation verify plus package process baseline | PASS |
 | cleanup | runner roots absent; no attributable process/resource | PASS |
+| pre-handoff audit | first packet rejected; intent/evidence/identity defects corrected | PASS |
 
 The earlier zero-collection baseline and partial activation probe are disclosed
 in the snapshot/design documents and are not used as evidence.
@@ -47,6 +48,12 @@ license to add product exceptions.
 
 - the packet freezes claims and scope, not copied shell commands;
 - the executor discovers runner-valid file/node targets;
+- behavior-preserving refactor uses current GREEN and does not manufacture a
+  structural RED;
+- cross-session baseline reuse includes canonical commands, explicit targets,
+  environment, result and cleanup rather than only run IDs/counts;
+- commit/tree and explicit inventories replace non-reproducible auxiliary
+  manifest hashes;
 - Context uses one coherent source block and one reprovision boundary;
 - runtime activation precedes every post-source public proof;
 - cross-component tests stay root-owned;
@@ -56,5 +63,5 @@ license to add product exceptions.
 
 ## 5. Authorization
 
-Only `BS-MM-S4-CONTEXT-R1-20260804-01` may execute. READY does not accept
+Only `BS-MM-S4-CONTEXT-R1-20260804-02` may execute. READY does not accept
 Context, close S4, authorize S5, update master truth, or authorize Git writes.

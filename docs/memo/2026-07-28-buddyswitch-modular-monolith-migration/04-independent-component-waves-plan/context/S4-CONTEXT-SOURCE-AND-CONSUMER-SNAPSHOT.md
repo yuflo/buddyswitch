@@ -2,8 +2,7 @@
 
 > Snapshot source: `84734395f7b9088ad130ae8ace310cb55220865f`
 > Source tree: `61c8d902547878b980b3eb0f18a403c5e239986f`
-> Source/host manifest: `7e9fbf6dd410bac484e070c0aebcf33096b8904d60036485ccbffcbf5e8f1b6f`
-> Proof-input manifest: `0c91870963a88a45094cff12e8428ae736e2d017f1e71632b6abf75d3d1b3808`
+> Identity authority: exact commit/tree and explicit inventories below
 
 ## 1. Current owner shape
 
@@ -104,7 +103,25 @@ root `tests/integration`, `tests/process` and `tests/unit/architecture`.
 The final Context module intentionally has no `tests/` directory. Creating one
 would falsely claim another component's Private fixture as Context-owned.
 
-## 6. Preserved source/runtime identity
+## 6. Protected assertion inventory
+
+The pre-handoff review inspected assertion bodies rather than inferring
+coverage from filenames or pass counts.
+
+| Observable | Current assertion boundary | Broken path it detects |
+|---|---|---|
+| `context.get` success, filters and full catalog/schema | `test_context_get_metadata_and_source_workspace_semantics`, `test_context_get_applies_filters`, `test_context_get_exposes_full_input_schemas` | missing projection keys, filter drift, incomplete generated schema |
+| `context.summarize` identity, decision, candidate and source facts | complete `test_context_binding.py` plus the four selected Host Decision cases | changed Public-read composition, visibility, policy or workspace projection |
+| `context.list_sources` success and source descriptors | `test_context_list_sources_excludes_handoffs`, `test_context_list_sources_includes_source_workspace_descriptor`, router/black-box selected dispatch | missing action, changed descriptors or explicit-registration dispatch failure |
+| payload/profile rejection | `test_context_rejects_unknown_payload_field`, `test_context_source_workspace_uses_profile_not_agents_text_and_profile_failure_is_explicit` | success-shaped invalid input or swallowed profile failure |
+| runless/no-state contract | three selected `test_runless_contract.py` cases | run reservation/content writes or catalog/input-schema drift |
+| package/application/native projection | affected architecture/package group | duplicate/missing registration, stale dynamic package, private eager load, wheel/activation drift |
+
+Context has no transport, resource or durable-state owner. Runtime/process
+error proof is therefore the existing generic registry/activation boundary;
+no Context-specific cleanup or recovery contract is invented.
+
+## 7. Preserved source/runtime identity
 
 At refresh time:
 
@@ -119,11 +136,67 @@ runtime.verify:        ok=true
 
 Valid preservation evidence:
 
-- direct Context behavior: run `f905a017ab6f455b9efd04dda9c2bcb3`,
-  34 passed and 23 subtests;
-- architecture/package/discovery affected group: run
-  `0b6cafba442b403ea441df38b6393241`, 68 passed and 41 subtests.
+- direct Context behavior:
+
+  ```text
+  command:
+    ./buddyswitch-test focused
+      tests/integration/env_tool/test_context_binding.py
+      tests/integration/env_tool/test_host_decision_surface.py::HostDecisionSurfaceProductModeTests::test_context_summarize_projects_runless_decision_surface
+      tests/integration/env_tool/test_host_decision_surface.py::HostDecisionSurfaceProductModeTests::test_context_summarize_includes_compact_artifacts_comments_and_updates
+      tests/integration/env_tool/test_host_decision_surface.py::HostDecisionSurfaceProductModeTests::test_context_summarize_track_filter_narrows_artifacts_comments_and_updates
+      tests/integration/env_tool/test_host_decision_surface.py::HostDecisionSurfaceProductModeTests::test_pm_page_prototype_decision_surface_prefers_direct_private_actor_private_directory_without_phrase_rule
+      tests/integration/env_tool/test_response_registry.py::EnvToolResponseRegistryTests::test_context_get_and_summarize_catalog_scope
+      tests/integration/env_tool/test_response_registry.py::EnvToolResponseRegistryTests::test_context_projections_explain_demand_and_task_product_boundaries
+      tests/integration/runtime/test_runless_contract.py::RunlessRuntimeContractTests::test_context_discovery_writes_no_run_reservation_or_run_content
+      tests/integration/runtime/test_runless_contract.py::RunlessRuntimeContractTests::test_tool_registry_exposes_runless_tools_and_excludes_memory_run_and_binding
+      tests/integration/runtime/test_runless_contract.py::RunlessRuntimeContractTests::test_context_get_exposes_full_input_schemas
+      tests/process/cli/test_prepare_runtime_context.py
+  run: ec4ae6b40a3d4fcaa8494049c609d35c
+  result: 34 passed, 23 subtests; 0.54s pytest / 0.75s runner
+  cleanup: run root absent; no attributable Context resource exists
+  ```
+
+- architecture/package/discovery affected group:
+
+  ```text
+  command:
+    ./buddyswitch-test focused
+      tests/unit/architecture/test_tool_runtime_contract.py
+      tests/unit/architecture/test_package_contract.py
+      tests/unit/architecture/test_communication_component_boundaries.py
+      tests/unit/architecture/test_demand_sys_boundaries.py
+      tests/process/cli/test_env_layer_boundaries.py
+      tests/process/cli/test_env_tool_package_independence.py
+      tests/process/cli/test_black_box_tool_runtime.py
+      tests/process/cli/test_env_native_mcp_projection.py
+      tests/process/package/test_distribution_install.py
+      tests/process/package/test_runtime_activation.py
+  run: 58658371b1244b428ea3cccfb24eb393
+  result: 68 passed, 41 subtests; 24.48s pytest / 24.64s runner
+  cleanup: run root absent; no attributable process/resource remains
+  ```
+
+Both commands ran through the activated non-editable runtime identified above
+with no ad hoc dependency or environment mutation. They remain entry
+preservation evidence only; the executor must prove identity equivalence or
+rerun the narrowest missing group.
 
 Run `3890727eaa5a41d7bc30da0fc8611f3e` selected wrong class node IDs and
 collected zero tests. It is retained as non-evidence and its run root was
 cleaned; no Goal Packet command depends on it.
+
+During the second pre-handoff audit, an exploratory
+`./buddyswitch-codex runtime verify` invocation returned `UNKNOWN_COMMAND`
+before touching runtime state. The canonical installed entrypoint was then
+used:
+
+```text
+BUDDYSWITCH_RUNTIME_DIR="$PWD/.buddyswitch-runtime" \
+  .buddyswitch-runtime/venv/bin/python \
+  -m buddyswitch.application.entrypoints.runtime_activation verify
+result: kind=runtime.verify; ok=true; source/distribution identities above
+```
+
+The unsupported invocation is diagnostic non-evidence and is not taught to
+the executor.

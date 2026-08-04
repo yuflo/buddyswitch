@@ -1,6 +1,6 @@
 # S4 Context Owner and Consumer Manifest
 
-> Packet: `BS-MM-S4-CONTEXT-R1-20260804-01`
+> Packet: `BS-MM-S4-CONTEXT-R1-20260804-02`
 > Manifest state: `FROZEN FOR READY`
 
 ## 1. Final owner

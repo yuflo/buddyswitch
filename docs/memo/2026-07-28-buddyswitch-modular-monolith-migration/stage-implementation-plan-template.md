@@ -135,7 +135,10 @@ Record, do not defer:
 | representative final topology | `[REQUIRED: exact fixture and toolchain]` | PASS | `[REQUIRED: none or exact risk]` |
 
 The hub preflight proves the specification and selected mechanism are
-coherent. It does not replace the executor's source-bound RED/GREEN. An
+coherent. It does not replace the executor's intent-appropriate source-bound
+entry and exit proof. New behavior and defect repair require an attributable
+RED; a behavior-preserving refactor requires a current GREEN baseline and must
+not manufacture a structural RED. An
 unresolved semantic owner, public/foundation contract, state identity or
 boundary mechanism is a plan failure, not an executor task.
 
@@ -184,10 +187,10 @@ Required task shape:
 - Test: `exact/test/path::exact_case`
 - Residue: `R-...`
 
-- [ ] **Step 1: Write or select the exact RED**
+- [ ] **Step 1: Select the intent-appropriate exact entry proof**
 
 ```python
-# complete assertion or contract shape used by this task
+# complete behavior/regression assertion, or the existing preservation assertion
 ```
 
 - [ ] **Step 2: Run the focused proof**
@@ -198,8 +201,9 @@ Run:
 ./buddyswitch-test focused exact/test/path::exact_case
 ```
 
-Expected: FAIL for the named current behavior, or PASS as a preservation
-baseline.
+Expected: FAIL for the named missing/broken behavior when behavior changes,
+or PASS as the current baseline for a behavior-preserving refactor. Do not add
+or run a future-topology assertion merely to manufacture RED for a refactor.
 
 - [ ] **Step 3: Make the smallest owner-correct implementation**
 

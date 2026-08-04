@@ -2,7 +2,7 @@
 
 > Current state: CONTEXT READY
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: `BS-MM-S4-CONTEXT-R1-20260804-01` only
+> Execution authority: `BS-MM-S4-CONTEXT-R1-20260804-02` only
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -31,7 +31,7 @@ Search, the atomic Track–Artifact pair, Evidence and Communication are accepte
 Context remains last. Its committed source/consumer refresh, preservation
 evidence and representative topology preflight passed. The reviewed atomic
 plan at `04-independent-component-waves-plan/context/README.md` authorizes
-only packet `BS-MM-S4-CONTEXT-R1-20260804-01`.
+only packet `BS-MM-S4-CONTEXT-R1-20260804-02`.
 
 ## Lane protocol
 

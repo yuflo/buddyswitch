@@ -1,7 +1,7 @@
 # S4 Context Boundary Design and Preflight
 
 > Decision: `SELECTED AND PREFLIGHTED`
-> Probe: `S4CONTEXTP-20260804-01`
+> Reproducible probe: `S4CONTEXTP-20260804-02`
 
 ## 1. Bottleneck
 
@@ -59,7 +59,8 @@ accepted component to Context.
 
 ## 4. Representative final-topology probe
 
-The probe constructed the proposed passive Context assembly from the current
+The second pre-handoff audit re-ran the probe using the exact command recorded
+in `S4-CONTEXT-PRE-HANDOFF-AUDIT.md`. It constructed the proposed passive Context assembly from the current
 `DEFINITION` and `invoke`, appended it last to the real component tuple and
 used the real application builder and registry.
 
@@ -87,7 +88,9 @@ real Manifest because it had not projected application Skill exports first.
 It made no source or external-state change. The accepted probe added the same
 `configure_skill_exports(application.skills)` step used by application
 activation, then passed. This confirms the mechanism against the declared
-runtime rather than a partial mock.
+runtime rather than a partial mock. The review rerun
+`S4CONTEXTP-20260804-02` reproduced the same positive and negative result and
+left no repository or persistent runtime state.
 
 ## 5. Consequences
 

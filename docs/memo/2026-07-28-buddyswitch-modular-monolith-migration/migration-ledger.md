@@ -8,7 +8,7 @@
 | Evidence acceptance | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` |
 | Active stage | S4 — Independent Component Waves / Context |
 | State | CONTEXT READY |
-| Runtime migration authorized | `BS-MM-S4-CONTEXT-R1-20260804-01` only |
+| Runtime migration authorized | `BS-MM-S4-CONTEXT-R1-20260804-02` only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
@@ -23,7 +23,7 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | CONTEXT READY | S3 | coordinating hub | execute only `BS-MM-S4-CONTEXT-R1-20260804-01`; hub reviews return |
+| S4 Component waves | CONTEXT READY | S3 | coordinating hub | execute only `BS-MM-S4-CONTEXT-R1-20260804-02`; hub reviews return |
 | S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
@@ -394,7 +394,8 @@ state. Track–Artifact is accepted in
 | 2026-08-03 | S4 Evidence acceptance | ACCEPTED | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` | checkpoint Evidence, then refresh Communication source and worker-lifecycle boundary; do not resume either packet |
 | 2026-08-03 | S4 Communication handoff | READY | `communication/S4-COMMUNICATION-READY-REVIEW.md`; direct `81501321bd0845149719c13e7d941d8b`; affected `7d8932ce647640e39068872988848089`; process/package `1872a4bf43f74d73bd16bd04a296e54a`; topology `S4COMMP-20260803-01`; packet `BS-MM-S4-COMMUNICATION-R1-20260803-01` | user starts one independent Communication task; hub pauses without polling |
 | 2026-08-04 | S4 Communication acceptance | ACCEPTED | `communication/S4-COMMUNICATION-ACCEPTANCE.md`; R3 exact `935615ad05c443fb9c730fc18430fca3`; affected `97e2ed6734e34e39b967e1ab7369a0db`, `9adbb959051643edb648678801b56d57`; FINAL `ffefbc012a5d45fa887cd10c9520229c` | checkpoint Communication, then refresh Context from the committed source; never resume R1–R3 |
-| 2026-08-04 | S4 Context handoff | READY | `context/S4-CONTEXT-READY-REVIEW.md`; direct `f905a017ab6f455b9efd04dda9c2bcb3`; affected `0b6cafba442b403ea441df38b6393241`; topology `S4CONTEXTP-20260804-01`; packet `BS-MM-S4-CONTEXT-R1-20260804-01` | user starts one independent Context task; hub pauses without polling |
+| 2026-08-04 | S4 Context first preparation | REJECTED BEFORE EXECUTION | `context/S4-CONTEXT-PRE-HANDOFF-AUDIT.md`; packet `BS-MM-S4-CONTEXT-R1-20260804-01` consumed | correct intent/evidence/identity defects before executor time is spent |
+| 2026-08-04 | S4 Context handoff | READY | `context/S4-CONTEXT-READY-REVIEW.md`; direct `ec4ae6b40a3d4fcaa8494049c609d35c`; affected `58658371b1244b428ea3cccfb24eb393`; topology `S4CONTEXTP-20260804-02`; packet `BS-MM-S4-CONTEXT-R1-20260804-02` | user starts one independent Context task; hub pauses without polling |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -418,7 +419,7 @@ Stop/replan condition:
 ```text
 Stage: S4 / Context
 Master state: CONTEXT READY
-Goal Packet: BS-MM-S4-CONTEXT-R1-20260804-01
+Goal Packet: BS-MM-S4-CONTEXT-R1-20260804-02
 Execution session: none
 Last hub checkpoint: Context source/consumer refresh and READY review complete
 Next action: user starts one independent Context execution session from the preparation checkpoint

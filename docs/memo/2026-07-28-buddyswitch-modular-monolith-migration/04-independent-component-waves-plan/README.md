@@ -1,7 +1,7 @@
 # S4 Independent Component Waves Plan
 
 > Stage state: `CONTEXT READY`
-> Executable packet: `BS-MM-S4-CONTEXT-R1-20260804-01`
+> Executable packet: `BS-MM-S4-CONTEXT-R1-20260804-02`
 > Current lane: Context atomic cutover; remains last
 > Merge unit: one accepted lane at a time
 
@@ -96,11 +96,13 @@ consumed permanently.
 
 Context did not reuse another lane's packet. Its fresh source/consumer trace
 proved Public-only product reads and three exact Context-specific shared-host
-residues. Direct baseline `f905a017ab6f455b9efd04dda9c2bcb3`, affected
-baseline `0b6cafba442b403ea441df38b6393241` and topology probe
-`S4CONTEXTP-20260804-01` passed. Only the packet under `context/` may execute.
+residues. The pre-handoff audit rejected the unexecuted first packet and
+corrected its intent, evidence-reuse and identity defects. Direct baseline
+`ec4ae6b40a3d4fcaa8494049c609d35c`, affected baseline
+`58658371b1244b428ea3cccfb24eb393` and reproducible topology probe
+`S4CONTEXTP-20260804-02` passed. Only the current packet under `context/` may execute.
 
 ## Checkpoint protocol
 
-Only `BS-MM-S4-CONTEXT-R1-20260804-01` is executable. It does not authorize
+Only `BS-MM-S4-CONTEXT-R1-20260804-02` is executable. It does not authorize
 Context acceptance, S5, S6 or S7.
