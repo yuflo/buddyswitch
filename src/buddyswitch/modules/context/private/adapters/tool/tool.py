@@ -1,4 +1,4 @@
-"""Black-box protocol entrypoint for env.tools.context."""
+"""Context Tool adapter."""
 
 from __future__ import annotations
 

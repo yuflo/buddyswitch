@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 
 from buddyswitch.runtime_support import env_profiles
 from buddyswitch.env.tool_runtime import registry as tool_registry
+from buddyswitch.env.tool_runtime import role_auth
 from buddyswitch.env.tool_runtime import results as tool_results
 from buddyswitch.modules.artifact import public as artifact_public
 from buddyswitch.modules.task import public as task_public
@@ -333,7 +334,11 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
     operation_semantics = _parent_operation_semantics()
     affordances = tool_registry.compact_tool_affordances()
     artifact_create = operation_semantics["artifact.create_revision"]
-    runtime_policy_preview = context.runtime_policy_preview(operation_semantics)
+    runtime_policy_preview = role_auth.role_action_summary(
+        context["active_role"],
+        context["manifest"],
+        operation_semantics,
+    )
     return {
         "runtime_policy_preview": runtime_policy_preview,
         "task_visibility": "Demand-bound Task objectives, native Goal bindings, and terminal Task results",

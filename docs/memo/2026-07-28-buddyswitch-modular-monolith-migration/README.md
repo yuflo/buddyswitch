@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S3 ACCEPTED; S4 CONTEXT READY
-> Runtime authorization: `BS-MM-S4-CONTEXT-R1-20260804-02` only
+> Current state: S0–S4 ACCEPTED; S5 SOURCE REFRESH
+> Runtime authorization: none; no S5 packet exists
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -22,8 +22,8 @@ Read:
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
-| S4 | `04-independent-component-waves.md` | CONTEXT READY |
-| S5 | `05-foundation-convergence.md` | BLOCKED |
+| S4 | `04-independent-component-waves.md` | ACCEPTED |
+| S5 | `05-foundation-convergence.md` | SOURCE REFRESH |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -151,7 +151,11 @@ identities, and recorded assertion-level reusable proof. Direct baseline
 `58658371b1244b428ea3cccfb24eb393` and reproducible topology probe
 `S4CONTEXTP-20260804-02` passed. D-056 selects one final passive Context Tool
 module with no Public/state/test subtree and exact host-residue removal. The
-reviewed plan authorizes only `BS-MM-S4-CONTEXT-R1-20260804-02`.
+returned candidate passed structure, direct, affected and frozen FINAL proof
+and is accepted in
+`04-independent-component-waves-plan/context/S4-CONTEXT-ACCEPTANCE.md`.
+Every S4 packet is consumed. S5 source refresh is unblocked, but no S5
+implementation is authorized before a fresh READY review.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

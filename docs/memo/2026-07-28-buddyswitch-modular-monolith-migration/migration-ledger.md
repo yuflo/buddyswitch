@@ -4,16 +4,17 @@
 
 | Field | Current value |
 |---|---|
+| Context/S4 acceptance | `context/S4-CONTEXT-ACCEPTANCE.md`; structure `fec6cceada1d4bd6836bead804046587`; direct `fe22eecc03234f30af665678671a7ea6`; affected `8895133bfd2d4f74859801a9ed9c3fea`; FINAL `57bb518bb531437e95038f9ccf91f050` |
 | Communication acceptance | `communication/S4-COMMUNICATION-ACCEPTANCE.md`; R3 exact `935615ad05c443fb9c730fc18430fca3`; cleanup/architecture `97e2ed6734e34e39b967e1ab7369a0db`; CLI/package `9adbb959051643edb648678801b56d57`; FINAL `ffefbc012a5d45fa887cd10c9520229c` |
 | Evidence acceptance | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` |
-| Active stage | S4 — Independent Component Waves / Context |
-| State | CONTEXT READY |
-| Runtime migration authorized | `BS-MM-S4-CONTEXT-R1-20260804-02` only |
+| Active stage | S5 — Foundation Convergence |
+| State | SOURCE REFRESH |
+| Runtime migration authorized | none; no S5 packet exists |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent Context packet return and hub acceptance review |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence and Communication modules |
+| Next gate | exact S5 source/consumer/hotspot trace and READY review |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules |
 
 ## Stage ledger
 
@@ -23,8 +24,8 @@
 | S1 Package/runtime | ACCEPTED | S0 | coordinating hub | closed |
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
-| S4 Component waves | CONTEXT READY | S3 | coordinating hub | execute only `BS-MM-S4-CONTEXT-R1-20260804-02`; hub reviews return |
-| S5 Foundation | BLOCKED | S4 | unassigned | exact remaining shared hotspot list |
+| S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
+| S5 Foundation | SOURCE REFRESH | S4 | coordinating hub | exact remaining shared hotspot list and READY review |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -396,6 +397,7 @@ state. Track–Artifact is accepted in
 | 2026-08-04 | S4 Communication acceptance | ACCEPTED | `communication/S4-COMMUNICATION-ACCEPTANCE.md`; R3 exact `935615ad05c443fb9c730fc18430fca3`; affected `97e2ed6734e34e39b967e1ab7369a0db`, `9adbb959051643edb648678801b56d57`; FINAL `ffefbc012a5d45fa887cd10c9520229c` | checkpoint Communication, then refresh Context from the committed source; never resume R1–R3 |
 | 2026-08-04 | S4 Context first preparation | REJECTED BEFORE EXECUTION | `context/S4-CONTEXT-PRE-HANDOFF-AUDIT.md`; packet `BS-MM-S4-CONTEXT-R1-20260804-01` consumed | correct intent/evidence/identity defects before executor time is spent |
 | 2026-08-04 | S4 Context handoff | READY | `context/S4-CONTEXT-READY-REVIEW.md`; direct `ec4ae6b40a3d4fcaa8494049c609d35c`; affected `58658371b1244b428ea3cccfb24eb393`; topology `S4CONTEXTP-20260804-02`; packet `BS-MM-S4-CONTEXT-R1-20260804-02` | user starts one independent Context task; hub pauses without polling |
+| 2026-08-04 | S4 Context and stage acceptance | ACCEPTED | `context/S4-CONTEXT-ACCEPTANCE.md`; structure `fec6cceada1d4bd6836bead804046587`; direct `fe22eecc03234f30af665678671a7ea6`; affected `8895133bfd2d4f74859801a9ed9c3fea`; FINAL `57bb518bb531437e95038f9ccf91f050` | checkpoint S4, then refresh S5 Foundation source/consumers/residue; never resume either Context packet |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -417,11 +419,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S4 / Context
-Master state: CONTEXT READY
-Goal Packet: BS-MM-S4-CONTEXT-R1-20260804-02
+Stage: S5 / Foundation
+Master state: SOURCE REFRESH
+Goal Packet: none
 Execution session: none
-Last hub checkpoint: Context source/consumer refresh and READY review complete
-Next action: user starts one independent Context execution session from the preparation checkpoint
+Last hub checkpoint: S4 Context and stage accepted; checkpoint commit pending
+Next action: commit/push S4, then refresh exact S5 source/consumer/hotspot truth
 No-polling state: inactive
 ```

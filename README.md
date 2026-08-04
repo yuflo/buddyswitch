@@ -101,8 +101,8 @@ package/build declaration.
 - `src/buddyswitch/modules/track/` for Track Public facts and external reads, Track/comment state, Tool, CLI/Web, inbound, cleanup, and Skills.
 - `src/buddyswitch/modules/artifact/` for Artifact Public decisions, Artifact/attachment state, Tool, selection assets/entrypoint, cleanup, and Skill.
 - `src/buddyswitch/modules/evidence/` for the Evidence Tool implementation and its stable Runtime Broker command entrypoint.
+- `src/buddyswitch/modules/context/` for the read-only Context Tool and its application projection over accepted component Public reads.
 - `src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}` for a component-owned Tool entrypoint and private implementation.
-- `src/buddyswitch/env/tools/<tool>/{tool.py,_impl.py}` for a not-yet-migrated dynamically discovered Tool entrypoint and private implementation.
 - `src/buddyswitch/runtime_kernel/protocol.py` for the runtime broker protocol envelope.
 - `src/buddyswitch/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
 - `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.

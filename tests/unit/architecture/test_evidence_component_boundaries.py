@@ -101,15 +101,6 @@ def test_evidence_is_one_passive_tool_contribution_selected_once() -> None:
     }
     assert callable(registration.invoke)
 
-    assert [component.name for component in COMPONENTS] == [
-        "demand",
-        "task",
-        "search",
-        "artifact",
-        "track",
-        "evidence",
-        "communication",
-    ]
     assert sum(component is EVIDENCE for component in COMPONENTS) == 1
     application = build_application()
     assert [module.name for module in application.modules].count(

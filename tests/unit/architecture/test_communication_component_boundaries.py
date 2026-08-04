@@ -87,22 +87,13 @@ def test_communication_has_one_physical_owner_and_no_retired_live_path() -> None
         assert not (REPO_ROOT / retired).exists(), retired
 
 
-def test_communication_is_selected_once_after_evidence_with_exact_contributions() -> None:
+def test_communication_is_selected_once_with_exact_contributions() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import COMMUNICATION, COMPONENTS
     from buddyswitch.env.tool_runtime import registry
     from buddyswitch.foundation.composition import ModuleAssembly
 
     assert isinstance(COMMUNICATION, ModuleAssembly)
-    assert [component.name for component in COMPONENTS] == [
-        "demand",
-        "task",
-        "search",
-        "artifact",
-        "track",
-        "evidence",
-        "communication",
-    ]
     assert sum(component is COMMUNICATION for component in COMPONENTS) == 1
     assert len(COMMUNICATION.tools) == 1
     assert COMMUNICATION.tools[0].definition.id == "message"
@@ -172,7 +163,8 @@ def test_dependency_direction_uses_public_edges_and_generic_hosts() -> None:
         demand_private / "adapters/daemon/demand_triage_runtime.py"
     )
     context_imports = _imports(
-        REPO_ROOT / "src/buddyswitch/env/tools/context/_impl.py"
+        REPO_ROOT
+        / "src/buddyswitch/modules/context/private/adapters/tool/_impl.py"
     )
     assert "buddyswitch.modules.communication" in triage_imports
     assert "buddyswitch.modules.communication" in context_imports

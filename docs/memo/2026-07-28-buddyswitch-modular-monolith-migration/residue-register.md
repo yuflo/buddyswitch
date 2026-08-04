@@ -43,15 +43,15 @@ Statuses:
 | R-COMM-001 | CLOSED — Message/IM/service/Tool/inbound/session/channel/worker/tests have one Communication root and one explicit assembly | S4 Communication | `04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md` |
 | R-SEARCH-001 | CLOSED — Search Tool and owning tests are physically aggregated, explicitly composed once, and the dynamic package plus generic host placeholder are absent | S4 Search | `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` |
 | R-EVIDENCE-001 | CLOSED — Evidence Tool and stable broker-backed adapter have one stateless module root and one explicit assembly; retired technical roots and generic host placeholders are absent | S4 Evidence | `04-independent-component-waves-plan/evidence/S4-EVIDENCE-ACCEPTANCE.md` |
-| R-CONTEXT-001 | CONFIRMED — Context now reads accepted component Public operations, but its Tool remains dynamically owned and Context-only catalog/runtime-source/Role-policy surfaces remain on shared ToolContext | S4 Context | one last-selected Context Tool module, old package absent and exact host residue removed |
+| R-CONTEXT-001 | CLOSED — Context is one last-selected read-only module over accepted Public reads; its old dynamic Tool package and Context-only shared ToolContext surfaces are absent | S4 Context | `04-independent-component-waves-plan/context/S4-CONTEXT-ACCEPTANCE.md` |
 
 ## Foundation/composition residue
 
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
-| R-FND-001 | Demand, Task, Track, Artifact and Communication portions CLOSED; fine-grained imports for unmigrated products remain in host entrypoints | S2–S5 | accepted component lanes; later component registrations only and no product import |
-| R-FND-002 | Demand, Task, Search, Track, Artifact, Evidence and Communication portions CLOSED through explicit fail-closed registration; global scanner remains for unmigrated Tools | S2–S5 | accepted component lanes; final explicit Tool registrations in S5 |
-| R-FND-003 | Demand, Task, Search, Track, Artifact, Evidence and Communication private portions CLOSED; broad product-aware ToolContext remains for unmigrated products | S2–S5 | accepted component lanes; final host facts/injected Public capabilities in S5 |
+| R-FND-001 | All S2–S4 component-lane portions CLOSED; S5 must refresh and remove any remaining concrete component or Role imports from foundation hosts | S2–S5 | accepted component lanes; S5 final foundation import proof |
+| R-FND-002 | All component Tool portions CLOSED through explicit fail-closed registration; the now-empty global package scanner remains | S2–S5 | accepted component lanes; final explicit-only Tool registration in S5 |
+| R-FND-003 | All component-private portions, including Context-only accessors, CLOSED; the remaining broad ToolContext host surface requires Foundation classification | S2–S5 | accepted component lanes; final host facts/value/capability boundary in S5 |
 | R-FND-004 | Task/Track Actor Console and Communication Web route/worker portions CLOSED through typed contributions; other product projections and retry coupling remain in Web implementation | S2–S5 | accepted component lanes; WebHost plus remaining owner contributions |
 | R-FND-005 | CLOSED — iMessage worker lifetime is a passive Communication contribution run by generic WebHost lifecycle | S4 Communication | `04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md` |
 | R-FND-006 | Demand, Task and Track portions CLOSED through owner CLI contributions; switches for unmigrated products remain | S2–S5 | S2/S3/Track–Artifact acceptance; remaining owner command contributions |
@@ -59,8 +59,8 @@ Statuses:
 | R-FND-008 | Demand, Task, Track, Artifact and Communication portions CLOSED through typed cleanup contributions; attribution for unmigrated products remains | S2–S5 | accepted component lanes; remaining module cleanup contributions |
 | R-FND-009 | Communication-owned IM identity portion CLOSED; remaining foundation identity is spread across lifecycle/daemon/Web | S1/S5 | Communication acceptance; final foundation Identity owner |
 | R-FND-010 | Actor-private/source-reference primitives mixed into product ToolContext | S1/S5 | exact foundation value/capability boundaries |
-| R-FND-011 | Demand, Task, Search, Track, Artifact, Evidence and Communication portions CLOSED with module-boundary proof; old technical-root enumeration remains for unmigrated components | S1–S5 | accepted component lanes; generic final dependency/topology proofs |
-| R-FND-012 | Demand, Task, Search, Track, Artifact, Evidence and Communication obsolete paths CLOSED; empty/obsolete technical paths for unmigrated components remain | owning stage/S5 | accepted component lanes; later owner-stage absence proof |
+| R-FND-011 | All component portions CLOSED with module-boundary proof; remaining foundation technical-root enumeration awaits exact S5 refresh | S1–S5 | accepted component lanes; generic final dependency/topology proofs |
+| R-FND-012 | All component obsolete paths CLOSED; empty/obsolete foundation technical roots, including the empty Tool package root, remain S5 inputs | owning stage/S5 | accepted component lanes; final foundation absence proof |
 
 ## Role residue
 
@@ -78,7 +78,7 @@ Statuses:
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
 | R-DOC-001 | CLOSED — current architecture paths match accepted S1 installed-package truth | S1 | `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md` |
-| R-DOC-002 | Demand, Task, Search, Track, Artifact, Evidence and Communication paths CLOSED; Context current paths remain | S2–S4 | accepted component lanes; Context cutover |
+| R-DOC-002 | CLOSED — every S2–S4 component path is current and its retired live guidance is absent | S2–S4 | accepted component lanes, including `S4-CONTEXT-ACCEPTANCE.md` |
 | R-DOC-003 | Demand, Task, Track and Communication contribution wording CLOSED; remaining Daemon/Web/foundation composition wording awaits final host truth | S5 | accepted component lanes; S5 final host truth |
 | R-DOC-004 | root stable Role/manifest paths | S6 | final RoleHost paths |
 | R-DOC-005 | migration instructions presented as current policy after completion | S7 | historical-only state |

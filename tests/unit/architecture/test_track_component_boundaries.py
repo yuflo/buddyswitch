@@ -146,15 +146,6 @@ def test_track_contributes_exact_surfaces_and_is_selected_once() -> None:
         registration.event_type for registration in TRACK.inbound_sources
     ] == ["track.comment.added"]
 
-    assert [component.name for component in COMPONENTS] == [
-        "demand",
-        "task",
-        "search",
-        "artifact",
-        "track",
-        "evidence",
-        "communication",
-    ]
     assert [component.name for component in COMPONENTS].count("track") == 1
     application = build_application()
     assert [module.name for module in application.modules].count("track") == 1

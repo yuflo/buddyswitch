@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Plan
 
-> Stage state: `CONTEXT READY`
-> Executable packet: `BS-MM-S4-CONTEXT-R1-20260804-02`
-> Current lane: Context atomic cutover; remains last
+> Stage state: `ACCEPTED`
+> Executable packet: none; all S4 packets are consumed
+> Next boundary: S5 Foundation source refresh only
 > Merge unit: one accepted lane at a time
 
 S4 is not one mechanical directory migration. Its six lanes share the same
@@ -12,9 +12,9 @@ proved that Track and Artifact must cut over as one atomic migration candidate
 while remaining two independent final modules. The next refresh selected
 Evidence because it needs only the existing Tool contribution and accepted
 Artifact Public. Communication then completed its route/worker boundary,
-physical cutover and generic cleanup execution repair. Search, Track,
-Artifact, Evidence and Communication are accepted. Context remains last; its
-committed-source refresh and READY review now authorize one atomic packet.
+physical cutover and generic cleanup execution repair. Context completed the
+final read-only projection cutover. Search, Track, Artifact, Evidence,
+Communication and Context are accepted.
 
 ## Read order for the current lane
 
@@ -54,7 +54,7 @@ adds current-source execution facts; it does not broaden S4.
 | Artifact | ACCEPTED WITH TRACK | `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md` |
 | Communication | ACCEPTED | `communication/S4-COMMUNICATION-ACCEPTANCE.md` |
 | Evidence | ACCEPTED | `evidence/S4-EVIDENCE-ACCEPTANCE.md` |
-| Context | READY | `context/S4-CONTEXT-GOAL-PACKET.md` |
+| Context | ACCEPTED | `context/S4-CONTEXT-ACCEPTANCE.md` |
 
 The initial Search packet was rejected before execution by the pre-handoff
 review. R1 produced a coherent candidate but stopped before collection on an
@@ -100,9 +100,11 @@ residues. The pre-handoff audit rejected the unexecuted first packet and
 corrected its intent, evidence-reuse and identity defects. Direct baseline
 `ec4ae6b40a3d4fcaa8494049c609d35c`, affected baseline
 `58658371b1244b428ea3cccfb24eb393` and reproducible topology probe
-`S4CONTEXTP-20260804-02` passed. Only the current packet under `context/` may execute.
+`S4CONTEXTP-20260804-02` passed. The successor packet completed against that
+boundary and is accepted in `context/S4-CONTEXT-ACCEPTANCE.md`. Both Context
+packets are consumed.
 
 ## Checkpoint protocol
 
-Only `BS-MM-S4-CONTEXT-R1-20260804-02` is executable. It does not authorize
-Context acceptance, S5, S6 or S7.
+No S4 packet is executable. S5 receives a fresh current-source trace; S5, S6
+and S7 implementation remain unauthorized until their own READY gates.

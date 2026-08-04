@@ -6,6 +6,7 @@ from buddyswitch.modules.artifact import public as artifact_public
 from buddyswitch.modules.artifact.module import ARTIFACT
 from buddyswitch.modules.evidence.module import EVIDENCE
 from buddyswitch.modules.communication.module import build_communication_module
+from buddyswitch.modules.context.module import CONTEXT
 from buddyswitch.modules.search.module import SEARCH
 from buddyswitch.modules.task import public as task_public
 from buddyswitch.modules.task.module import build_task_module
@@ -30,6 +31,7 @@ COMPONENTS = (
     TRACK,
     EVIDENCE,
     COMMUNICATION,
+    CONTEXT,
 )
 DAEMON_HANDLER_ORDER = (
     "demand_triage",

@@ -18,7 +18,9 @@ TOOL_ROOT = Path("src/buddyswitch/env/tools/demand_sys")
 CONTEXT = Path("src/buddyswitch/env/tool_runtime/context.py")
 CLI = Path("src/buddyswitch/launcher/cli.py")
 ROLE_AUTH = Path("src/buddyswitch/env/tool_runtime/role_auth.py")
-CONTEXT_IMPL = Path("src/buddyswitch/env/tools/context/_impl.py")
+CONTEXT_IMPL = Path(
+    "src/buddyswitch/modules/context/private/adapters/tool/_impl.py"
+)
 DAEMON_ADAPTER = Path("src/buddyswitch/launcher/demand_sys_daemon_adapter.py")
 DEMAND_TRIAGE_HANDLER = Path("src/buddyswitch/launcher/demand_triage_handler.py")
 DEMAND_ORCHESTRATION_HANDLER = Path("src/buddyswitch/launcher/demand_orchestration_handler.py")

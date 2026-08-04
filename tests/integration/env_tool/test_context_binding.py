@@ -60,6 +60,11 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertFalse(hasattr(context.repos, "message"))
         self.assertFalse(hasattr(context, "daemon"))
         self.assertFalse(hasattr(runtime_context, "Daemon" + "Access"))
+        self.assertFalse(hasattr(context, "objects"))
+        self.assertFalse(hasattr(runtime_context, "RuntimeObjectAccess"))
+        self.assertFalse(hasattr(context, "catalog"))
+        self.assertFalse(hasattr(runtime_context, "RegistryCatalogAccess"))
+        self.assertFalse(hasattr(context, "runtime_policy_preview"))
 
     def _write_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1000,7 +1005,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(source.get("access"), "write")
         self.assertIs(source.get("can_write_source"), True)
 
-        with patch("buddyswitch.env.tools.context._impl.env_profiles.require_env_profile", side_effect=RuntimeError("boom")):
+        with patch("buddyswitch.modules.context.private.adapters.tool._impl.env_profiles.require_env_profile", side_effect=RuntimeError("boom")):
             rejected = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
         self.assertFalse(rejected.get("ok"), msg=rejected)
         self.assertEqual((rejected.get("error") or {}).get("code"), "E_CONTEXT_SOURCE_WORKSPACE")

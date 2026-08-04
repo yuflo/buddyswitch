@@ -214,7 +214,7 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/env/tool_runtime/results.py",
             "src/buddyswitch/env/tool_runtime/registry.py",
             "src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}",
-            "src/buddyswitch/env/tools/<tool>/{tool.py,_impl.py}",
+            "src/buddyswitch/modules/context/",
             "src/buddyswitch/runtime_kernel/protocol.py",
             "src/buddyswitch/runtime_kernel/dispatcher.py",
             "src/buddyswitch/contracts/prepare-turn-context.json",
@@ -252,6 +252,12 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/modules/artifact/",
             "buddyswitch/objects/artifacts",
             "buddyswitch/objects/artifact-attachments",
+        ),
+        REPO_ROOT / "docs" / "arch" / "context-capability-architecture.md": (
+            "src/buddyswitch/modules/context/",
+            "src/buddyswitch/modules/context/module.py",
+            "src/buddyswitch/modules/context/private/adapters/tool/tool.py",
+            "src/buddyswitch/modules/context/private/adapters/tool/_impl.py",
         ),
         REPO_ROOT / "docs" / "arch" / "communication-capability-architecture.md": (
             "src/buddyswitch/modules/communication/",

@@ -1,7 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Initial state: BLOCKED
-> Blocked by: all S4 lanes accepted
+> Current state: SOURCE REFRESH
+> Entry prerequisite: S4 ACCEPTED
+> Execution authority: none; READY preparation has not completed
 > Merge unit: final shared-host convergence
 
 ## Acceptance sentence

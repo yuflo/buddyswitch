@@ -1,8 +1,8 @@
 # S4 Independent Component Waves Charter
 
-> Current state: CONTEXT READY
+> Current state: ACCEPTED
 > Entry prerequisite: S3 ACCEPTED
-> Execution authority: `BS-MM-S4-CONTEXT-R1-20260804-02` only
+> Execution authority: none; every S4 packet is consumed
 > Merge unit: one accepted component lane at a time
 
 ## Acceptance sentence
@@ -23,15 +23,13 @@
 
 Browser is not a product lane. It remains an Actor foundation capability.
 
-Search, the atomic Track–Artifact pair, Evidence and Communication are accepted. See
+All six lanes are accepted. See
 `04-independent-component-waves-plan/search/S4-SEARCH-ACCEPTANCE.md` and
 `04-independent-component-waves-plan/track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`
 `04-independent-component-waves-plan/evidence/S4-EVIDENCE-ACCEPTANCE.md` and
-`04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md`.
-Context remains last. Its committed source/consumer refresh, preservation
-evidence and representative topology preflight passed. The reviewed atomic
-plan at `04-independent-component-waves-plan/context/README.md` authorizes
-only packet `BS-MM-S4-CONTEXT-R1-20260804-02`.
+`04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md`
+and `04-independent-component-waves-plan/context/S4-CONTEXT-ACCEPTANCE.md`.
+Context is selected once and last; no S4 packet remains executable.
 
 ## Lane protocol
 
@@ -64,5 +62,7 @@ Allowed only when:
 
 ## Wave exit
 
-S4 accepts only after every lane accepts and the remaining S5 hotspot list is
-exact. A vague “foundation cleanup later” is not an exit.
+Every lane is accepted and the remaining Foundation-wide scanner, host,
+lifecycle, identity and technical-root targets are assigned to the fresh S5
+trace. S4 is closed; a vague “foundation cleanup later” remains insufficient
+for S5 READY.

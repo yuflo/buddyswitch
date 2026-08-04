@@ -26,27 +26,6 @@ import re
 ROLE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
-def _load_registry_module():
-    from buddyswitch.env.tool_runtime import registry as tool_registry
-
-    return tool_registry
-
-
-class RuntimeObjectAccess:
-    """Concrete runtime-object helpers for tool implementations."""
-
-    def runtime_sources(self) -> dict[str, Any]:
-        return {
-            "tracks": "track.list / track.open",
-            "tasks": "task_sys.create / task_sys.list / task_sys.get / task_sys.cancel",
-            "demands": "demand_sys.list / demand_sys.get",
-            "artifacts": "artifact.list / artifact.get",
-            "messages": "message.list",
-            "track_comments": "track.list_comments",
-            "writable_surfaces": "context.get / context.summarize",
-        }
-
-
 class ActorPrivateAccess:
     """Current identity private file operations."""
 
@@ -166,22 +145,6 @@ class BrowserAccess:
         return {"active_role": self._active_role, "browser_port": port}
 
 
-class RegistryCatalogAccess:
-    """Read-only registry projections for context tool surfaces."""
-
-    def tool_catalog(self) -> dict[str, dict[str, Any]]:
-        return _load_registry_module().env_tools_description()
-
-    def operation_semantics(self) -> dict[str, dict[str, Any]]:
-        return _load_registry_module().operation_semantics()
-
-    def compact_tool_affordances(self) -> dict[str, dict[str, Any]]:
-        return _load_registry_module().compact_tool_affordances()
-
-    def tool_catalog_errors(self) -> list[dict[str, str]]:
-        return _load_registry_module().tool_catalog_errors()
-
-
 def _actor_identity_id(value: Any, field: str) -> str:
     return actor_identity(value).id
 
@@ -270,8 +233,6 @@ class ToolContext(Mapping[str, Any]):
     manifest: dict[str, Any]
     manifest_path: Path | None = None
     invocation: InvocationFact = field(default_factory=InvocationFact)
-    objects: RuntimeObjectAccess = field(default_factory=RuntimeObjectAccess)
-    catalog: RegistryCatalogAccess = field(default_factory=RegistryCatalogAccess)
     rules: DomainAccess = field(default_factory=DomainAccess)
     repos: RepoAccess = field(default_factory=RepoAccess)
 
@@ -337,11 +298,6 @@ class ToolContext(Mapping[str, Any]):
     @property
     def active_role(self) -> str:
         return self.role_id
-
-    def runtime_policy_preview(self, operation_semantics: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        from buddyswitch.env.tool_runtime import role_auth
-
-        return role_auth.role_action_summary(self.role_id, self.manifest, operation_semantics)
 
     def now(self) -> str:
         return datetime.now().astimezone().isoformat(timespec="seconds")
