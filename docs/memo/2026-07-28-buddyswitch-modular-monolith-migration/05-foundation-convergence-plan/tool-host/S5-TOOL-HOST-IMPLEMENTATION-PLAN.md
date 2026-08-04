@@ -1,8 +1,14 @@
 # S5 C1 ToolHost Implementation Plan
 
+> **HISTORICAL R1 PLAN — NOT EXECUTION AUTHORITY.** Its acceptance sentence
+> remains current, but its path moves and retained-surface statements were R1
+> hypotheses. R2 derives implementation from repository facts and the authority
+> boundary in `S5-TOOL-HOST-R2-GOAL-PACKET.md`.
+
 ## Status
 
-`READY` for packet `BS-MM-S5-TOOLHOST-R1-20260804-01` only.
+Historical R1 status: `READY` for packet
+`BS-MM-S5-TOOLHOST-R1-20260804-01` only; that authority is consumed.
 
 ## FRAME
 

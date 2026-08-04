@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from buddyswitch.env.tool_runtime import results as tool_results
-from buddyswitch.env.tool_runtime import role_auth
+from buddyswitch.foundation.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime.definition import AuthorizationDecision
 
 
 def _semantic_action(*, tool: str, action: str | None) -> str:
@@ -19,7 +19,7 @@ def role_auth_rejection(
     action: str,
     current_identity: dict[str, Any],
     active_role: str,
-    decision: role_auth.AuthDecision,
+    decision: AuthorizationDecision,
 ) -> dict[str, Any]:
     allowed_roles = list(decision.allowed_roles)
     allowed_roles_text = ", ".join(allowed_roles) if allowed_roles else "none"

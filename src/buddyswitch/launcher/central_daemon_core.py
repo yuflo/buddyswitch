@@ -14,7 +14,7 @@ from typing import Any
 
 from buddyswitch.launcher import daemon_mailbox  # noqa: E402
 from buddyswitch.env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
-from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.runtime_kernel import protocol  # noqa: E402
 from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 

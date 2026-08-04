@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from buddyswitch.env.tool_runtime import registry as tool_registry
+from buddyswitch.foundation.tool_runtime import registry as tool_registry
 from buddyswitch.runtime_support.env_manifest import load_manifest
 from tests.support.paths import REPO_ROOT
 

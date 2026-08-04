@@ -18,14 +18,14 @@ from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from buddyswitch.runtime_kernel.client import RuntimeBrokerError  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
 
 class EnvClientPayloadCliTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = importlib.import_module("buddyswitch.env.client")
+        self.client = importlib.import_module("buddyswitch.foundation.tool_runtime.client")
 
     def _run_client(
         self,
@@ -89,7 +89,8 @@ class EnvClientPayloadCliTests(unittest.TestCase):
     def test_json_object_payload_dispatches_for_every_action(self) -> None:
         for tool in sorted(tool_registry.supported_tools()):
             for action in sorted(tool_registry.supported_actions(tool)):
-                payload = {field: f"value-for-{field}" for field in tool_registry.payload_fields_for_action(tool, action)}
+                fields = tool_registry.env_tools_description()[tool]["payload_fields"][action]
+                payload = {field: f"value-for-{field}" for field in fields}
                 cli_action = action.replace("_", "-")
                 with self.subTest(tool=tool, action=action):
                     code, output, broker = self._run_client([tool, cli_action, "--payload", json.dumps(payload)])
@@ -222,7 +223,14 @@ class EnvClientPayloadCliTests(unittest.TestCase):
                 broker.assert_not_called()
 
     def test_client_has_no_per_tool_dispatch_branches(self) -> None:
-        source = (ROOT / "src" / "buddyswitch" / "env" / "client.py").read_text(encoding="utf-8")
+        source = (
+            ROOT
+            / "src"
+            / "buddyswitch"
+            / "foundation"
+            / "tool_runtime"
+            / "client.py"
+        ).read_text(encoding="utf-8")
         for tool in sorted(tool_registry.supported_tools()):
             with self.subTest(tool=tool):
                 self.assertNotIn(f"def _dispatch_{tool}(", source)

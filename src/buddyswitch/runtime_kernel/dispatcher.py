@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.tool_runtime import results as tool_results
-from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.foundation.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 from buddyswitch.launcher import browser_runtime_manager
 from buddyswitch.runtime_support.env_manifest import ManifestError, load_manifest
 

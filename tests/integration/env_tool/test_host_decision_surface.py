@@ -18,7 +18,7 @@ from buddyswitch.modules.track.private.state import track_comments as track_comm
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 

@@ -15,8 +15,8 @@ ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
-from buddyswitch.env.tool_runtime import results as tool_results  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.foundation.tool_runtime import results as tool_results  # noqa: E402
 from buddyswitch.modules.task import public as task_public  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -136,11 +136,11 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
         context_summary = self._dispatch(instance=instance, tool="context", action="summarize", args={})
         self.assertNotEqual((context_summary.get("error") or {}).get("code"), "E_TASK_SYS_ACTIVE_TASK_REQUIRED", msg=context_summary)
 
-        active_actor = {"actor_id": str(instance["actor_id"]), "role_id": str(instance["role"])}
+        current_identity = {"id": str(instance["actor_id"]), "type": "actor"}
         handler_response = tool_results.success(
             tool="search",
             action="search.status",
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=str(instance["role"]),
             effect_summary="handler reached",
             state_changed=False,
@@ -154,11 +154,11 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
     def test_active_task_required_action_dispatches_when_current_anchor_exists(self) -> None:
         instance = self._instance(role="market")
         self._seed_active_task(instance=instance)
-        active_actor = {"actor_id": str(instance["actor_id"]), "role_id": str(instance["role"])}
+        current_identity = {"id": str(instance["actor_id"]), "type": "actor"}
         handler_response = tool_results.success(
             tool="search",
             action="search.request",
-            active_actor=active_actor,
+            current_identity=current_identity,
             active_role=str(instance["role"]),
             effect_summary="handler reached with active task",
             state_changed=False,

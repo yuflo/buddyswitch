@@ -11,7 +11,7 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from buddyswitch.modules.task.private.domain import task_sys  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -38,8 +38,6 @@ class TaskSysCheckpointRetirementTests(RuntimeWorkspaceTestCase):
         self.assertFalse(hasattr(task_sys, "record_checkpoint_update"))
 
     def test_actor_facing_task_sys_tool_registers_only_current_lifecycle_actions(self) -> None:
-        tool_registry.clear_cache()
-
         self.assertEqual(
             tool_registry.supported_actions("task_sys"),
             {"create", "list", "get", "cancel"},

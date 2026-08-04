@@ -23,7 +23,7 @@ from tests.support import task_fixtures
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 import buddyswitch.runtime_kernel.lifecycle as runtime_lifecycle  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"

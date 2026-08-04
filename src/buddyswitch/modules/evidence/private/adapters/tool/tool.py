@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from buddyswitch.env.tool_runtime.context import ToolContext
-from buddyswitch.env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, ToolDefinition, validate_definition
+    from buddyswitch.foundation.tool_runtime.context import ToolContext
+from buddyswitch.foundation.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, ToolDefinition, validate_definition
 
 
 def _build_definition() -> ToolDefinition:

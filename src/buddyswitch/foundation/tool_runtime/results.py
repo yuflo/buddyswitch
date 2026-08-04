@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from buddyswitch.env.tool_runtime.definition import MUTATES_NONE
+from buddyswitch.foundation.tool_runtime.definition import MUTATES_NONE
 
 _SUCCESS_CANONICAL_FIELDS = {
     "ok",
@@ -16,15 +16,13 @@ _SUCCESS_CANONICAL_FIELDS = {
     "state_changed",
     "durability",
     "allowed_next_actions",
-    "allowed_next_action_options",
     "state_changes",
     "created_ids",
     "updated_ids",
-    "binding_changed",
     "read_scope",
-    "validation_only",
-    "follow_up_affordances",
 }
+
+__all__ = ("alternative_capability", "next_action_option", "rejection", "success")
 
 _REJECTION_CANONICAL_FIELDS = {
     "ok",
@@ -46,7 +44,6 @@ _REJECTION_CANONICAL_FIELDS = {
     "boundary",
     "correctable_fields",
     "alternative_capabilities",
-    "mutates_product_state",
     "field_errors",
 }
 
@@ -165,45 +162,6 @@ def next_action_option(
     }
 
 
-def follow_up_affordance(
-    *,
-    tool: str,
-    action: str,
-    reason: str,
-    affordance_id: str | None = None,
-    preconditions: list[str] | None = None,
-    source_refs: list[str] | None = None,
-) -> dict[str, Any]:
-    return next_action_option(
-        tool=tool,
-        action=action,
-        reason=reason,
-        option_id=affordance_id or f"follow_up.{tool}.{action}",
-        preconditions=preconditions,
-        source_refs=source_refs,
-    )
-
-
-def tool_affordance(
-    tool: str,
-    action: str,
-    effect: str,
-    condition: str,
-    risk: str | None = None,
-    mutates_product_state: bool = False,
-) -> dict[str, Any]:
-    row: dict[str, Any] = {
-        "tool": _require_non_empty_text(tool, "tool"),
-        "action": _require_non_empty_text(action, "action"),
-        "effect": _require_non_empty_text(effect, "effect"),
-        "condition": _require_conditional_affordance_text(condition, "condition"),
-        "mutates_product_state": bool(mutates_product_state),
-    }
-    if isinstance(risk, str) and risk.strip():
-        row["risk"] = risk.strip()
-    return row
-
-
 def alternative_capability(
     *,
     tool: str,
@@ -225,28 +183,18 @@ def success(
     *,
     tool: str,
     action: str,
-    current_identity: dict[str, Any] | None = None,
-    active_actor: dict[str, Any] | None = None,
+    current_identity: dict[str, Any],
     active_role: str,
     effect_summary: str,
     state_changed: bool,
     durability: str,
     allowed_next_actions: list[str] | None = None,
-    allowed_next_action_options: list[dict[str, Any]] | None = None,
     state_changes: list[dict[str, Any]] | None = None,
     created_ids: list[str] | None = None,
     updated_ids: list[str] | None = None,
-    binding_changed: bool | None = None,
     read_scope: str | None = None,
-    validation_only: bool | None = None,
-    follow_up_affordances: list[dict[str, Any]] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if current_identity is None and active_actor is not None:
-        if isinstance(active_actor, dict) and isinstance(active_actor.get("actor_id"), str):
-            current_identity = {"id": active_actor["actor_id"], "type": "actor"}
-        elif isinstance(active_actor, dict) and isinstance(active_actor.get("id"), str):
-            current_identity = dict(active_actor)
     payload: dict[str, Any] = {
         "ok": True,
         "tool": tool,
@@ -258,22 +206,14 @@ def success(
         "durability": _require_non_empty_text(durability, "durability"),
         "allowed_next_actions": list(allowed_next_actions or []),
     }
-    if isinstance(allowed_next_action_options, list):
-        payload["allowed_next_action_options"] = _validate_next_action_options(allowed_next_action_options)
     if state_changes is not None:
         payload["state_changes"] = _require_list(state_changes, "state_changes")
     if created_ids is not None:
         payload["created_ids"] = _require_list(created_ids, "created_ids")
     if updated_ids is not None:
         payload["updated_ids"] = _require_list(updated_ids, "updated_ids")
-    if binding_changed is not None:
-        payload["binding_changed"] = _require_bool(binding_changed, "binding_changed")
     if read_scope is not None:
         payload["read_scope"] = _require_non_empty_text(read_scope, "read_scope")
-    if validation_only is not None:
-        payload["validation_only"] = _require_bool(validation_only, "validation_only")
-    if follow_up_affordances is not None:
-        payload["follow_up_affordances"] = _require_list(follow_up_affordances, "follow_up_affordances")
     if isinstance(extra, dict):
         _merge_extra(payload, extra, _SUCCESS_CANONICAL_FIELDS)
     return payload
@@ -297,11 +237,9 @@ def rejection(
     retry_guidance: str,
     allowed_next_actions: list[str] | None = None,
     allowed_next_action_options: list[dict[str, Any]] | None = None,
-    error_class: str | None = None,
     boundary: str | None = None,
     correctable_fields: list[str] | None = None,
     alternative_capabilities: list[dict[str, Any]] | None = None,
-    mutates_product_state: bool | None = None,
     field_errors: list[dict[str, Any]] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -325,16 +263,12 @@ def rejection(
         "retry_guidance": _require_non_empty_text(retry_guidance, "retry_guidance"),
         "allowed_next_actions": list(allowed_next_actions or []),
     }
-    if isinstance(error_class, str) and error_class.strip():
-        payload["error"]["class"] = error_class.strip()
     if isinstance(boundary, str) and boundary.strip():
         payload["boundary"] = boundary.strip()
     if isinstance(correctable_fields, list):
         payload["correctable_fields"] = list(correctable_fields)
     if isinstance(alternative_capabilities, list):
         payload["alternative_capabilities"] = list(alternative_capabilities)
-    if mutates_product_state is not None:
-        payload["mutates_product_state"] = _require_bool(mutates_product_state, "mutates_product_state")
     if field_errors is not None:
         payload["field_errors"] = _validate_field_errors(field_errors)
     if isinstance(allowed_next_action_options, list):

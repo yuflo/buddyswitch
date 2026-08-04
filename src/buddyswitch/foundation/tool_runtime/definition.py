@@ -8,18 +8,28 @@ from typing import Any, Callable, Mapping
 
 MUTATES_NONE = "none"
 MUTATES_RUNTIME_OBJECTS = "runtime_objects"
-MUTATES_RUNTIME_FILES = "runtime_files"
-MUTATES_BROKER_TOKEN = "broker_token"
-MUTATES_BROWSER_SESSION = "browser_session"
+_MUTATES_BROKER_TOKEN = "broker_token"
 TASK_REQUIREMENT_FREE = "free"
 TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED = "active_task_required"
+
+__all__ = (
+    "ActionDefinition",
+    "AuthorizationDecision",
+    "MUTATES_NONE",
+    "MUTATES_RUNTIME_OBJECTS",
+    "TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED",
+    "TASK_REQUIREMENT_FREE",
+    "ToolAuthorizer",
+    "ToolDefinition",
+    "ToolRegistration",
+    "validate_definition",
+    "validate_registration",
+)
 
 _ALLOWED_MUTATION_VALUES = {
     MUTATES_NONE,
     MUTATES_RUNTIME_OBJECTS,
-    MUTATES_RUNTIME_FILES,
-    MUTATES_BROKER_TOKEN,
-    MUTATES_BROWSER_SESSION,
+    _MUTATES_BROKER_TOKEN,
 }
 _ALLOWED_TASK_REQUIREMENT_VALUES = {
     TASK_REQUIREMENT_FREE,
@@ -73,13 +83,25 @@ class ToolDefinition:
     backend_model: Mapping[str, Any] = field(default_factory=dict)
 
 
-ToolInvoke = Callable[..., dict[str, Any]]
+_ToolInvoke = Callable[..., dict[str, Any]]
 
 
 @dataclass(frozen=True)
 class ToolRegistration:
     definition: ToolDefinition
-    invoke: ToolInvoke
+    invoke: _ToolInvoke
+
+
+@dataclass(frozen=True)
+class AuthorizationDecision:
+    allowed: bool
+    required_permission: str
+    active_role: str
+    allowed_roles: tuple[str, ...]
+    reason: str
+
+
+ToolAuthorizer = Callable[[str, str, dict[str, Any]], AuthorizationDecision]
 
 
 def validate_registration(registration: ToolRegistration) -> None:

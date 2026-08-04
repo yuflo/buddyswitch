@@ -10,7 +10,7 @@ import sys
 from typing import Any
 
 
-from buddyswitch.env.tool_runtime import registry as tool_registry
+from buddyswitch.foundation.tool_runtime import registry as tool_registry
 from buddyswitch.runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 _PRODUCT_MODE_ENV_KEYS = (

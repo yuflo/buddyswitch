@@ -1,5 +1,10 @@
 # S5 C1 ToolHost Goal Packet
 
+> **CONSUMED — DO NOT EXECUTE OR RESUME.** R1 returned a runnable C1
+> candidate, but hub review found that this packet transmitted unproved
+> implementation assumptions. Continue only through
+> `S5-TOOL-HOST-R2-GOAL-PACKET.md`.
+
 ## Packet identity
 
 - Packet ID: `BS-MM-S5-TOOLHOST-R1-20260804-01`

@@ -5,8 +5,6 @@ from __future__ import annotations
 import importlib
 import json
 import sys
-import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
@@ -16,17 +14,13 @@ from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.tool_runtime import registry  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
 
 class EnvNativeMcpProjectionTests(unittest.TestCase):
     def setUp(self) -> None:
-        registry.clear_cache()
-        self.native_mcp = importlib.import_module("buddyswitch.env.tool_runtime.native_mcp")
-
-    def tearDown(self) -> None:
-        registry.clear_cache()
+        self.native_mcp = importlib.import_module("buddyswitch.foundation.tool_runtime.native_mcp")
 
     def test_projection_covers_every_registry_action_with_matching_schema(self) -> None:
         specs = self.native_mcp.list_native_tool_specs()
@@ -40,7 +34,7 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
                 name = f"{tool}__{action.name}"
                 with self.subTest(action=name):
                     self.assertIn(name, by_name)
-                    self.assertEqual(self.native_mcp.decode_native_tool_name(name), (tool, action.name))
+                    self.assertEqual(self.native_mcp.resolve_native_tool_name(name), (tool, action.name))
                     self.assertEqual(by_name[name]["inputSchema"], action.input_schema)
                     self.assertNotIn("outputSchema", by_name[name])
                     description = by_name[name]["description"]
@@ -114,12 +108,15 @@ class EnvNativeMcpProjectionTests(unittest.TestCase):
         script = """
 import json
 import sys
-from buddyswitch.env.tool_runtime import native_mcp
+from buddyswitch.application.build import activate_application
+from buddyswitch.foundation.tool_runtime import native_mcp
 
+activate_application()
+before = set(sys.modules)
 native_mcp.list_native_tool_specs()
-loaded = sorted(sys.modules)
+loaded = sorted(set(sys.modules) - before)
 print(json.dumps({
-    "private_impl": [name for name in loaded if name.startswith("buddyswitch.env.tools.") and "._impl" in name],
+    "private_impl": [name for name in loaded if name.endswith("._impl") and ".private.adapters.tool." in name],
     "domain": [name for name in loaded if name.startswith("buddyswitch.env.domain.")],
     "repos": [name for name in loaded if name.startswith("buddyswitch.env.repos.")],
     "runtime_services": [
@@ -145,92 +142,80 @@ print(json.dumps({
         self.assertEqual(payload["repos"], [])
         self.assertEqual(payload["runtime_services"], [])
 
-    def test_projection_discovers_new_tool_package_without_central_manifest(self) -> None:
-        import buddyswitch.env.tools as env_tools  # noqa: WPS433
+    def test_projection_uses_explicit_registration_as_its_only_catalog_input(self) -> None:
+        from buddyswitch.foundation.tool_runtime.definition import (
+            ActionDefinition,
+            TASK_REQUIREMENT_FREE,
+            ToolDefinition,
+            ToolRegistration,
+        )
 
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            temp_tools = Path(temp_dir) / "env" / "tools"
-            probe_dir = temp_tools / "probe"
-            probe_dir.mkdir(parents=True)
-            (probe_dir / "__init__.py").write_text('"""Probe env tool package."""\n', encoding="utf-8")
-            (probe_dir / "tool.py").write_text(
-                textwrap.dedent(
-                    '''
-                    from __future__ import annotations
+        definition = ToolDefinition(
+            id="probe",
+            title="Probe Tool",
+            description="Explicit native projection probe.",
+            scope="test-only",
+            capability_boundary="Reads temporary probe data only.",
+            object_model="Temporary probe object.",
+            use_when=("testing explicit projection",),
+            do_not_use_when=("running product work",),
+            actions=(
+                ActionDefinition(
+                    name="inspect",
+                    title="Inspect Probe",
+                    description="Inspect temporary probe state.",
+                    input_schema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "probe_id": {
+                                "type": "string",
+                                "description": "Probe id to inspect.",
+                            }
+                        },
+                        "required": ["probe_id"],
+                    },
+                    output_schema={"$ref": "ToolResult"},
+                    kind="read",
+                    task_requirement=TASK_REQUIREMENT_FREE,
+                    mutates="none",
+                    required_permission="none",
+                    authority="test-only",
+                    visibility="test-only",
+                    durability="none",
+                    result_content_level="summary",
+                    success_effect="Returns temporary probe details.",
+                    failure_state_guarantee="No runtime state changes on failure.",
+                    reads=("temporary probe data",),
+                    writes=(),
+                    does_not_write=("runtime objects",),
+                    use_when=("testing explicit projection",),
+                    do_not_use_when=("running product work",),
+                ),
+            ),
+        )
+        registry.configure_tool_registrations(
+            (ToolRegistration(definition=definition, invoke=lambda **_kwargs: {}),)
+        )
+        try:
+            names = {spec["name"] for spec in self.native_mcp.list_native_tool_specs()}
+        finally:
+            from buddyswitch.application.build import activate_application
 
-                    from typing import Any
+            activate_application()
 
-                    from buddyswitch.env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
+        self.assertEqual(names, {"probe__inspect"})
 
-                    DEFINITION = ToolDefinition(
-                        id="probe",
-                        title="Probe Tool",
-                        description="Temporary probe tool used to verify registry discovery.",
-                        scope="test-only",
-                        capability_boundary="Reads temporary probe data only.",
-                        object_model="Temporary probe object.",
-                        use_when=("Use to prove native projection discovers new tool packages.",),
-                        do_not_use_when=("Do not use outside projection tests.",),
-                        actions=(
-                            ActionDefinition(
-                                name="inspect",
-                                title="Inspect Probe",
-                                description="Inspect temporary probe state.",
-                                input_schema={
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "probe_id": {
-                                            "type": "string",
-                                            "description": "Probe id to inspect.",
-                                        }
-                                    },
-                                    "required": ["probe_id"],
-                                },
-                                output_schema={"$ref": "ToolResult"},
-                                kind="read",
-                                task_requirement=TASK_REQUIREMENT_FREE,
-                                mutates="none",
-                                required_permission="probe.inspect",
-                                authority="test-only",
-                                visibility="active-role",
-                                durability="none",
-                                result_content_level="summary",
-                                success_effect="Returns temporary probe details.",
-                                failure_state_guarantee="No runtime state changes on failure.",
-                                reads=("temporary probe data",),
-                                writes=(),
-                                does_not_write=("runtime objects",),
-                                preconditions=("probe package is present on env.tools path",),
-                                returns=("probe summary",),
-                                use_when=("Use when verifying dynamic native discovery.",),
-                                do_not_use_when=("Do not use in product flows.",),
-                            ),
-                        ),
-                    )
-                    validate_definition(DEFINITION)
-
-                    def invoke(*, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]:
-                        return {"ok": True, "tool": "probe", "action": f"probe.{action}", "args": args}
-                    '''
-                ).lstrip(),
-                encoding="utf-8",
-            )
-
-            original_path = list(env_tools.__path__)
-            try:
-                env_tools.__path__.insert(0, str(temp_tools))
-                registry.clear_cache()
-                names = {spec["name"] for spec in self.native_mcp.list_native_tool_specs()}
-            finally:
-                env_tools.__path__[:] = original_path
-                registry.clear_cache()
-
-        self.assertIn("probe__inspect", names)
-
-        projection_source = (ROOT / "src/buddyswitch/env/tool_runtime/native_mcp.py").read_text(encoding="utf-8")
-        server_path = ROOT / "src/buddyswitch/launcher/env_tool_mcp_server.py"
+        projection_source = (ROOT / "src/buddyswitch/foundation/tool_runtime/native_mcp.py").read_text(encoding="utf-8")
+        server_path = ROOT / "src/buddyswitch/foundation/tool_runtime/mcp_server.py"
         server_source = server_path.read_text(encoding="utf-8") if server_path.exists() else ""
         combined = projection_source + "\n" + server_source
-        for forbidden in ("SHIPPED_TOOLS", "task__current", "message__send", "native_manifest", "tool_pack"):
+        for forbidden in (
+            "SHIPPED_TOOLS",
+            "task__current",
+            "message__send",
+            "native_manifest",
+            "tool_pack",
+            "discover_tool_ids",
+        ):
             self.assertNotIn(forbidden, combined)

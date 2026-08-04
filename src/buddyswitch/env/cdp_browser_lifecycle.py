@@ -15,7 +15,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 SCRIPTS_ROOT = SCRIPTS_DIR.parent
 
 from buddyswitch.env import browser_ttl_config  # noqa: E402
-from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 
 
 BROWSER_PAGE_EXPIRED_TRIGGER = "browser.page.expired"

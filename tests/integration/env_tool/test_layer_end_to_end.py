@@ -21,7 +21,7 @@ from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 from buddyswitch.modules.communication.private.state import messages as message_repo  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 

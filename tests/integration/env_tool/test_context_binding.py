@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from dataclasses import fields
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,16 +17,16 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.env.repos import runtime_files
+from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
-from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.foundation.tool_runtime import context as runtime_context  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
@@ -35,8 +36,8 @@ _EXPECTED_TOOLS = {"demand_sys", "task_sys", "track", "artifact", "context", "ev
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
     def test_tool_context_exposes_only_explicit_runtime_capabilities(self) -> None:
-        profile = runtime_context.ActorIdentityProfile(
-            identity=runtime_context.IdentityRef(id="act-dev-capability", type="actor"),
+        profile = ActorIdentityProfile(
+            identity=IdentityRef(id="act-dev-capability", type="actor"),
             role_id="dev",
         )
         context = runtime_context.ToolContext.from_identity_profile(
@@ -46,18 +47,81 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             manifest={},
         )
 
-        self.assertIsInstance(context.actor_directory, runtime_context.ActorDirectoryAccess)
-        self.assertIsInstance(context.signal_delivery, runtime_context.SignalDeliveryAccess)
+        self.assertEqual(set(runtime_context.__all__), {"InvocationFact", "ToolContext"})
+        self.assertEqual(
+            {field.name for field in fields(runtime_context.ToolContext)},
+            {
+                "actor_private_root",
+                "current_actor_identity_profile",
+                "current_identity",
+                "instance_json",
+                "instance_payload",
+                "invocation",
+                "manifest",
+                "manifest_path",
+                "role_id",
+            },
+        )
+        self.assertEqual(
+            {name for name in dir(context) if not name.startswith("_")},
+            {
+                "actor_directory",
+                "actor_private_root",
+                "current_actor_identity_profile",
+                "current_identity",
+                "from_identity_profile",
+                "get",
+                "instance_json",
+                "instance_payload",
+                "invocation",
+                "items",
+                "keys",
+                "manifest",
+                "manifest_path",
+                "now",
+                "role_id",
+                "signal_delivery",
+                "values",
+            },
+        )
+        self.assertEqual(
+            set(context),
+            {
+                "active_role",
+                "current_identity",
+                "instance_json",
+                "instance_payload",
+                "manifest",
+                "manifest_path",
+            },
+        )
+        self.assertEqual(context.role_id, "dev")
+        self.assertEqual(context["active_role"], "dev")
+        self.assertTrue(callable(context.actor_directory.list_online_actors))
+        self.assertTrue(callable(context.actor_directory.check_reachability))
+        self.assertTrue(callable(context.signal_delivery.deliver_signal))
+        self.assertTrue(callable(context.now))
+        self.assertTrue(hasattr(context, "actor_private_root"))
+        self.assertEqual(
+            context.actor_private_root,
+            runtime_files.actor_private_dir(context.instance_payload).resolve(strict=False),
+        )
         self.assertFalse(hasattr(context, "task_goal_runtime"))
         self.assertFalse(hasattr(runtime_context, "TaskGoalRuntimeAccess"))
         self.assertFalse(hasattr(context, "task_sys_runtime"))
         self.assertFalse(hasattr(context, "im_actor_delivery"))
         self.assertFalse(hasattr(runtime_context, "ImActorDeliveryAccess"))
-        self.assertFalse(hasattr(context.rules, "task_sys"))
-        self.assertFalse(hasattr(context.rules, "demand_sys"))
-        self.assertFalse(hasattr(context.repos, "demand"))
-        self.assertFalse(hasattr(context.repos, "demands"))
-        self.assertFalse(hasattr(context.repos, "message"))
+        for retired_attribute in ("rules", "repos", "actor_private", "browser"):
+            with self.subTest(retired_attribute=retired_attribute):
+                self.assertFalse(hasattr(context, retired_attribute))
+        for retired_type in (
+            "DomainAccess",
+            "RepoAccess",
+            "ActorPrivateAccess",
+            "BrowserAccess",
+        ):
+            with self.subTest(retired_type=retired_type):
+                self.assertFalse(hasattr(runtime_context, retired_type))
         self.assertFalse(hasattr(context, "daemon"))
         self.assertFalse(hasattr(runtime_context, "Daemon" + "Access"))
         self.assertFalse(hasattr(context, "objects"))
@@ -65,6 +129,18 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertFalse(hasattr(context, "catalog"))
         self.assertFalse(hasattr(runtime_context, "RegistryCatalogAccess"))
         self.assertFalse(hasattr(context, "runtime_policy_preview"))
+        for unearned_attribute in ("active_actor", "active_role", "new_id"):
+            with self.subTest(unearned_attribute=unearned_attribute):
+                self.assertFalse(hasattr(context, unearned_attribute))
+        for unearned_module_surface in (
+            "ActorDirectoryAccess",
+            "ActorIdentityProfile",
+            "IdentityRef",
+            "SignalDeliveryAccess",
+            "default_manifest_path",
+        ):
+            with self.subTest(unearned_module_surface=unearned_module_surface):
+                self.assertFalse(hasattr(runtime_context, unearned_module_surface))
 
     def _write_json(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

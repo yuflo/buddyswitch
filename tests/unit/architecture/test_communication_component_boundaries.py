@@ -14,8 +14,8 @@ RETIRED_PATHS = (
     Path("src/buddyswitch/env/repos/messages.py"),
     Path("src/buddyswitch/env/services/messages.py"),
     Path("src/buddyswitch/env/tools/message"),
-    Path("src/buddyswitch/env/tool_runtime/im_client.py"),
-    Path("src/buddyswitch/env/tool_runtime/im_actor_delivery.py"),
+    Path("src/buddyswitch/foundation/tool_runtime/im_client.py"),
+    Path("src/buddyswitch/foundation/tool_runtime/im_actor_delivery.py"),
     Path("src/buddyswitch/launcher/external_im_session.py"),
     Path("src/buddyswitch/launcher/im_http_router.py"),
     Path("src/buddyswitch/launcher/im_wake_handler.py"),
@@ -90,7 +90,7 @@ def test_communication_has_one_physical_owner_and_no_retired_live_path() -> None
 def test_communication_is_selected_once_with_exact_contributions() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import COMMUNICATION, COMPONENTS
-    from buddyswitch.env.tool_runtime import registry
+    from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.composition import ModuleAssembly
 
     assert isinstance(COMMUNICATION, ModuleAssembly)
@@ -114,7 +114,6 @@ def test_communication_is_selected_once_with_exact_contributions() -> None:
     assert [source.event_type for source in application.inbound_sources].count(
         "im.message.created"
     ) == 1
-    assert "message" not in registry.discover_tool_ids()
 
 
 def test_communication_public_and_input_port_are_exact() -> None:

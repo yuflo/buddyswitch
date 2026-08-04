@@ -445,6 +445,47 @@ class RuntimeBrokerTests(unittest.TestCase):
         self.assertFalse(self.workspace.path("buddyswitch/content/runs").exists())
         self.assertFalse(self.workspace.path("runs/raw").exists())
 
+    def test_env_tool_mutation_and_read_have_one_broker_terminal_truth(self) -> None:
+        instance_json = self._instance_json()
+        actor_id = str(json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"])
+        self.workspace.seed_active_task(
+            instance_json=instance_json,
+            role="pm",
+            actor_id=actor_id,
+            task_slug="broker-terminal-truth",
+        )
+
+        created = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "track",
+                "action": "create",
+                "args": {
+                    "track_id": "track-broker-terminal-truth",
+                    "title": "Broker terminal truth",
+                    "outcome": "Prove persisted mutation and read results agree.",
+                    "now": {"next": "Read the persisted Track.", "blocker": None},
+                },
+            },
+            instance_json=instance_json,
+        )
+        self.assertTrue(created.get("ok"), msg=created)
+        self.assertIs(created.get("state_changed"), True, msg=created)
+        self.assertEqual(created.get("durability"), "durable", msg=created)
+
+        opened = self._dispatch(
+            method="env.tool",
+            params={
+                "tool": "track",
+                "action": "open",
+                "args": {"track_id": "track-broker-terminal-truth"},
+            },
+            instance_json=instance_json,
+        )
+        self.assertTrue(opened.get("ok"), msg=opened)
+        self.assertIs(opened.get("state_changed"), False, msg=opened)
+        self.assertEqual((opened.get("track") or {}).get("id"), "track-broker-terminal-truth")
+
     def test_env_tool_rejects_legacy_handoff_tool_payload(self) -> None:
         instance_json = self._instance_json()
         response = self._dispatch(

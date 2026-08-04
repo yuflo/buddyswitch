@@ -23,12 +23,12 @@ DAEMON_OWNED_FILES = [
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
-    ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py",
-    ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "context.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "tool_runtime" / "context.py",
 ]
 DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_contracts.py"
-CONTEXT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "context.py"
-DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py"
+CONTEXT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "tool_runtime" / "context.py"
+DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
 IM_ACTOR_DELIVERY_PATH = ROOT / "src/buddyswitch/modules/communication/private/adapters/actor/im_actor_delivery.py"
 PRODUCT_HANDLER_PATHS = (
     ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py",
@@ -92,8 +92,10 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         self.assertNotIn("Daemon" + "Access", class_names)
         self.assertNotIn("TaskGoalRuntimeAccess", class_names)
         self.assertNotIn('"daemon"', context_source)
-        for name in ("ActorDirectoryAccess", "SignalDeliveryAccess"):
+        for name in ("_ActorDirectoryAccess", "_SignalDeliveryAccess"):
             self.assertIn(name, class_names)
+        self.assertNotIn("ActorDirectoryAccess", class_names)
+        self.assertNotIn("SignalDeliveryAccess", class_names)
         self.assertNotIn("ImActorDeliveryAccess", class_names)
         self.assertNotIn("im_actor_delivery", context_source)
 
@@ -121,7 +123,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         imports_by_file = {path: _imported_modules(path) for path in _existing_sources()}
         flattened = {module for imports in imports_by_file.values() for module in imports}
 
-        self.assertIn("buddyswitch.env.tool_runtime.daemon_client", flattened)
+        self.assertIn("buddyswitch.foundation.daemon.client", flattened)
         self.assertNotIn("buddyswitch.env.tool_runtime.daemon_presence", flattened)
         self.assertFalse((ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_presence.py").exists())
 
@@ -146,7 +148,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
             if path.name not in {"context.py"}
         ]
         source = "\n".join(path.read_text(encoding="utf-8") for path in daemon_delivery_files)
-        source += "\n" + _class_source(CONTEXT_PATH, "SignalDeliveryAccess")
+        source += "\n" + _class_source(CONTEXT_PATH, "_SignalDeliveryAccess")
 
         self.assertNotIn("to_role: str", source)
         self.assertNotIn("to_role=", source)

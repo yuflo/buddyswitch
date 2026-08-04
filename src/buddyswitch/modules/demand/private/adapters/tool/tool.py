@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from buddyswitch.env.tool_runtime.context import ToolContext
+    from buddyswitch.foundation.tool_runtime.context import ToolContext
 
-from buddyswitch.env.tool_runtime.definition import ActionDefinition
-from buddyswitch.env.tool_runtime.definition import MUTATES_NONE
-from buddyswitch.env.tool_runtime.definition import MUTATES_RUNTIME_OBJECTS
-from buddyswitch.env.tool_runtime.definition import TASK_REQUIREMENT_FREE
-from buddyswitch.env.tool_runtime.definition import ToolDefinition
-from buddyswitch.env.tool_runtime.definition import validate_definition
+from buddyswitch.foundation.tool_runtime.definition import ActionDefinition
+from buddyswitch.foundation.tool_runtime.definition import MUTATES_NONE
+from buddyswitch.foundation.tool_runtime.definition import MUTATES_RUNTIME_OBJECTS
+from buddyswitch.foundation.tool_runtime.definition import TASK_REQUIREMENT_FREE
+from buddyswitch.foundation.tool_runtime.definition import ToolDefinition
+from buddyswitch.foundation.tool_runtime.definition import validate_definition
 from buddyswitch.modules.demand.private.capability import BOUND_CAPABILITY_ENV
 
 

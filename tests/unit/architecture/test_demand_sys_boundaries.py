@@ -15,9 +15,9 @@ DOMAIN = Path("src/buddyswitch/env/domain/demand_sys.py")
 READ_MODEL = Path("src/buddyswitch/env/domain/demand_read.py")
 REPOSITORY = Path("src/buddyswitch/env/repos/demands.py")
 TOOL_ROOT = Path("src/buddyswitch/env/tools/demand_sys")
-CONTEXT = Path("src/buddyswitch/env/tool_runtime/context.py")
+CONTEXT = Path("src/buddyswitch/foundation/tool_runtime/context.py")
 CLI = Path("src/buddyswitch/launcher/cli.py")
-ROLE_AUTH = Path("src/buddyswitch/env/tool_runtime/role_auth.py")
+ROLE_AUTH = Path("src/buddyswitch/runtime_support/role_auth.py")
 CONTEXT_IMPL = Path(
     "src/buddyswitch/modules/context/private/adapters/tool/_impl.py"
 )
@@ -33,7 +33,7 @@ GENERIC_DAEMON_PATHS = (
     Path("src/buddyswitch/launcher/daemon_runtime.py"),
     Path("src/buddyswitch/launcher/daemon_core.py"),
     Path("src/buddyswitch/launcher/daemon_mailbox.py"),
-    Path("src/buddyswitch/env/tool_runtime/daemon_client.py"),
+    Path("src/buddyswitch/foundation/daemon/client.py"),
 )
 DEMAND_ROOT = Path("src/buddyswitch/modules/demand")
 FINAL_DOMAIN = DEMAND_ROOT / "private/domain/demand_sys.py"
@@ -51,12 +51,12 @@ DEMAND_PUBLIC = Path("src/buddyswitch/modules/demand/public/operations.py")
 COMPOSED_HOST_IMPLEMENTATIONS = (
     Path("src/buddyswitch/launcher/cli.py"),
     Path("src/buddyswitch/launcher/instance_daemon.py"),
-    Path("src/buddyswitch/launcher/env_tool_mcp_server.py"),
+    Path("src/buddyswitch/foundation/tool_runtime/mcp_server.py"),
     Path("src/buddyswitch/runtime_kernel/broker.py"),
     Path("src/buddyswitch/launcher/actor_environment.py"),
     Path("src/buddyswitch/runtime_support/runtime_skills.py"),
     Path("src/buddyswitch/runtime_support/env_cleanup.py"),
-    Path("src/buddyswitch/env/client.py"),
+    Path("src/buddyswitch/foundation/tool_runtime/client.py"),
     Path("src/buddyswitch/runtime_support/turn_runtime.py"),
     Path("src/buddyswitch/launcher/app_server.py"),
     Path("src/buddyswitch/launcher/web_management.py"),
@@ -213,13 +213,13 @@ def test_demand_owner_public_and_local_proofs_have_one_final_physical_root() -> 
 def test_hosts_receive_typed_contributions_and_consumers_use_demand_public() -> None:
     assert (REPO_ROOT / DEMAND_PUBLIC).is_file()
     host_paths = (
-        Path("src/buddyswitch/env/tool_runtime/context.py"),
-        Path("src/buddyswitch/env/tool_runtime/native_mcp.py"),
-        Path("src/buddyswitch/env/tool_runtime/registry.py"),
+        Path("src/buddyswitch/foundation/tool_runtime/context.py"),
+        Path("src/buddyswitch/foundation/tool_runtime/native_mcp.py"),
+        Path("src/buddyswitch/foundation/tool_runtime/registry.py"),
         Path("src/buddyswitch/runtime_kernel/dispatcher.py"),
         Path("src/buddyswitch/launcher/instance_daemon.py"),
         Path("src/buddyswitch/launcher/cli.py"),
-        Path("src/buddyswitch/launcher/env_tool_mcp_server.py"),
+        Path("src/buddyswitch/foundation/tool_runtime/mcp_server.py"),
         Path("src/buddyswitch/launcher/codex_config.py"),
         Path("src/buddyswitch/launcher/actor_environment.py"),
         Path("src/buddyswitch/runtime_support/env_cleanup.py"),
@@ -480,11 +480,10 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
 
 def test_demand_sys_has_one_tool_name_and_one_actor_scoped_read_path() -> None:
     from buddyswitch.application.build import build_application
-    from buddyswitch.env.tool_runtime import registry
+    from buddyswitch.foundation.tool_runtime import registry
 
     tool_root = REPO_ROOT / "src" / "buddyswitch" / "env" / "tools"
     assert not (tool_root / "demand_sys").exists()
-    assert "demand_sys" not in registry.discover_tool_ids()
     tool_ids = [
         registration.definition.id
         for registration in build_application().tools

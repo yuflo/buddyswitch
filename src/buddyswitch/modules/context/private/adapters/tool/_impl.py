@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from buddyswitch.runtime_support import env_profiles
-from buddyswitch.env.tool_runtime import registry as tool_registry
-from buddyswitch.env.tool_runtime import role_auth
-from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime import registry as tool_registry
+from buddyswitch.runtime_support import role_auth
+from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.modules.artifact import public as artifact_public
 from buddyswitch.modules.task import public as task_public
 from buddyswitch.modules.track import public as track_public

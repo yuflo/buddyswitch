@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from buddyswitch.env.tool_runtime.definition import ToolRegistration
+from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
 from buddyswitch.foundation.composition import ModuleAssembly
 from buddyswitch.modules.artifact.private.adapters.cleanup import (
     ARTIFACT_ATTACHMENTS_CONTRIBUTION,

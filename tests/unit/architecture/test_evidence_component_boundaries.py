@@ -30,9 +30,9 @@ RETIRED_PATHS = (
 APPLICATION_ENTRYPOINT = Path(
     "src/buddyswitch/application/entrypoints/browser_evidence.py"
 )
-TOOL_CONTEXT = Path("src/buddyswitch/env/tool_runtime/context.py")
+TOOL_CONTEXT = Path("src/buddyswitch/foundation/tool_runtime/context.py")
 ALLOWED_EVIDENCE_IMPORT_PREFIXES = (
-    "buddyswitch.env.tool_runtime",
+    "buddyswitch.foundation.tool_runtime",
     "buddyswitch.foundation.composition",
     "buddyswitch.modules.artifact.public",
     "buddyswitch.modules.evidence",
@@ -80,7 +80,7 @@ def test_evidence_is_one_passive_tool_contribution_selected_once() -> None:
 
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import COMPONENTS
-    from buddyswitch.env.tool_runtime import registry
+    from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.composition import ModuleAssembly
     from buddyswitch.modules.evidence.module import EVIDENCE
 
@@ -109,7 +109,6 @@ def test_evidence_is_one_passive_tool_contribution_selected_once() -> None:
     assert [
         tool.definition.id for tool in application.tools
     ].count("evidence") == 1
-    assert "evidence" not in registry.discover_tool_ids()
     assert [handler.name for handler in application.daemon_handlers] == [
         "demand_triage",
         "task_goal",
@@ -171,25 +170,6 @@ def test_stable_entrypoint_delegates_to_evidence_runtime_broker_entrypoint() -> 
         for imported in application_imports | evidence_imports
         if imported.startswith("buddyswitch.runtime_support.browser_evidence")
     ]
-
-
-def test_browser_host_retains_only_generic_status_surface() -> None:
-    context_path = REPO_ROOT / TOOL_CONTEXT
-    tree = ast.parse(
-        context_path.read_text(encoding="utf-8"),
-        filename=str(context_path),
-    )
-    browser_access = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "BrowserAccess"
-    )
-    methods = {
-        node.name
-        for node in browser_access.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    assert methods == {"__init__", "status"}
 
 
 def test_current_guidance_names_only_the_evidence_module_owner() -> None:

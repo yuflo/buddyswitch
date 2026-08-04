@@ -12,11 +12,11 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.env.tool_runtime.definition import ActionDefinition  # noqa: E402
-from buddyswitch.env.tool_runtime.definition import ToolDefinition  # noqa: E402
-from buddyswitch.env.tool_runtime.definition import validate_definition  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as catalog  # noqa: E402
-from buddyswitch.env.tool_runtime import role_auth  # noqa: E402
+from buddyswitch.foundation.tool_runtime.definition import ActionDefinition  # noqa: E402
+from buddyswitch.foundation.tool_runtime.definition import ToolDefinition  # noqa: E402
+from buddyswitch.foundation.tool_runtime.definition import validate_definition  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as catalog  # noqa: E402
+from buddyswitch.runtime_support import role_auth  # noqa: E402
 
 _EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 _EXPECTED_ACTIONS_BY_TOOL = {
@@ -114,7 +114,7 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         registry_tools = set(catalog.supported_tools())
         self.assertEqual(registry_tools, _EXPECTED_TOOLS)
         self.assertEqual(set(desc), _EXPECTED_TOOLS)
-        self.assertEqual(catalog.semantic_contract_errors(), [])
+        self.assertEqual(catalog.tool_catalog_errors(), [])
 
         for tool in sorted(registry_tools):
             expected_actions = set(catalog.supported_actions(tool))
@@ -370,10 +370,18 @@ class EnvToolSemanticContractTests(unittest.TestCase):
 
     def test_operation_semantics_permissions_are_covered_by_role_policy(self) -> None:
         manifest = env_manifest.load_manifest(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml")
-        manifest_roles = role_auth.manifest_role_ids(manifest)
+        manifest_roles = frozenset(
+            role["id"]
+            for role in manifest.get("roles", [])
+            if isinstance(role, dict) and isinstance(role.get("id"), str)
+        )
         for key, row in catalog.operation_semantics().items():
             required_permission = row["required_permission"]
-            allowed_roles = role_auth.allowed_roles_for_permission(required_permission, manifest)
+            allowed_roles = frozenset(
+                role
+                for role in manifest_roles
+                if role_auth.authorize(required_permission, role, manifest).allowed
+            )
             with self.subTest(action=key, required_permission=required_permission):
                 self.assertTrue(allowed_roles)
                 self.assertLessEqual(allowed_roles, manifest_roles)

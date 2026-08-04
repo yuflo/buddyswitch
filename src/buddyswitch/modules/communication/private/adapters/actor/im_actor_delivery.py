@@ -9,7 +9,7 @@ import uuid
 from buddyswitch.env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
 from buddyswitch.env.repos import runtime_files  # noqa: E402
-from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 
 
 def _non_empty_text(value: Any, field: str) -> str:

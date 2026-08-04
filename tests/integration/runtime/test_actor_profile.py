@@ -16,8 +16,8 @@ from buddyswitch.env.domain.identity import ExternalIdentityProfile  # noqa: E40
 from buddyswitch.env.domain.identity import IdentityRef  # noqa: E402
 from buddyswitch.env.domain.identity import actor_identity  # noqa: E402
 from buddyswitch.env.domain.identity import external_identity  # noqa: E402
-from buddyswitch.env.tool_runtime import context as context_module  # noqa: E402
-from buddyswitch.env.tool_runtime.context import ToolContext  # noqa: E402
+from buddyswitch.foundation.tool_runtime import context as context_module  # noqa: E402
+from buddyswitch.foundation.tool_runtime.context import ToolContext  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 
@@ -82,7 +82,8 @@ class IdentityRuntimeTests(unittest.TestCase):
         self.assertEqual(context.role_id, "dev")
         self.assertEqual(context["current_identity"], {"id": "act-dev-context", "type": "actor"})
         self.assertEqual(context["active_role"], "dev")
-        self.assertEqual(context["role_id"], "dev")
+        with self.assertRaises(KeyError):
+            _ = context["role_id"]
         with self.assertRaises(KeyError):
             _ = context["active" + "_actor"]
         self.assertFalse(hasattr(context, "actor_address"))
@@ -104,13 +105,12 @@ class IdentityRuntimeTests(unittest.TestCase):
         self.assertEqual(signal["target_identity_id"], "act-pm-route")
         self.assertEqual(signal["target_role_id"], "pm")
 
-    def test_actor_private_file_summaries_are_identity_owned(self) -> None:
+    def test_tool_context_exposes_actor_private_root_without_file_service(self) -> None:
         context = self._context(actor_id="act-dev-private-summary", role_id="dev")
 
-        context.actor_private.write_file("notes.md", content="private")
-        summaries = context.actor_private.list_files()
-
-        self.assertEqual(len(summaries), 1)
-        self.assertEqual(summaries[0]["owner_identity"], {"id": "act-dev-private-summary", "type": "actor"})
-        self.assertNotIn("owner" + "_actor", summaries[0])
-        self.assertEqual(summaries[0]["visibility"], "current_identity_private")
+        self.assertTrue(hasattr(context, "actor_private_root"))
+        self.assertEqual(
+            context.actor_private_root,
+            self.runtime_root / "private",
+        )
+        self.assertFalse(hasattr(context, "actor_private"))

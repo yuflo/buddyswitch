@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from buddyswitch.env.tool_runtime.context import ToolContext
+    from buddyswitch.foundation.tool_runtime.context import ToolContext
 
-from buddyswitch.env.tool_runtime.definition import (
+from buddyswitch.foundation.tool_runtime.definition import (
     ActionDefinition,
     MUTATES_NONE,
     MUTATES_RUNTIME_OBJECTS,

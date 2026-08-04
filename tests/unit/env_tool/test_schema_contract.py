@@ -13,8 +13,8 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.tool_runtime import registry as catalog  # noqa: E402
-from buddyswitch.env.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as catalog  # noqa: E402
+from buddyswitch.foundation.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition  # noqa: E402
 
 
 _ENUM_FIELDS = {"status", "state", "health", "kind", "template", "target_type", "backend", "engine", "box", "type"}

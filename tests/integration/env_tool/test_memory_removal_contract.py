@@ -22,7 +22,7 @@ from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 from buddyswitch.modules.artifact.private.domain import source_refs  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"

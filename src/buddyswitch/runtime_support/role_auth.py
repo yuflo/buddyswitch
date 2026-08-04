@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-COMMON_ROLE_PERMISSIONS = frozenset(
+from buddyswitch.foundation.tool_runtime.definition import AuthorizationDecision
+
+__all__ = ("authorize", "role_action_summary")
+
+
+_COMMON_ROLE_PERMISSIONS = frozenset(
     {
         "track.read",
         "track.create",
@@ -39,19 +43,10 @@ COMMON_ROLE_PERMISSIONS = frozenset(
     }
 )
 
-ROLE_PERMISSION_ADDITIONS: dict[str, frozenset[str]] = {}
+_ROLE_PERMISSION_ADDITIONS: dict[str, frozenset[str]] = {}
 
 
-@dataclass(frozen=True)
-class AuthDecision:
-    allowed: bool
-    required_permission: str
-    active_role: str
-    allowed_roles: tuple[str, ...]
-    reason: str
-
-
-def manifest_role_ids(manifest: dict[str, Any]) -> frozenset[str]:
+def _manifest_role_ids(manifest: dict[str, Any]) -> frozenset[str]:
     roles: set[str] = set()
     for role in manifest.get("roles", []):
         if isinstance(role, dict) and isinstance(role.get("id"), str):
@@ -59,22 +54,15 @@ def manifest_role_ids(manifest: dict[str, Any]) -> frozenset[str]:
     return frozenset(roles)
 
 
-def allowed_permissions_for_role(role: str, manifest: dict[str, Any]) -> frozenset[str]:
-    roles = manifest_role_ids(manifest)
-    if role not in roles:
-        return frozenset()
-    return frozenset({"none", *COMMON_ROLE_PERMISSIONS, *ROLE_PERMISSION_ADDITIONS.get(role, frozenset())})
-
-
-def allowed_roles_for_permission(required_permission: str, manifest: dict[str, Any]) -> frozenset[str]:
-    roles = manifest_role_ids(manifest)
+def _allowed_roles_for_permission(required_permission: str, manifest: dict[str, Any]) -> frozenset[str]:
+    roles = _manifest_role_ids(manifest)
     if required_permission == "none":
         return roles
-    if required_permission in COMMON_ROLE_PERMISSIONS:
+    if required_permission in _COMMON_ROLE_PERMISSIONS:
         return roles
     return frozenset(
         role
-        for role, additions in ROLE_PERMISSION_ADDITIONS.items()
+        for role, additions in _ROLE_PERMISSION_ADDITIONS.items()
         if role in roles and required_permission in additions
     )
 
@@ -85,12 +73,16 @@ def _require_role_id(role_id: Any) -> str:
     return role_id.strip()
 
 
-def authorize(required_permission: str, role_id: str, manifest: dict[str, Any]) -> AuthDecision:
+def authorize(
+    required_permission: str,
+    role_id: str,
+    manifest: dict[str, Any],
+) -> AuthorizationDecision:
     active_role = _require_role_id(role_id)
-    allowed_roles = tuple(sorted(allowed_roles_for_permission(required_permission, manifest)))
-    roles = manifest_role_ids(manifest)
+    allowed_roles = tuple(sorted(_allowed_roles_for_permission(required_permission, manifest)))
+    roles = _manifest_role_ids(manifest)
     if not allowed_roles:
-        return AuthDecision(
+        return AuthorizationDecision(
             allowed=False,
             required_permission=required_permission,
             active_role=active_role,
@@ -98,7 +90,7 @@ def authorize(required_permission: str, role_id: str, manifest: dict[str, Any]) 
             reason=f"required permission '{required_permission}' is not covered by env.tool role action policy",
         )
     if active_role not in roles:
-        return AuthDecision(
+        return AuthorizationDecision(
             allowed=False,
             required_permission=required_permission,
             active_role=active_role,
@@ -106,7 +98,7 @@ def authorize(required_permission: str, role_id: str, manifest: dict[str, Any]) 
             reason=f"active role '{active_role}' is an unknown role for this manifest",
         )
     if active_role not in allowed_roles:
-        return AuthDecision(
+        return AuthorizationDecision(
             allowed=False,
             required_permission=required_permission,
             active_role=active_role,
@@ -116,7 +108,7 @@ def authorize(required_permission: str, role_id: str, manifest: dict[str, Any]) 
                 f"'{required_permission}'"
             ),
         )
-    return AuthDecision(
+    return AuthorizationDecision(
         allowed=True,
         required_permission=required_permission,
         active_role=active_role,

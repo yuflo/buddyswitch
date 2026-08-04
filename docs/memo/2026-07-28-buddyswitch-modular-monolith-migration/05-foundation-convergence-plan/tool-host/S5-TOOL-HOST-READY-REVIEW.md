@@ -1,8 +1,13 @@
 # S5 C1 ToolHost READY Review
 
+> **R1 READINESS HISTORY — CONSUMED.** This review admitted the first C1
+> execution but did not prove its returned candidate. The active continuation
+> authority is the R2 Goal Packet.
+
 ## Decision
 
-`READY` — only packet `BS-MM-S5-TOOLHOST-R1-20260804-01` may execute.
+Historical decision: R1 was `READY` only for packet
+`BS-MM-S5-TOOLHOST-R1-20260804-01`. That authority is consumed.
 
 This review authorizes one ToolHost cutover. It does not accept implementation
 and does not authorize C2–C7 or S6.

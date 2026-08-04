@@ -13,7 +13,7 @@ from typing import Any, Mapping
 
 from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
-from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.launcher import daemon_triggers  # noqa: E402
 from buddyswitch.runtime_kernel import protocol  # noqa: E402
 

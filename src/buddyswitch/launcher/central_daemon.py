@@ -15,7 +15,7 @@ from typing import Any
 HELPER_DIR = Path(__file__).resolve().parent
 
 from buddyswitch.launcher import central_daemon_core  # noqa: E402
-from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 
 

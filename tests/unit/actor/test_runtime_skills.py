@@ -10,7 +10,7 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from buddyswitch.runtime_support import runtime_skills  # noqa: E402
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
@@ -766,7 +766,7 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn('"$buddyswitch_python" -m buddyswitch.application.entrypoints.diagnostics status', text)
 
     def test_runtime_contract_not_shared_skill_owns_inactive_actions(self) -> None:
-        from buddyswitch.env.tool_runtime import registry as catalog
+        from buddyswitch.foundation.tool_runtime import registry as catalog
 
         self.assertNotIn("advance", catalog.supported_actions("track"))
         self.assertIn("resolve_comment_thread", catalog.supported_actions("track"))

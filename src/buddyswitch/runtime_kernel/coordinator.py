@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from buddyswitch.runtime_support import turn_runtime
-from buddyswitch.env.tool_runtime import registry as tool_registry
+from buddyswitch.foundation.tool_runtime import registry as tool_registry
 
 
 class LockMode(str, Enum):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.modules.task.private.adapters.goal import client as goal_client
 from buddyswitch.modules.task.private.domain import task_sys
 from buddyswitch.modules.task.public.contracts import DemandSelectionResolver

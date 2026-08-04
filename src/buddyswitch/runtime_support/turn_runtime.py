@@ -18,7 +18,7 @@ from typing import Any, Iterator
 
 from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST
 from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.tool_runtime import registry as tool_registry
+from buddyswitch.foundation.tool_runtime import registry as tool_registry
 
 ROOT = runtime_files.ROOT
 

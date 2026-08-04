@@ -1,5 +1,9 @@
 # S5 C1 ToolHost Source and Consumer Snapshot
 
+> R1 source snapshot preserved for traceability. Hub return review supersedes
+> its two unproved classifications: `new_id()` had no current consumer, and the
+> Broker re-export facade had no current consumer or protected contract.
+
 ## Snapshot identity
 
 | Field | Value |
@@ -53,7 +57,7 @@ part of the migration claim.
 | `env/tool_runtime/results.py` | canonical result/rejection shaping | `foundation/tool_runtime/results.py` |
 | `env/tool_runtime/auth_feedback.py` | authorization rejection projection | `foundation/tool_runtime/auth_feedback.py` |
 | `env/tool_runtime/native_mcp.py` | native Tool names/schema projection | `foundation/tool_runtime/native_mcp.py` |
-| `env/tool_runtime/broker_client.py` | stable Tool-side Broker adapter | `foundation/tool_runtime/broker_client.py` |
+| `env/tool_runtime/broker_client.py` | zero-consumer Broker re-export at R1 return | R2 retains no facade unless a current production consumer or protected contract proves it necessary |
 | `env/tool_runtime/daemon_client.py` | generic Daemon transport | `foundation/daemon/client.py` |
 | `env/tool_runtime/role_auth.py` | current product/Role permission policy | `runtime_support/role_auth.py` until S6 |
 | `env/client.py` | human/admin broker-routed Tool CLI | `foundation/tool_runtime/client.py` |
@@ -85,7 +89,7 @@ Current used host facts/capabilities are:
 - identity profile, `role_id`, instance path/payload, manifest/path and
   invocation metadata;
 - `actor_directory` and `signal_delivery`;
-- `now()` and current ID helper behavior where consumed.
+- consumed `now()` behavior. R1 review found no current consumer for `new_id()`.
 
 The only product references through the broad `repos` bag are:
 

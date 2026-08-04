@@ -15,7 +15,7 @@ from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 
 
 class TurnRuntimeRunlessTests(unittest.TestCase):

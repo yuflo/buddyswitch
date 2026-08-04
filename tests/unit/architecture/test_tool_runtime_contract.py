@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import ast
-import importlib
-import json
-import tempfile
-import textwrap
+import inspect
 import unittest
 from pathlib import Path
 
@@ -14,6 +11,13 @@ from buddyswitch.application.build import build_application
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
+
+FINAL_TOOL_RUNTIME_ROOT = ROOT / "src" / "buddyswitch" / "foundation" / "tool_runtime"
+FINAL_DAEMON_ROOT = ROOT / "src" / "buddyswitch" / "foundation" / "daemon"
+FINAL_DAEMON_CLIENT = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
+FINAL_ROLE_POLICY = ROOT / "src" / "buddyswitch" / "runtime_support" / "role_auth.py"
+RETIRED_TOOL_RUNTIME_ROOT = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime"
+RETIRED_TOOL_PACKAGE_ROOT = ROOT / "src" / "buddyswitch" / "env" / "tools"
 
 
 SHIPPED_TOOLS: dict[str, set[str]] = {
@@ -48,91 +52,231 @@ EXPLICIT_COMPONENT_TOOL_IDS = frozenset(
     registration.definition.id
     for registration in build_application().tools
 )
-DISCOVERED_TOOL_PACKAGES = (
-    frozenset(SHIPPED_TOOLS) - EXPLICIT_COMPONENT_TOOL_IDS
-)
-
-LEGACY_SHARED_RUNTIME_FILES = {
-    "catalog.py",
-    "cli_helpers.py",
-    "discovery.py",
-    "dispatch.py",
-    "model.py",
-    "responses.py",
-    "router.py",
-}
-
-LEGACY_TOOL_PUBLIC_FILES = {"contract.py", "semantics.py", "handlers.py", "cli.py", "service.py"}
-FORBIDDEN_IMPORT_PREFIXES = ("buddyswitch.env.repos", "buddyswitch.env.domain", "env_manifest", "runtime_kernel")
-FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS = {
-    f"buddyswitch.env.tools.{name}"
-    for name in (
-        "catalog",
-        "dispatch",
-        "router",
-        "responses",
-        "model",
-        "discovery",
-        "cli_helpers",
-    )
-}
-
-
-
-
 class ToolRuntimeArchitectureTests(unittest.TestCase):
-    def _tool_dir(self, tool: str) -> Path:
-        return ROOT / "src" / "buddyswitch" / "env" / "tools" / tool
-    def test_discovered_tool_packages_expose_single_public_entrypoint(self) -> None:
-        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
-            expected_actions = SHIPPED_TOOLS[tool]
-            with self.subTest(tool=tool):
-                package_dir = self._tool_dir(tool)
-                self.assertTrue(package_dir.is_dir(), msg=f"missing tool package: {package_dir}")
-                self.assertTrue((package_dir / "tool.py").exists(), msg=f"missing tool.py for {tool}")
-                for file_name in sorted(LEGACY_TOOL_PUBLIC_FILES):
-                    self.assertFalse((package_dir / file_name).exists(), msg=f"legacy file still exists: {package_dir / file_name}")
+    def test_foundation_toolhost_is_the_single_final_physical_owner(self) -> None:
+        expected_runtime_files = {
+            "__init__.py",
+            "auth_feedback.py",
+            "client.py",
+            "context.py",
+            "definition.py",
+            "mcp_server.py",
+            "native_mcp.py",
+            "registry.py",
+            "results.py",
+        }
+        actual_runtime_files = {
+            path.name for path in FINAL_TOOL_RUNTIME_ROOT.glob("*.py")
+        }
 
-                module = importlib.import_module(f"buddyswitch.env.tools.{tool}.tool")
-                definition = getattr(module, "DEFINITION", None)
-                invoke = getattr(module, "invoke", None)
-                self.assertTrue(callable(invoke), msg=f"{tool}.tool.invoke must be callable")
-                self.assertIsNotNone(definition, msg=f"{tool}.tool.DEFINITION missing")
-                self.assertEqual(getattr(definition, "id", None), tool)
+        self.assertEqual(actual_runtime_files, expected_runtime_files)
+        self.assertEqual(
+            {path.name for path in FINAL_DAEMON_ROOT.glob("*.py")},
+            {"__init__.py", "client.py"},
+        )
+        self.assertTrue(FINAL_DAEMON_CLIENT.is_file())
+        self.assertTrue(FINAL_ROLE_POLICY.is_file())
+        self.assertFalse(RETIRED_TOOL_RUNTIME_ROOT.exists())
+        self.assertFalse(RETIRED_TOOL_PACKAGE_ROOT.exists())
+        self.assertFalse((ROOT / "src/buddyswitch/env/client.py").exists())
+        self.assertFalse(
+            (ROOT / "src/buddyswitch/launcher/env_tool_mcp_server.py").exists()
+        )
 
-                actions = getattr(definition, "actions", ())
-                names = {getattr(row, "name", None) for row in actions}
-                self.assertEqual(names, expected_actions)
-                for action in actions:
-                    input_schema = getattr(action, "input_schema", None)
-                    self.assertIsInstance(input_schema, dict, msg=action)
-                    self.assertEqual(input_schema.get("type"), "object", msg=action)
-                    self.assertIs(input_schema.get("additionalProperties"), False, msg=action)
-                    self.assertIsInstance(input_schema.get("properties"), dict, msg=action)
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("src/buddyswitch/foundation/tool_runtime/definition.py", readme)
+        self.assertNotIn("src/buddyswitch/env/tool_runtime", readme)
 
-                    output_schema = getattr(action, "output_schema", None)
-                    self.assertIsInstance(output_schema, dict, msg=action)
-                    if "$ref" in output_schema:
-                        self.assertEqual(output_schema, {"$ref": "ToolResult"})
-                    else:
-                        self.assertEqual(output_schema.get("type"), "object", msg=action)
+    def test_toolhost_exports_only_production_earned_contracts(self) -> None:
+        from buddyswitch.foundation import tool_runtime
+        from buddyswitch.foundation.tool_runtime import context
+        from buddyswitch.foundation.tool_runtime import definition
+        from buddyswitch.foundation.tool_runtime import native_mcp
+        from buddyswitch.foundation.tool_runtime import registry
+        from buddyswitch.foundation.tool_runtime import results
+        from buddyswitch.runtime_support import role_auth
 
-    def test_component_tools_are_explicitly_contributed_outside_discovered_packages(self) -> None:
-        from buddyswitch.env.tool_runtime import registry
+        self.assertEqual(set(tool_runtime.__all__), set())
+        self.assertEqual(set(context.__all__), {"InvocationFact", "ToolContext"})
+        self.assertEqual(
+            set(definition.__all__),
+            {
+                "ActionDefinition",
+                "AuthorizationDecision",
+                "MUTATES_NONE",
+                "MUTATES_RUNTIME_OBJECTS",
+                "TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED",
+                "TASK_REQUIREMENT_FREE",
+                "ToolAuthorizer",
+                "ToolDefinition",
+                "ToolRegistration",
+                "validate_definition",
+                "validate_registration",
+            },
+        )
+        self.assertEqual(
+            set(registry.__all__),
+            {
+                "action_mutates",
+                "compact_tool_affordances",
+                "configure_active_task_probe",
+                "configure_authorizer",
+                "configure_tool_registrations",
+                "dispatch_env_tool_request",
+                "env_tools_description",
+                "get_action_definition",
+                "get_definition",
+                "operation_semantics",
+                "supported_actions",
+                "supported_tools",
+                "tool_catalog_errors",
+            },
+        )
+        self.assertEqual(
+            set(native_mcp.__all__),
+            {
+                "bound_capability_env",
+                "encode_native_tool_name",
+                "list_native_tool_specs",
+                "resolve_native_tool_name",
+            },
+        )
+        self.assertEqual(
+            set(results.__all__),
+            {"alternative_capability", "next_action_option", "rejection", "success"},
+        )
+        self.assertEqual(set(role_auth.__all__), {"authorize", "role_action_summary"})
+
+        for module, names in (
+            (
+                context,
+                (
+                    "ActorDirectoryAccess",
+                    "ActorIdentityProfile",
+                    "IdentityRef",
+                    "SignalDeliveryAccess",
+                    "default_manifest_path",
+                ),
+            ),
+            (
+                definition,
+                (
+                    "MUTATES_BROKER_TOKEN",
+                    "MUTATES_BROWSER_SESSION",
+                    "MUTATES_RUNTIME_FILES",
+                    "ToolInvoke",
+                ),
+            ),
+            (
+                registry,
+                (
+                    "_action_spec_row",
+                    "load_definition",
+                    "payload_fields_for_action",
+                    "semantic_contract_errors",
+                ),
+            ),
+            (results, ("follow_up_affordance", "tool_affordance")),
+            (
+                role_auth,
+                (
+                    "COMMON_ROLE_PERMISSIONS",
+                    "ROLE_PERMISSION_ADDITIONS",
+                    "allowed_permissions_for_role",
+                    "allowed_roles_for_permission",
+                    "manifest_role_ids",
+                ),
+            ),
+        ):
+            for name in names:
+                with self.subTest(module=module.__name__, name=name):
+                    self.assertFalse(hasattr(module, name))
+
+        success_parameters = inspect.signature(results.success).parameters
+        for unearned_parameter in (
+            "active_actor",
+            "allowed_next_action_options",
+            "binding_changed",
+            "follow_up_affordances",
+            "validation_only",
+        ):
+            with self.subTest(unearned_parameter=unearned_parameter):
+                self.assertNotIn(unearned_parameter, success_parameters)
+
+        rejection_parameters = inspect.signature(results.rejection).parameters
+        for unearned_parameter in ("error_class", "mutates_product_state"):
+            with self.subTest(unearned_rejection_parameter=unearned_parameter):
+                self.assertNotIn(unearned_parameter, rejection_parameters)
+
+        registry_source = (FINAL_TOOL_RUNTIME_ROOT / "registry.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("runtime load errors", registry_source)
+
+    def test_foundation_toolhost_has_no_discovery_component_or_role_import(self) -> None:
+        self.assertTrue(FINAL_TOOL_RUNTIME_ROOT.is_dir())
+        violations: list[str] = []
+        forbidden_import_prefixes = (
+            "buddyswitch.env.tool_runtime",
+            "buddyswitch.env.tools",
+            "buddyswitch.modules",
+            "buddyswitch.runtime_support.role_auth",
+        )
+        for path in sorted(FINAL_TOOL_RUNTIME_ROOT.glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
+            relative = path.relative_to(ROOT).as_posix()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name.startswith(forbidden_import_prefixes):
+                            violations.append(
+                                f"{relative}:{node.lineno}: import {alias.name}"
+                            )
+                elif isinstance(node, ast.ImportFrom):
+                    module = node.module or ""
+                    if module.startswith(forbidden_import_prefixes):
+                        violations.append(
+                            f"{relative}:{node.lineno}: from {module} import ..."
+                        )
+            for retired_term in (
+                "discover_tool_ids",
+                "pkgutil.iter_modules",
+                "importlib.import_module",
+                "buddyswitch.env.tools",
+            ):
+                if retired_term in source:
+                    violations.append(f"{relative}: contains {retired_term}")
+
+        self.assertEqual(violations, [], msg="\n".join(violations))
+
+    def test_application_injects_role_policy_and_adapters_use_narrow_context(self) -> None:
+        application_source = (
+            ROOT / "src/buddyswitch/application/build.py"
+        ).read_text(encoding="utf-8")
+        artifact_source = (
+            ROOT / "src/buddyswitch/modules/artifact/private/state/artifacts.py"
+        ).read_text(encoding="utf-8")
+        evidence_source = (
+            ROOT / "src/buddyswitch/modules/evidence/private/adapters/tool/_impl.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("registry.configure_authorizer(role_auth.authorize)", application_source)
+        self.assertIn("context.actor_private_root", artifact_source)
+        self.assertNotIn("context.repos", artifact_source)
+        self.assertIn("context.now()", evidence_source)
+        self.assertNotIn("context.repos", evidence_source)
+
+    def test_component_tools_are_explicitly_contributed_exactly_once(self) -> None:
+        from buddyswitch.foundation.tool_runtime import registry
 
         application = build_application()
-        component_registrations = {
-            registration.definition.id: registration
-            for module in application.modules
-            for registration in module.tools
-        }
-        self.assertEqual(
-            set(component_registrations),
-            set(EXPLICIT_COMPONENT_TOOL_IDS),
-        )
-        for tool_id, registration in sorted(component_registrations.items()):
-            self.assertNotIn(tool_id, registry.discover_tool_ids())
-            self.assertFalse(self._tool_dir(tool_id).exists())
+        tool_ids = [registration.definition.id for registration in application.tools]
+        self.assertEqual(set(tool_ids), set(SHIPPED_TOOLS))
+        self.assertEqual(len(tool_ids), len(set(tool_ids)))
+        self.assertEqual(registry.supported_tools(), set(SHIPPED_TOOLS))
+        for registration in application.tools:
+            tool_id = registration.definition.id
             self.assertEqual(registration.definition.id, tool_id)
             self.assertTrue(callable(registration.invoke))
             self.assertEqual(
@@ -140,78 +284,27 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 SHIPPED_TOOLS[tool_id],
             )
 
-    def test_tool_packages_import_only_runtime_sdk_and_local_modules(self) -> None:
-        violations: list[str] = []
-        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
-            package_dir = self._tool_dir(tool)
-            for path in sorted(package_dir.rglob("*.py")):
-                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-                rel = path.relative_to(ROOT).as_posix()
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Import):
-                        for alias in node.names:
-                            name = alias.name
-                            if name.startswith(FORBIDDEN_IMPORT_PREFIXES):
-                                violations.append(f"{rel}:{node.lineno}: import {name}")
-                            if name in FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS:
-                                violations.append(f"{rel}:{node.lineno}: import {name}")
-                            if name.startswith("buddyswitch.env.tools."):
-                                parts = name.split(".")
-                                if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
-                                    violations.append(f"{rel}:{node.lineno}: import sibling tool {name}")
-                    if isinstance(node, ast.ImportFrom):
-                        module = node.module or ""
-                        if module.startswith(FORBIDDEN_IMPORT_PREFIXES):
-                            violations.append(f"{rel}:{node.lineno}: from {module} import ...")
-                        if module in FORBIDDEN_ENV_TOOLS_RUNTIME_IMPORTS:
-                            violations.append(f"{rel}:{node.lineno}: from {module} import ...")
-                        if module == "buddyswitch.env.tools":
-                            for alias in node.names:
-                                if alias.name in SHIPPED_TOOLS and alias.name != tool:
-                                    violations.append(
-                                        f"{rel}:{node.lineno}: "
-                                        f"from buddyswitch.env.tools import sibling {alias.name}"
-                                    )
-                        if module.startswith("buddyswitch.env.tools."):
-                            parts = module.split(".")
-                            if len(parts) >= 3 and parts[2] in SHIPPED_TOOLS and parts[2] != tool:
-                                violations.append(f"{rel}:{node.lineno}: from sibling tool module {module} import ...")
-        self.assertEqual(violations, [], msg="\n".join(violations))
-    def test_tool_packages_mutate_state_only_through_tool_context(self) -> None:
-        violations: list[str] = []
-        blocked_literals = (
-            "workspace_dir",
-            "BUDDYSWITCH_STATE_ROOT",
-            "buddyswitch/objects",
-            "buddyswitch/local/actor_private",
-        )
-        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
-            package_dir = self._tool_dir(tool)
-            for path in sorted(package_dir.rglob("*.py")):
-                source = path.read_text(encoding="utf-8")
-                rel = path.relative_to(ROOT).as_posix()
-                tree = ast.parse(source, filename=str(path))
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Call):
-                        if isinstance(node.func, ast.Attribute):
-                            if node.func.attr in {"write_text", "write_bytes", "unlink"}:
-                                violations.append(f"{rel}:{node.lineno}: direct path mutation via .{node.func.attr}()")
-                        if isinstance(node.func, ast.Name) and node.func.id == "open":
-                            mode = None
-                            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
-                                mode = node.args[1].value
-                            for keyword in node.keywords:
-                                if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant):
-                                    mode = keyword.value.value
-                            if isinstance(mode, str) and any(flag in mode for flag in ("w", "a", "x")):
-                                violations.append(f"{rel}:{node.lineno}: open() write mode is not allowed")
-                if path.name == "_impl.py":
-                    for literal in blocked_literals:
-                        if literal in source:
-                            violations.append(f"{rel}: contains forbidden storage literal: {literal}")
-        self.assertEqual(violations, [], msg="\n".join(violations))
+    def test_invalid_and_duplicate_registrations_fail_without_replacing_catalog(self) -> None:
+        from buddyswitch.foundation.tool_runtime import registry
+        from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
+
+        registration = build_application().tools[0]
+        before = registry.supported_tools()
+        with self.assertRaisesRegex(ValueError, "duplicate explicit tool registration"):
+            registry.configure_tool_registrations((registration, registration))
+        with self.assertRaisesRegex(ValueError, "must be callable"):
+            registry.configure_tool_registrations(
+                (
+                    ToolRegistration(
+                        definition=registration.definition,
+                        invoke=None,  # type: ignore[arg-type]
+                    ),
+                )
+            )
+        self.assertEqual(registry.supported_tools(), before)
+
     def test_registry_projects_catalog_semantics_payload_fields_and_cli_actions_from_definitions(self) -> None:
-        from buddyswitch.env.tool_runtime import registry
+        from buddyswitch.foundation.tool_runtime import registry
 
         tools_desc = registry.env_tools_description()
         semantics = registry.operation_semantics()
@@ -223,17 +316,13 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 action_def = registry.get_action_definition(tool, action)
                 expected_fields = [name for name in (action_def.input_schema.get("properties") or {}) if isinstance(name, str)]
                 self.assertEqual(tools_desc[tool]["payload_fields"][action], expected_fields)
-                self.assertEqual(
-                    set(registry.payload_fields_for_action(tool, action)),
-                    set(expected_fields),
-                )
                 self.assertIn(f"{tool}.{action}", semantics)
     def test_definition_validation_rejects_incomplete_input_contracts(self) -> None:
-        from buddyswitch.env.tool_runtime.definition import ActionDefinition
-        from buddyswitch.env.tool_runtime.definition import MUTATES_NONE
-        from buddyswitch.env.tool_runtime.definition import TASK_REQUIREMENT_FREE
-        from buddyswitch.env.tool_runtime.definition import ToolDefinition
-        from buddyswitch.env.tool_runtime.definition import validate_definition
+        from buddyswitch.foundation.tool_runtime.definition import ActionDefinition
+        from buddyswitch.foundation.tool_runtime.definition import MUTATES_NONE
+        from buddyswitch.foundation.tool_runtime.definition import TASK_REQUIREMENT_FREE
+        from buddyswitch.foundation.tool_runtime.definition import ToolDefinition
+        from buddyswitch.foundation.tool_runtime.definition import validate_definition
 
         def _definition_for(schema: dict[str, object]) -> ToolDefinition:
             return ToolDefinition(
@@ -244,7 +333,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 capability_boundary="probe boundary",
                 object_model="Probe objects are test-only validation rows.",
                 use_when=("testing",),
-                do_not_use_when=(),
+                do_not_use_when=("not for runtime use",),
                 actions=(
                     ActionDefinition(
                         name="ping",
@@ -265,11 +354,16 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                         reads=("probe payload",),
                         writes=(),
                         does_not_write=("runtime objects",),
+                        use_when=("testing",),
+                        do_not_use_when=("not for runtime use",),
                     ),
                 ),
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"probe\.ping\.input_schema\.required must be a list",
+        ):
             validate_definition(
                 _definition_for(
                     {
@@ -282,7 +376,10 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 )
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"probe\.ping\.input_schema\.properties\.title\.description must be a non-empty string",
+        ):
             validate_definition(
                 _definition_for(
                     {
@@ -296,7 +393,10 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 )
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"probe\.ping\.input_schema\.properties\.now\.additionalProperties must be false",
+        ):
             validate_definition(
                 _definition_for(
                     {
@@ -315,7 +415,10 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 )
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"probe\.ping\.input_schema\.properties\.refs\.items must be an object",
+        ):
             validate_definition(
                 _definition_for(
                     {
@@ -333,7 +436,10 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 )
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"probe\.ping\.input_schema\.properties\.status\.enum must be a non-empty list",
+        ):
             validate_definition(
                 _definition_for(
                     {
@@ -349,11 +455,3 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                     }
                 )
             )
-    def test_legacy_env_tools_runtime_surfaces_are_removed(self) -> None:
-        tools_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
-        for file_name in sorted(LEGACY_SHARED_RUNTIME_FILES):
-            self.assertFalse((tools_root / file_name).exists(), msg=f"legacy shared file still exists: {file_name}")
-        for tool in sorted(DISCOVERED_TOOL_PACKAGES):
-            package_dir = self._tool_dir(tool)
-            for file_name in sorted(LEGACY_TOOL_PUBLIC_FILES):
-                self.assertFalse((package_dir / file_name).exists(), msg=f"legacy file still exists: {package_dir / file_name}")

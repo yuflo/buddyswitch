@@ -17,8 +17,8 @@ from buddyswitch.modules.artifact.private.state import artifacts as artifact_rep
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
-from buddyswitch.env.tool_runtime import registry as tool_catalog  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 _RETIRED_ACTOR_PRIVATE_FILE_ROWS_FIELD = "actor_private_" + "files"

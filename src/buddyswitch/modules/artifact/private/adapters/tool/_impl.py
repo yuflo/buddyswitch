@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from .tool import DEFINITION
-from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.modules.artifact.private.domain import (
     artifact_relations as artifact_relations_domain,
 )

@@ -29,8 +29,8 @@ APPLICATION_BUILD = Path("src/buddyswitch/application/build.py")
 MODULE_ASSEMBLY = Path("src/buddyswitch/foundation/composition/__init__.py")
 WEB_CONTRACTS = Path("src/buddyswitch/launcher/web_contracts.py")
 GENERIC_HOSTS = (
-    Path("src/buddyswitch/env/tool_runtime/context.py"),
-    Path("src/buddyswitch/env/tool_runtime/registry.py"),
+    Path("src/buddyswitch/foundation/tool_runtime/context.py"),
+    Path("src/buddyswitch/foundation/tool_runtime/registry.py"),
     Path("src/buddyswitch/launcher/cli.py"),
     Path("src/buddyswitch/launcher/instance_daemon.py"),
     Path("src/buddyswitch/launcher/web_management.py"),
@@ -172,7 +172,7 @@ def test_task_contributions_are_typed_and_generic_hosts_have_no_task_private_sta
             }
         ], relative
 
-    from buddyswitch.env.tool_runtime.context import ToolContext
+    from buddyswitch.foundation.tool_runtime.context import ToolContext
 
     context_fields = {field.name for field in fields(ToolContext)}
     assert "task_goal_runtime" not in context_fields

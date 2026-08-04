@@ -119,7 +119,7 @@ def test_track_has_one_physical_owner_and_no_retired_live_path() -> None:
 def test_track_contributes_exact_surfaces_and_is_selected_once() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import COMPONENTS, TRACK
-    from buddyswitch.env.tool_runtime import registry
+    from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.composition import ModuleAssembly
 
     assert isinstance(TRACK, ModuleAssembly)
@@ -155,7 +155,6 @@ def test_track_contributes_exact_surfaces_and_is_selected_once() -> None:
     assert [
         registration.event_type for registration in application.inbound_sources
     ].count("track.comment.added") == 1
-    assert "track" not in registry.discover_tool_ids()
 
 
 def test_track_dependency_direction_and_stable_storage_are_exact() -> None:

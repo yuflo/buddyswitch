@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from .tool import DEFINITION
-from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime import results as tool_results
 import buddyswitch.modules.artifact.public as artifact_public
 
 
@@ -195,7 +195,7 @@ def _issue_token(
         "issued_by_identity_id": current_identity["id"],
         "mode": mode or "default",
         "evidence_kind": kind,
-        "issued_at": context.repos.runtime_files.now_iso(),
+        "issued_at": context.now(),
     }
 
 

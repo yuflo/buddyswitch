@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from buddyswitch.env.tool_runtime.definition import ToolRegistration
+from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
 from buddyswitch.foundation.composition import ModuleAssembly
 from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
 from buddyswitch.modules.demand.private.adapters.cleanup import CONTRIBUTION

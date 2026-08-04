@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from buddyswitch.env.tool_runtime import registry as tool_catalog
+from buddyswitch.foundation.tool_runtime import registry as tool_catalog
 from tests.support.paths import REPO_ROOT
 
 
@@ -15,7 +15,7 @@ GENERIC_DAEMON_PATHS = (
     Path("src/buddyswitch/launcher/daemon_runtime.py"),
     Path("src/buddyswitch/launcher/daemon_core.py"),
     Path("src/buddyswitch/launcher/daemon_mailbox.py"),
-    Path("src/buddyswitch/env/tool_runtime/daemon_client.py"),
+    Path("src/buddyswitch/foundation/daemon/client.py"),
 )
 
 DEMAND_REPOSITORY_PATH = Path(
@@ -198,7 +198,6 @@ def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
 
     roots = (
         REPO_ROOT / "src" / "buddyswitch" / "runtime_support" / "turn_runtime.py",
-        REPO_ROOT / "src" / "buddyswitch" / "env" / "tools",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "domain",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "repos",
         *(
@@ -283,16 +282,20 @@ def test_tool_catalog_projections_are_generated_from_definitions() -> None:
 
 
 def test_env_tool_catalog_excludes_source_write_capabilities() -> None:
+    from buddyswitch.application.build import build_application
+
     forbidden_tools = {"project", "dev_env", "source", "filesystem", "workspace_write"}
     forbidden_actions = {"apply_patch", "write_file", "delete_file", "configure_project"}
     supported_tools = set(tool_catalog.supported_tools())
-    tool_packages = {
-        path.name
-        for path in (REPO_ROOT / "src" / "buddyswitch" / "env" / "tools").iterdir()
-        if path.is_dir() and not path.name.startswith("_")
+    application_tools = {
+        registration.definition.id
+        for registration in build_application().tools
     }
+    retired_tool_root = REPO_ROOT / "src" / "buddyswitch" / "env" / "tools"
 
+    assert not retired_tool_root.exists()
+    assert supported_tools == application_tools
     assert forbidden_tools.isdisjoint(supported_tools)
-    assert forbidden_tools.isdisjoint(tool_packages)
+    assert forbidden_tools.isdisjoint(application_tools)
     for tool in supported_tools:
         assert forbidden_actions.isdisjoint(tool_catalog.supported_actions(tool))

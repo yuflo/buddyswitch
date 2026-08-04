@@ -12,7 +12,7 @@ import socket
 from typing import Any
 import uuid
 
-from buddyswitch.env.tool_runtime import registry as tool_registry
+from buddyswitch.foundation.tool_runtime import registry as tool_registry
 
 from buddyswitch.runtime_kernel import protocol
 

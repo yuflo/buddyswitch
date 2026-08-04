@@ -334,7 +334,7 @@ def adopt_local_attachment(
     if artifact is None:
         raise ValueError(f"artifact not found: {artifact_id}")
 
-    root = context.repos.runtime_files.actor_private_dir(context.instance_payload).resolve(strict=False)
+    root = context.actor_private_root
     try:
         resolved_source = source_path.expanduser().resolve(strict=True)
     except FileNotFoundError as exc:

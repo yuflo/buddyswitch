@@ -7,13 +7,14 @@
 | Context/S4 acceptance | `context/S4-CONTEXT-ACCEPTANCE.md`; structure `fec6cceada1d4bd6836bead804046587`; direct `fe22eecc03234f30af665678671a7ea6`; affected `8895133bfd2d4f74859801a9ed9c3fea`; FINAL `57bb518bb531437e95038f9ccf91f050` |
 | Communication acceptance | `communication/S4-COMMUNICATION-ACCEPTANCE.md`; R3 exact `935615ad05c443fb9c730fc18430fca3`; cleanup/architecture `97e2ed6734e34e39b967e1ab7369a0db`; CLI/package `9adbb959051643edb648678801b56d57`; FINAL `ffefbc012a5d45fa887cd10c9520229c` |
 | Evidence acceptance | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` |
+| S5 C1 acceptance | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; executable patch `23e7aab5…`; FINAL `7841f5d5614141728a2db56a4612d8f4` |
 | Active stage | S5 — Foundation Convergence |
-| State | READY — C1 TOOLHOST ONLY |
-| Runtime migration authorized | `BS-MM-S5-TOOLHOST-R1-20260804-01` only |
+| State | C1 ACCEPTED — C2 SOURCE REFRESH/PREPARATION ONLY |
+| Runtime migration authorized | none |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent C1 execution return and hub acceptance review |
+| Next gate | C2 current-source owner/consumer/test refresh and READY decision |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules |
 
 ## Stage ledger
@@ -25,7 +26,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | READY — C1 TOOLHOST ONLY | S4 | coordinating hub | execute/review ToolHost only; C2–C7 blocked |
+| S5 Foundation | C1 ACCEPTED — C2 PREPARATION ONLY | S4 | coordinating hub | refresh C2 WebHost/cleanup boundary; C2 implementation and C3–C7 blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -311,6 +312,19 @@ GREEN `65c9520b0b984c639cb49aa5bc18959b`, affected
 state. Track–Artifact is accepted in
 `track-artifact/S4-TRACK-ARTIFACT-ACCEPTANCE.md`; both packets are consumed.
 
+S5 C1 then replaced the dynamic Tool package/runtime topology with one
+application-selected Foundation ToolHost and a generic Daemon transport
+client. R1 returned a runnable candidate but retained test-only ToolContext,
+error and Broker facade surfaces. R2 consumed that candidate, removed the
+unearned surfaces, added exact public-boundary proof and preserved all eight
+Tool contracts. Its initial FINAL exposed one Search default-manifest owner
+violation; the executor repaired the production owner, reprovisioned a new
+candidate, passed exact/affected proof and one replacement frozen FINAL
+`7841f5d5614141728a2db56a4612d8f4`. Hub review reproduced executable patch
+`23e7aab5…`, untracked source identities and installed runtime identity, then
+accepted C1 in `tool-host/S5-TOOL-HOST-ACCEPTANCE.md`. Both C1 packets are
+consumed. C2 source refresh is unblocked; no C2 implementation packet exists.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -356,6 +370,7 @@ state. Track–Artifact is accepted in
 | 2026-08-04 | S4 Communication | READY — R3 FIX_AFTER_FINAL ONLY | ACCEPTED | coordinating hub | exact source/runtime identity reproduced; Communication cutover, recursive cleanup, effect-time destructive authority, truthful results and one frozen replacement FINAL accepted; all packets consumed |
 | 2026-08-04 | S4 Context / S4 | READY | ACCEPTED | coordinating hub | exact source/runtime identity, direct/affected/frozen FINAL, one final Context owner and retired host residue accepted; S4 closed |
 | 2026-08-04 | S5 Foundation | SOURCE REFRESH | READY — C1 TOOLHOST ONLY | coordinating hub | seven owner-bounded checkpoints selected; C1 source/consumer manifest, baselines, topology preflight, plan and READY review passed |
+| 2026-08-04 | S5 C1 ToolHost | READY — C1 R2 COMPLETION ONLY | ACCEPTED — C2 PREPARATION ONLY | coordinating hub | final source/runtime identity, exact earned surfaces, explicit registrations, old-path absence, affected proof and replacement FINAL `7841f5d5614141728a2db56a4612d8f4` accepted; both C1 packets consumed |
 
 ## Checkpoint record
 
@@ -401,6 +416,8 @@ state. Track–Artifact is accepted in
 | 2026-08-04 | S4 Context handoff | READY | `context/S4-CONTEXT-READY-REVIEW.md`; direct `ec4ae6b40a3d4fcaa8494049c609d35c`; affected `58658371b1244b428ea3cccfb24eb393`; topology `S4CONTEXTP-20260804-02`; packet `BS-MM-S4-CONTEXT-R1-20260804-02` | user starts one independent Context task; hub pauses without polling |
 | 2026-08-04 | S4 Context and stage acceptance | ACCEPTED | `context/S4-CONTEXT-ACCEPTANCE.md`; structure `fec6cceada1d4bd6836bead804046587`; direct `fe22eecc03234f30af665678671a7ea6`; affected `8895133bfd2d4f74859801a9ed9c3fea`; FINAL `57bb518bb531437e95038f9ccf91f050` | checkpoint S4, then refresh S5 Foundation source/consumers/residue; never resume either Context packet |
 | 2026-08-04 | S5 C1 ToolHost handoff | READY | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-READY-REVIEW.md`; ToolHost `fc856633c1f942b0a15f7d2e13dd74ef`; Web/cleanup `d9048d5075ee4d529580f5a32c216eda`; Browser `81ea8226d61f44908ac341e3ba679724`; topology `S5TOOLP-20260804-01`; packet `BS-MM-S5-TOOLHOST-R1-20260804-01` | user starts one independent C1 task; hub pauses without polling; C2–C7 remain blocked |
+| 2026-08-04 | S5 C1 R1 return / R2 handoff | READY — C1 COMPLETION ONLY | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-R1-RETURN-REVIEW.md`; preserved executable patch `1874dc3d…`; packet `BS-MM-S5-TOOLHOST-R2-20260804-01`; D-059 | preserve the runnable R1 candidate, let the executor close the whole C1 authority boundary from repository facts, then return one final C1 candidate; C2–C7 remain blocked |
+| 2026-08-04 | S5 C1 ToolHost acceptance | ACCEPTED | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; executable patch `23e7aab5…`; affected runs `5d0d14bc50c1403ea2c9c4b9fde061e6`, `b5033c61de0e415db1ae2060e16fd217`, `eabb70a77a8b4fb1b9b34b011d79a090`; FINAL `7841f5d5614141728a2db56a4612d8f4` | commit/push safe checkpoint, then refresh C2 source and READY inputs; never resume either C1 packet |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -422,11 +439,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / C1 ToolHost
-Master state: READY — C1 TOOLHOST ONLY
-Goal Packet: BS-MM-S5-TOOLHOST-R1-20260804-01
+Stage: S5 / Foundation / C2 source refresh
+Master state: C1 ACCEPTED — C2 PREPARATION ONLY
+Goal Packet: none
 Execution session: none
-Last hub checkpoint: S5 C1 source refresh, preflight and READY review complete
-Next action: user starts one independent C1 task and returns its result packet
-No-polling state: PAUSED_FOR_USER_RESULT after handoff
+Last hub checkpoint: C1 R2 candidate and replacement FINAL accepted; both C1 packets consumed
+Next action: commit/push C1 safe checkpoint, then prepare C2 from current repository facts
+No-polling state: not entered; no C2 execution authority exists
 ```

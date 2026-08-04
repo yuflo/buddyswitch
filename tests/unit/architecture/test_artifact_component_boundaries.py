@@ -127,7 +127,7 @@ def test_artifact_has_one_physical_owner_and_no_retired_live_path() -> None:
 def test_artifact_contributes_exact_surfaces_and_is_selected_once() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import ARTIFACT, COMPONENTS
-    from buddyswitch.env.tool_runtime import registry
+    from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.composition import ModuleAssembly
 
     assert isinstance(ARTIFACT, ModuleAssembly)
@@ -150,7 +150,6 @@ def test_artifact_contributes_exact_surfaces_and_is_selected_once() -> None:
     assert [
         registration.definition.id for registration in application.tools
     ].count("artifact") == 1
-    assert "artifact" not in registry.discover_tool_ids()
 
 
 def test_artifact_dependency_direction_and_composition_wiring_are_exact() -> None:

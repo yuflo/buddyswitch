@@ -15,7 +15,7 @@ from tests.support.processes import run_process
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -132,7 +132,7 @@ sys.meta_path.insert(0, BlockMessageImpl())
 
 from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_manifest
-from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 
 activate_application()
 manifest_path = Path({str(MANIFEST)!r})
@@ -182,7 +182,7 @@ sys.meta_path.insert(0, BlockSelectedImpl())
 
 from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_manifest
-from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 
 activate_application()
 manifest_path = Path({str(MANIFEST)!r})
@@ -201,12 +201,7 @@ loaded = sorted(
     name
     for name in sys.modules
     if name.endswith("._impl")
-    and name.startswith(
-        (
-            "buddyswitch.env.tools.",
-            "buddyswitch.modules.demand.private.adapters.tool.",
-        )
-    )
+    and name.startswith("buddyswitch.modules.demand.private.adapters.tool.")
 )
 print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
 """
@@ -340,28 +335,21 @@ print(json.dumps({{"response": response, "loaded": loaded}}, sort_keys=True))
         for tool, action, args, role in self._CHEAP_ACTION_CASES:
             payload_json = json.dumps({"tool": tool, "action": action, "args": args}, ensure_ascii=True)
             script = f"""
-import importlib
 import json
 import sys
 from pathlib import Path
 
 from buddyswitch.application.build import activate_application
 from buddyswitch.runtime_support import env_manifest
-from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request
+from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 
 application = activate_application()
 registration_by_tool = {{
     registration.definition.id: registration
     for registration in application.tools
 }}
-registration = registration_by_tool.get({tool!r})
-if registration is None:
-    selected_tool_module = importlib.import_module(
-        f"buddyswitch.env.tools.{{{tool!r}}}.tool"
-    )
-    selected_invoke_module = selected_tool_module.invoke.__module__
-else:
-    selected_invoke_module = registration.invoke.__module__
+registration = registration_by_tool[{tool!r}]
+selected_invoke_module = registration.invoke.__module__
 expected = f"{{selected_invoke_module.rsplit('.', 1)[0]}}._impl"
 component_private_tool_roots = tuple(
     f"{{registration.invoke.__module__.rsplit('.', 1)[0]}}."
@@ -383,12 +371,7 @@ loaded = sorted(
     name
     for name in sys.modules
     if name.endswith("._impl")
-    and name.startswith(
-        (
-            "buddyswitch.env.tools.",
-            *component_private_tool_roots,
-        )
-    )
+    and name.startswith(component_private_tool_roots)
 )
 print(json.dumps(
     {{"response": response, "loaded": loaded, "expected": expected}},

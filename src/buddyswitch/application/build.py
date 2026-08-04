@@ -9,7 +9,7 @@ from buddyswitch.application.composition import (
     COMPONENTS,
     DAEMON_HANDLER_ORDER,
 )
-from buddyswitch.env.tool_runtime.definition import (
+from buddyswitch.foundation.tool_runtime.definition import (
     ToolRegistration,
     validate_registration,
 )
@@ -270,14 +270,15 @@ def activate_application(
     daemon_handler_order: tuple[str, ...] = DAEMON_HANDLER_ORDER,
     active_task_probe=ACTIVE_TASK_PROBE,
 ) -> ApplicationAssembly:
-    from buddyswitch.env.tool_runtime import native_mcp, registry
+    from buddyswitch.foundation.tool_runtime import native_mcp, registry
     from buddyswitch.launcher import codex_config, web_management
-    from buddyswitch.runtime_support import env_manifest
+    from buddyswitch.runtime_support import env_manifest, role_auth
 
     application = build_application(
         modules,
         daemon_handler_order=daemon_handler_order,
     )
+    registry.configure_authorizer(role_auth.authorize)
     registry.configure_tool_registrations(application.tools)
     registry.configure_active_task_probe(active_task_probe)
     env_manifest.configure_skill_exports(application.skills)

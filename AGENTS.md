@@ -111,6 +111,8 @@ A broad suite does not replace missing direct product or residue proof; a narrow
 ## Codex Engineering Style
 
 - Repository facts outrank memory, other-project conventions, and plausible guesses. Inspect code, contracts, tests, instructions, and git state first.
+- Plans and Goal Packets freeze outcomes, authority boundaries, protected contracts, and proof obligations. Path lists and implementation sketches are hypotheses, not commands: within the authorized boundary, the executor owns the shortest owner-correct implementation and must correct stale plan assumptions from current repository facts without waiting for permission.
+- A current production consumer or explicit protected external contract earns an interface. A test written only to exercise or preserve an otherwise unused alias, helper, facade, field, or entrypoint is not a consumer and must not keep that surface alive.
 - Trace the semantic owner and consumer path before editing. Fix the owning cause, not an interface symptom.
 - Keep one intent per change. Do not mix features, broad renames, formatting, unrelated cleanup, test-framework work, or architecture migration.
 - Preserve unrelated user work. Partition dirty scope; never stage, revert, or rewrite it for convenience.

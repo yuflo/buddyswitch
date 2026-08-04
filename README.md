@@ -94,10 +94,10 @@ package/build declaration.
 
 - `pyproject.toml` for package build and installed-distribution ownership.
 - `src/buddyswitch/catalog/manifest.toml` for the environment manifest.
-- `src/buddyswitch/env/tool_runtime/definition.py` for `ToolDefinition` / `ActionDefinition` protocol and schema validation.
-- `src/buddyswitch/env/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
-- `src/buddyswitch/env/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
-- `src/buddyswitch/env/tool_runtime/registry.py` for runtime discovery, catalog/semantics projection, and selected tool dispatch.
+- `src/buddyswitch/foundation/tool_runtime/definition.py` for `ToolDefinition` / `ActionDefinition` protocol and schema validation.
+- `src/buddyswitch/foundation/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
+- `src/buddyswitch/foundation/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
+- `src/buddyswitch/foundation/tool_runtime/registry.py` for explicit catalog/semantics projection and selected tool dispatch.
 - `src/buddyswitch/modules/track/` for Track Public facts and external reads, Track/comment state, Tool, CLI/Web, inbound, cleanup, and Skills.
 - `src/buddyswitch/modules/artifact/` for Artifact Public decisions, Artifact/attachment state, Tool, selection assets/entrypoint, cleanup, and Skill.
 - `src/buddyswitch/modules/evidence/` for the Evidence Tool implementation and its stable Runtime Broker command entrypoint.

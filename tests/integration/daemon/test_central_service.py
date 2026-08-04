@@ -18,7 +18,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 CENTRAL_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py"
 CENTRAL_CLI_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py"
-DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime" / "daemon_client.py"
+DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
 MODULE_COUNTER = count()
 
 
@@ -26,7 +26,7 @@ def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
     module_name = (
-        "buddyswitch.env.tool_runtime.daemon_client"
+        "buddyswitch.foundation.daemon.client"
         if path == DAEMON_CLIENT_PATH
         else f"buddyswitch.launcher.{path.stem}"
     )

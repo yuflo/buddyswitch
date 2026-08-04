@@ -12,7 +12,7 @@ ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
 import buddyswitch.modules.search.private.adapters.tool._impl as search_impl  # noqa: E402
-from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
+from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"

@@ -5,11 +5,19 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from buddyswitch.env.tool_runtime import registry
-from buddyswitch.env.tool_runtime.definition import ActionDefinition, ToolDefinition
+from buddyswitch.foundation.tool_runtime import registry
+from buddyswitch.foundation.tool_runtime.definition import ActionDefinition, ToolDefinition
 
 
-NATIVE_TOOL_SEPARATOR = "__"
+__all__ = (
+    "bound_capability_env",
+    "encode_native_tool_name",
+    "list_native_tool_specs",
+    "resolve_native_tool_name",
+)
+
+
+_NATIVE_TOOL_SEPARATOR = "__"
 
 
 def encode_native_tool_name(tool: str, action: str) -> str:
@@ -17,21 +25,21 @@ def encode_native_tool_name(tool: str, action: str) -> str:
         raise ValueError("tool must be a non-empty string")
     if not isinstance(action, str) or not action.strip():
         raise ValueError("action must be a non-empty string")
-    return f"{tool.strip()}{NATIVE_TOOL_SEPARATOR}{action.strip()}"
+    return f"{tool.strip()}{_NATIVE_TOOL_SEPARATOR}{action.strip()}"
 
 
-def decode_native_tool_name(name: str) -> tuple[str, str]:
+def _decode_native_tool_name(name: str) -> tuple[str, str]:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("native tool name must be a non-empty string")
     normalized = name.strip()
-    parts = normalized.split(NATIVE_TOOL_SEPARATOR)
+    parts = normalized.split(_NATIVE_TOOL_SEPARATOR)
     if len(parts) != 2 or not parts[0] or not parts[1]:
         raise ValueError(f"invalid BuddySwitch native tool name: {name}")
     return parts[0], parts[1]
 
 
 def resolve_native_tool_name(name: str) -> tuple[str, str]:
-    tool, action = decode_native_tool_name(name)
+    tool, action = _decode_native_tool_name(name)
     if tool not in registry.supported_tools() or action not in registry.supported_actions(tool):
         raise KeyError(f"unsupported BuddySwitch native env tool: {name}")
     return tool, action
@@ -53,7 +61,7 @@ def _format_rows(label: str, rows: tuple[str, ...]) -> list[str]:
     return [f"{label}: {row}" for row in rows]
 
 
-def native_tool_description(tool: str, definition: ToolDefinition, action: ActionDefinition) -> str:
+def _native_tool_description(tool: str, definition: ToolDefinition, action: ActionDefinition) -> str:
     rows: list[str] = [
         f"{definition.title} / {action.title}.",
         action.description,
@@ -81,11 +89,11 @@ def native_tool_description(tool: str, definition: ToolDefinition, action: Actio
     return "\n".join(row for row in rows if row)
 
 
-def native_tool_spec(tool: str, definition: ToolDefinition, action: ActionDefinition) -> dict[str, Any]:
+def _native_tool_spec(tool: str, definition: ToolDefinition, action: ActionDefinition) -> dict[str, Any]:
     return {
         "name": encode_native_tool_name(tool, action.name),
         "title": action.title,
-        "description": native_tool_description(tool, definition, action),
+        "description": _native_tool_description(tool, definition, action),
         "inputSchema": _schema_copy(action.input_schema),
     }
 
@@ -98,5 +106,5 @@ def list_native_tool_specs(*, exclude_tools: set[str] | None = None) -> list[dic
             continue
         definition = registry.get_definition(tool)
         for action in definition.actions:
-            specs.append(native_tool_spec(tool, definition, action))
+            specs.append(_native_tool_spec(tool, definition, action))
     return specs

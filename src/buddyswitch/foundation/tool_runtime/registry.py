@@ -1,33 +1,38 @@
-"""Registry, discovery, projection, and dispatch for black-box env.tool runtime."""
+"""Explicit registry, projection, and dispatch for the Foundation ToolHost."""
 
 from __future__ import annotations
 
 import copy
-import importlib
-import pkgutil
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-import buddyswitch.env.tools
+from buddyswitch.foundation.tool_runtime.definition import ActionDefinition
+from buddyswitch.foundation.tool_runtime.definition import TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED
+from buddyswitch.foundation.tool_runtime.definition import ToolDefinition
+from buddyswitch.foundation.tool_runtime.definition import ToolAuthorizer
+from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
+from buddyswitch.foundation.tool_runtime.definition import validate_registration
+from buddyswitch.foundation.tool_runtime import results as tool_results
 
-from buddyswitch.env.tool_runtime.definition import ActionDefinition
-from buddyswitch.env.tool_runtime.definition import TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED
-from buddyswitch.env.tool_runtime.definition import ToolDefinition
-from buddyswitch.env.tool_runtime.definition import ToolRegistration
-from buddyswitch.env.tool_runtime.definition import validate_definition
-from buddyswitch.env.tool_runtime.definition import validate_registration
-from buddyswitch.env.tool_runtime import results as tool_results
-
-_DEFINITION_CACHE: dict[str, ToolDefinition] = {}
 _EXPLICIT_REGISTRATIONS: dict[str, ToolRegistration] = {}
-_LOAD_ERRORS: dict[str, dict[str, str]] = {}
-_RETIRED_TOOL_IDS = frozenset({"task"})
 _ACTIVE_TASK_PROBE: Callable[[Any], bool] | None = None
+_AUTHORIZER: ToolAuthorizer | None = None
 
-
-def clear_cache() -> None:
-    _DEFINITION_CACHE.clear()
-    _LOAD_ERRORS.clear()
+__all__ = (
+    "action_mutates",
+    "compact_tool_affordances",
+    "configure_active_task_probe",
+    "configure_authorizer",
+    "configure_tool_registrations",
+    "dispatch_env_tool_request",
+    "env_tools_description",
+    "get_action_definition",
+    "get_definition",
+    "operation_semantics",
+    "supported_actions",
+    "supported_tools",
+    "tool_catalog_errors",
+)
 
 
 def configure_tool_registrations(
@@ -35,21 +40,22 @@ def configure_tool_registrations(
 ) -> None:
     if not isinstance(registrations, tuple):
         raise ValueError("tool registrations must be a tuple")
-    discovered = set(discover_tool_ids())
     configured: dict[str, ToolRegistration] = {}
     for registration in registrations:
         validate_registration(registration)
         tool_id = registration.definition.id
         if tool_id in configured:
             raise ValueError(f"duplicate explicit tool registration: {tool_id}")
-        if tool_id in discovered:
-            raise ValueError(
-                f"tool '{tool_id}' is both explicitly registered and package-discovered"
-            )
         configured[tool_id] = registration
     _EXPLICIT_REGISTRATIONS.clear()
     _EXPLICIT_REGISTRATIONS.update(configured)
-    clear_cache()
+
+
+def configure_authorizer(authorizer: ToolAuthorizer) -> None:
+    if not callable(authorizer):
+        raise ValueError("ToolHost authorizer must be callable")
+    global _AUTHORIZER
+    _AUTHORIZER = authorizer
 
 
 def configure_active_task_probe(
@@ -61,67 +67,15 @@ def configure_active_task_probe(
     _ACTIVE_TASK_PROBE = probe
 
 
-def discover_tool_ids() -> list[str]:
-    discovered: list[str] = []
-    for info in pkgutil.iter_modules(buddyswitch.env.tools.__path__):
-        if not info.ispkg:
-            continue
-        name = info.name
-        if name.startswith("_"):
-            continue
-        if name in _RETIRED_TOOL_IDS:
-            continue
-        discovered.append(name)
-    return sorted(set(discovered))
-
-
-def _tool_module_name(tool: str) -> str:
-    return f"buddyswitch.env.tools.{tool}.tool"
-
-
-def _load_tool_module(tool: str):
-    return importlib.import_module(_tool_module_name(tool))
-
-
-def load_definition(tool: str) -> ToolDefinition:
+def _load_definition(tool: str) -> ToolDefinition:
     registration = _EXPLICIT_REGISTRATIONS.get(tool)
-    if registration is not None:
-        return registration.definition
-    if tool in _DEFINITION_CACHE:
-        return _DEFINITION_CACHE[tool]
-    module_name = _tool_module_name(tool)
-    try:
-        module = _load_tool_module(tool)
-        definition = getattr(module, "DEFINITION", None)
-        invoke = getattr(module, "invoke", None)
-        if not callable(invoke):
-            raise TypeError(f"{module_name}.invoke must be callable")
-        if not isinstance(definition, ToolDefinition):
-            raise TypeError(f"{module_name}.DEFINITION must be ToolDefinition")
-        validate_definition(definition)
-        if definition.id != tool:
-            raise ValueError(f"{module_name}.DEFINITION.id must equal '{tool}'")
-        _DEFINITION_CACHE[tool] = definition
-        _LOAD_ERRORS.pop(tool, None)
-        return definition
-    except Exception as exc:
-        _LOAD_ERRORS[tool] = {
-            "tool": tool,
-            "module": module_name,
-            "error": str(exc),
-        }
-        raise
+    if registration is None:
+        raise KeyError(f"unsupported tool: {tool}")
+    return registration.definition
 
 
 def supported_tools() -> set[str]:
-    rows: set[str] = set(_EXPLICIT_REGISTRATIONS)
-    for tool in discover_tool_ids():
-        try:
-            load_definition(tool)
-        except Exception:
-            continue
-        rows.add(tool)
-    return rows
+    return set(_EXPLICIT_REGISTRATIONS)
 
 
 def _selected_tools(*, exclude_tools: set[str] | None = None) -> list[str]:
@@ -131,43 +85,25 @@ def _selected_tools(*, exclude_tools: set[str] | None = None) -> list[str]:
 
 def supported_actions(tool: str) -> set[str]:
     try:
-        definition = load_definition(tool)
+        definition = _load_definition(tool)
     except Exception:
         return set()
     return {row.name for row in definition.actions}
 
 
-def _action_spec_row(action: ActionDefinition) -> dict[str, Any]:
-    properties = action.input_schema.get("properties")
-    payload_fields: list[str] = []
-    if isinstance(properties, dict):
-        payload_fields = [name for name in properties if isinstance(name, str)]
-    return {
-        "name": action.name,
-        "payload_fields": payload_fields,
-        "kind": action.kind,
-        "mutates": action.mutates,
-        "task_requirement": action.task_requirement,
-        "required_permission": action.required_permission,
-        "authority": action.authority,
-        "preconditions": list(action.preconditions),
-        "returns": list(action.returns),
-    }
-
-
 def get_definition(tool: str) -> ToolDefinition:
-    return load_definition(tool)
+    return _load_definition(tool)
 
 
 def get_action_definition(tool: str, action: str) -> ActionDefinition:
-    definition = load_definition(tool)
+    definition = _load_definition(tool)
     for row in definition.actions:
         if row.name == action:
             return row
     raise KeyError(f"unsupported action: {tool}.{action}")
 
 
-def payload_fields_for_action(tool: str, action: str) -> list[str]:
+def _payload_fields_for_action(tool: str, action: str) -> list[str]:
     try:
         row = get_action_definition(tool, action)
     except Exception:
@@ -179,19 +115,7 @@ def payload_fields_for_action(tool: str, action: str) -> list[str]:
 
 
 def tool_catalog_errors() -> list[dict[str, str]]:
-    discovered = set(discover_tool_ids())
-    for tool in sorted(discovered):
-        try:
-            load_definition(tool)
-        except Exception:
-            continue
-    for stale in sorted(set(_LOAD_ERRORS) - discovered):
-        _LOAD_ERRORS.pop(stale, None)
-    return [_LOAD_ERRORS[name] for name in sorted(_LOAD_ERRORS)]
-
-
-def semantic_contract_errors() -> list[str]:
-    return [f"{row['module']}: {row['error']}" for row in tool_catalog_errors()]
+    return []
 
 
 def _action_semantic_row(tool: str, row: ActionDefinition) -> dict[str, Any]:
@@ -238,14 +162,14 @@ def _action_semantic_row(tool: str, row: ActionDefinition) -> dict[str, Any]:
 def env_tools_description(*, exclude_tools: set[str] | None = None) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for tool in _selected_tools(exclude_tools=exclude_tools):
-        definition = load_definition(tool)
+        definition = _load_definition(tool)
         operations: list[str] = []
         payload_fields: dict[str, list[str]] = {}
         input_schemas: dict[str, dict[str, Any]] = {}
         action_semantics: dict[str, dict[str, Any]] = {}
         for action in definition.actions:
             operations.append(action.name)
-            payload_fields[action.name] = payload_fields_for_action(tool, action.name)
+            payload_fields[action.name] = _payload_fields_for_action(tool, action.name)
             input_schemas[action.name] = _schema_copy(action.input_schema)
             action_semantics[action.name] = _action_semantic_row(tool, action)
 
@@ -287,7 +211,7 @@ def env_tools_description(*, exclude_tools: set[str] | None = None) -> dict[str,
 def operation_semantics(*, exclude_tools: set[str] | None = None) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for tool in _selected_tools(exclude_tools=exclude_tools):
-        definition = load_definition(tool)
+        definition = _load_definition(tool)
         for action in definition.actions:
             rows[f"{tool}.{action.name}"] = {
                 "kind": action.kind,
@@ -313,7 +237,7 @@ def operation_semantics(*, exclude_tools: set[str] | None = None) -> dict[str, d
 def compact_tool_affordances(*, exclude_tools: set[str] | None = None) -> dict[str, dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     for tool in _selected_tools(exclude_tools=exclude_tools):
-        definition = load_definition(tool)
+        definition = _load_definition(tool)
         rows[tool] = {
             "capability": definition.title,
             "object_model": definition.object_model,
@@ -461,15 +385,10 @@ def _active_task_required_rejection(
 
 def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) -> dict[str, Any]:
     registration = _EXPLICIT_REGISTRATIONS.get(tool)
-    if registration is not None:
-        invoke = registration.invoke
-        invoke_label = f"explicit tool '{tool}'"
-    else:
-        module = _load_tool_module(tool)
-        invoke = getattr(module, "invoke", None)
-        invoke_label = _tool_module_name(tool)
-        if not callable(invoke):
-            raise TypeError(f"{invoke_label}.invoke must be callable")
+    if registration is None:
+        raise KeyError(f"unsupported tool: {tool}")
+    invoke = registration.invoke
+    invoke_label = f"explicit tool '{tool}'"
     response = invoke(action=action, args=args, context=context)
     if not isinstance(response, dict):
         raise TypeError(f"{invoke_label}.invoke must return an object")
@@ -529,27 +448,8 @@ def dispatch_env_tool_request(
         )
     tool = raw_tool.strip().lower()
 
-    known_packages = set(discover_tool_ids())
     known_tools = supported_tools()
     if tool not in known_tools:
-        if tool in known_packages:
-            return _reject(
-                    tool=tool,
-                    action=None,
-                    current_identity=current_identity,
-                    active_role=active_role,
-                code="E_ENV_TOOL_CATALOG",
-                message=f"env.tool package '{tool}' exists but its definition is unavailable",
-                permission_boundary="env.tool.catalog",
-                human_summary=f"Tool '{tool}' package exists but its definition could not be loaded.",
-                why_blocked="selected tool definition failed to load",
-                retryable=False,
-                retry_guidance="Fix selected tool definition errors before retrying.",
-                allowed_next_actions=[
-                    "Use context.get to inspect tool_catalog and tool_catalog_errors.",
-                ],
-                correctable_fields=["tool"],
-            )
         return _reject(
             tool=tool,
             action=None,
@@ -610,10 +510,15 @@ def dispatch_env_tool_request(
         )
 
     action_definition = get_action_definition(tool, action)
-    from buddyswitch.env.tool_runtime import auth_feedback
-    from buddyswitch.env.tool_runtime import role_auth
+    from buddyswitch.foundation.tool_runtime import auth_feedback
 
-    auth_decision = role_auth.authorize(action_definition.required_permission, runtime_actor.role_id, manifest)
+    if _AUTHORIZER is None:
+        raise RuntimeError("ToolHost authorizer is not configured")
+    auth_decision = _AUTHORIZER(
+        action_definition.required_permission,
+        runtime_actor.role_id,
+        manifest,
+    )
     if not auth_decision.allowed:
         return auth_feedback.role_auth_rejection(
             tool=tool,
@@ -643,7 +548,7 @@ def dispatch_env_tool_request(
             correctable_fields=["args"],
         )
 
-    from buddyswitch.env.tool_runtime.context import InvocationFact, ToolContext
+    from buddyswitch.foundation.tool_runtime.context import InvocationFact, ToolContext
 
     invocation_payload = invocation or {}
     if not isinstance(invocation_payload, dict):
@@ -700,6 +605,5 @@ def dispatch_env_tool_request(
             retry_guidance="Fix the selected tool implementation before retrying this action.",
             allowed_next_actions=[
                 "Use another registered tool that does not depend on this implementation.",
-                "Inspect context.get.tool_catalog_errors for runtime load errors.",
             ],
         )

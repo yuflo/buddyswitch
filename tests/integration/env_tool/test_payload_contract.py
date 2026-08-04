@@ -14,9 +14,9 @@ ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as catalog  # noqa: E402
-from buddyswitch.env.tool_runtime import role_auth  # noqa: E402
-from buddyswitch.env.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as catalog  # noqa: E402
+from buddyswitch.runtime_support import role_auth  # noqa: E402
+from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
@@ -73,14 +73,15 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             manifest_path=MANIFEST,
         )
 
-    def test_payload_field_helper_matches_registry(self) -> None:
+    def test_catalog_payload_fields_match_definitions(self) -> None:
+        descriptions = catalog.env_tools_description()
         for tool in sorted(catalog.supported_tools()):
             for action in sorted(catalog.supported_actions(tool)):
                 with self.subTest(tool=tool, action=action):
                     action_def = catalog.get_action_definition(tool, action)
                     expected = sorted((action_def.input_schema.get("properties") or {}).keys())
                     self.assertEqual(
-                        set(catalog.payload_fields_for_action(tool, action)),
+                        set(descriptions[tool]["payload_fields"][action]),
                         set(expected),
                     )
 
@@ -98,11 +99,24 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
 
     def test_every_action_rejects_unregistered_payload_field_without_state_change(self) -> None:
         manifest = env_manifest.load_manifest(MANIFEST)
+        manifest_roles = {
+            role["id"]
+            for role in manifest.get("roles", [])
+            if isinstance(role, dict) and isinstance(role.get("id"), str)
+        }
         for tool in sorted(catalog.supported_tools()):
             for action in sorted(catalog.supported_actions(tool)):
                 with self.subTest(tool=tool, action=action):
                     action_def = catalog.get_action_definition(tool, action)
-                    allowed_roles = role_auth.allowed_roles_for_permission(action_def.required_permission, manifest)
+                    allowed_roles = {
+                        role
+                        for role in manifest_roles
+                        if role_auth.authorize(
+                            action_def.required_permission,
+                            role,
+                            manifest,
+                        ).allowed
+                    }
                     self.assertTrue(allowed_roles, msg=f"{tool}.{action}")
                     active_role = sorted(allowed_roles)[0]
                     response = self._dispatch(
@@ -115,25 +129,12 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
                     self.assertIs(response.get("state_changed"), False, msg=response)
                     self.assertIn("__unexpected_payload_field__", json.dumps(response, ensure_ascii=True))
 
-    def test_services_do_not_define_duplicate_payload_field_sets_and_legacy_message_domain_is_retired(self) -> None:
-        service_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
-        violations: list[str] = []
-        for path in sorted(service_root.glob("*/service.py")):
-            if path.name != "service.py":
-                continue
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Assign):
-                    continue
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id.endswith("_FIELDS"):
-                        violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: {target.id}")
-
+    def test_retired_tool_package_and_legacy_message_domain_are_absent(self) -> None:
+        retired_tool_root = ROOT / "src" / "buddyswitch" / "env" / "tools"
         message_domain = ROOT / "src" / "buddyswitch" / "env" / "domain" / "messages.py"
-        if message_domain.exists():
-            violations.append(f"{message_domain.relative_to(ROOT)}: legacy actor-address message domain must stay retired")
 
-        self.assertEqual(violations, [], msg="\n".join(violations))
+        self.assertFalse(retired_tool_root.exists(), msg=retired_tool_root)
+        self.assertFalse(message_domain.exists(), msg=message_domain)
 
     def test_current_im_surfaces_do_not_contain_retired_processing_model(self) -> None:
         current_surfaces = (
@@ -142,7 +143,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             "src/buddyswitch/modules/communication/private/adapters/tool/tool.py",
             "src/buddyswitch/modules/communication/private/adapters/tool/_impl.py",
             "src/buddyswitch/modules/communication/private/adapters/actor/im_client.py",
-            "src/buddyswitch/env/tool_runtime/role_auth.py",
+            "src/buddyswitch/runtime_support/role_auth.py",
             "src/buddyswitch/modules/communication/private/adapters/web/external_im_session.py",
             "src/buddyswitch/modules/communication/private/adapters/web/im_http_router.py",
             "src/buddyswitch/modules/task/private/adapters/goal/handler.py",

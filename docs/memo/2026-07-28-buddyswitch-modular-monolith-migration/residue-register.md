@@ -49,18 +49,18 @@ Statuses:
 
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
-| R-FND-001 | REMOVING — all component portions are closed; C1 removes ToolHost's Role implementation import and later S5 checkpoints remove any remaining concrete host imports | S2–S5 | C1 acceptance plus S5 final foundation import proof |
-| R-FND-002 | REMOVING — all eight current Tools are explicitly registered and the discovered set is empty; the tracked global package root, scanner, dynamic loader and discovery-shaped tests remain | S2–S5 | C1 explicit-only catalog and old-root absence proof |
-| R-FND-003 | REMOVING — current broad ToolContext still exposes repo/domain/Actor-private/Browser bags; C1 narrows it to used host facts/capabilities | S2–S5 | C1 narrow-context consumer and absence proof |
+| R-FND-001 | C1 TOOLHOST PORTION CLOSED — Foundation ToolHost imports no component or Role implementation; later S5 checkpoints own remaining concrete host imports | S2–S5 | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; final S5 foundation import proof |
+| R-FND-002 | CLOSED — all eight current Tools are explicitly registered once; package scanner, dynamic loader, discovery APIs, old global Tool package root and discovery-shaped guidance are absent | S2–S5 | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md` |
+| R-FND-003 | CLOSED — ToolContext contains only production-consumed host facts/capabilities and no repository/domain/Browser/private service-locator bag or unused alias/helper | S2–S5 | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md` |
 | R-FND-004 | Task/Track Actor Console and Communication Web route/worker portions CLOSED through typed contributions; other product projections and retry coupling remain in Web implementation | S2–S5 | accepted component lanes; WebHost plus remaining owner contributions |
 | R-FND-005 | CLOSED — iMessage worker lifetime is a passive Communication contribution run by generic WebHost lifecycle | S4 Communication | `04-independent-component-waves-plan/communication/S4-COMMUNICATION-ACCEPTANCE.md` |
 | R-FND-006 | Demand, Task and Track portions CLOSED through owner CLI contributions; switches for unmigrated products remain | S2–S5 | S2/S3/Track–Artifact acceptance; remaining owner command contributions |
 | R-FND-007 | Browser ownership fragmented across lifecycle/Daemon/Broker/proxy | S1/S5 | one Actor browser-runtime owner |
 | R-FND-008 | Demand, Task, Track, Artifact and Communication portions CLOSED through typed cleanup contributions; attribution for unmigrated products remains | S2–S5 | accepted component lanes; remaining module cleanup contributions |
 | R-FND-009 | Communication-owned IM identity portion CLOSED; remaining foundation identity is spread across lifecycle/daemon/Web | S1/S5 | Communication acceptance; final foundation Identity owner |
-| R-FND-010 | REMOVING — Actor-private root derivation is mixed into a repository bag on ToolContext; C1 replaces it with an explicit safe host fact | S1/S5 | C1 exact value/capability boundary proof |
+| R-FND-010 | CLOSED — ToolContext exposes the exact resolved Actor-private root as a host fact; no repository bag owns that access | S1/S5 | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md` |
 | R-FND-011 | CONFIRMED — S5 refresh classified remaining technical roots into seven owner-bounded checkpoints | S1–S5 | C1–C7 acceptance and generic final dependency/topology proofs |
-| R-FND-012 | REMOVING — all component obsolete paths are closed; tracked empty Tool package root and obsolete ToolHost technical paths are C1 inputs, later technical roots retain their checkpoint owners | owning stage/S5 | C1 old Tool paths absent; S5 final foundation absence proof |
+| R-FND-012 | C1 TOOLHOST PORTION CLOSED — old Tool runtime/package/client/MCP paths and the zero-consumer Broker facade are absent; later technical roots retain their checkpoint owners | owning stage/S5 | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; S5 final foundation absence proof |
 
 ## Role residue
 

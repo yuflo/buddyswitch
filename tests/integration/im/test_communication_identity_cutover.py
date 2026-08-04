@@ -12,10 +12,11 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
+from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
 from buddyswitch.env.repos import identities  # noqa: E402
 from buddyswitch.modules.communication.private.state import messages as message_repo  # noqa: E402
-from buddyswitch.env.tool_runtime import context as runtime_context  # noqa: E402
-from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.foundation.tool_runtime import context as runtime_context  # noqa: E402
+from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_actor_delivery  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
 from buddyswitch.launcher import central_daemon_core  # noqa: E402
@@ -88,11 +89,20 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestCase):
         original = daemon_client.deliver_signal
         daemon_client.deliver_signal = lambda *, signal: captured.setdefault("signal", signal) or {"delivery_status": "delivered"}
         try:
-            access = runtime_context.SignalDeliveryAccess(
-                current_identity=runtime_context.IdentityRef(id="act-dev-signal-source", type="actor"),
-                role_id="dev",
+            context = runtime_context.ToolContext.from_identity_profile(
+                actor_identity_profile=ActorIdentityProfile(
+                    identity=IdentityRef(id="act-dev-signal-source", type="actor"),
+                    role_id="dev",
+                ),
+                instance_json=self.runtime_root / "instances" / "act-dev-signal-source" / "instance.json",
+                instance_payload={
+                    "actor_id": "act-dev-signal-source",
+                    "role": "dev",
+                    "workspace_dir": str(self.runtime_root / "workspace"),
+                },
+                manifest={},
             )
-            access.deliver_signal(
+            context.signal_delivery.deliver_signal(
                 signal_type="track.comment.added",
                 target_identity_id="act-pm-signal-target",
                 target_role_id="pm",

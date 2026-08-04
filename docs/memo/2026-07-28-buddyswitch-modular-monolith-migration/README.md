@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 READY — C1 TOOLHOST ONLY
-> Runtime authorization: `BS-MM-S5-TOOLHOST-R1-20260804-01` only
+> Current state: S0–S4 ACCEPTED; S5 C1 ACCEPTED — C2 PREPARATION ONLY
+> Runtime authorization: none
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -12,7 +12,8 @@ Read:
 4. `../2026-07-28-buddyswitch-modular-monolith-migration-roadmap.md`;
 5. `00-coordination-hub.md`;
 6. `00-execution-governance.md`;
-7. only the current stage Goal Packet, charter and exact implementation plan.
+7. only the current stage Goal Packet, charter and named return review. Historical
+   implementation plans provide context, not execution authority.
 
 ## Stage charters
 
@@ -23,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | READY — C1 TOOLHOST ONLY |
+| S5 | `05-foundation-convergence.md` | C1 ACCEPTED — C2 PREPARATION ONLY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -162,10 +163,17 @@ than one safe repository-wide merge unit. The ordered cutover blueprint is at
 `05-foundation-convergence-plan/README.md`. C1 converges only the explicit
 ToolHost, narrow ToolContext and generic Daemon client; source/consumer
 snapshot, representation-complete manifest, affected baselines, topology
-preflight, implementation plan and READY review have passed. Packet
-`BS-MM-S5-TOOLHOST-R1-20260804-01` is the sole execution authority. C2–C7 and
-S6 remain blocked.
+preflight, implementation plan and READY review admitted R1. R1 returned a
+runnable candidate, but hub review rejected its unused-surface residue and the
+coordinator's path-prescriptive handoff model. R2 removed the unearned
+ToolContext/error/Broker surfaces, preserved all eight Tool contracts, passed
+affected proof and one replacement frozen FINAL after an owner-correct Search
+repair, and is accepted in
+`05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`. Both C1
+packets are consumed. C2 source refresh and READY preparation are unblocked;
+C2 implementation, C3–C7 and S6 remain blocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
-stage, or one explicitly independent S4 lane, with its exact plan and relevant
-ledger/residue rows.
+stage or owner-bounded lane with an outcome, semantic authority boundary,
+protected contracts and proof obligations. Historical implementation plans are
+context, not commands.

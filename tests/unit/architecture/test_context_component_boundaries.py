@@ -25,7 +25,7 @@ RETIRED_PATHS = (
     Path("src/buddyswitch/env/tools/context"),
 )
 ALLOWED_CONTEXT_IMPORT_PREFIXES = (
-    "buddyswitch.env.tool_runtime",
+    "buddyswitch.foundation.tool_runtime",
     "buddyswitch.foundation.composition",
     "buddyswitch.modules.artifact.public",
     "buddyswitch.modules.communication.public",
@@ -33,6 +33,7 @@ ALLOWED_CONTEXT_IMPORT_PREFIXES = (
     "buddyswitch.modules.task.public",
     "buddyswitch.modules.track.public",
     "buddyswitch.runtime_support.env_profiles",
+    "buddyswitch.runtime_support.role_auth",
 )
 
 
@@ -93,7 +94,7 @@ def test_context_is_one_passive_tool_contribution_selected_once_and_last() -> No
         CONTEXT,
         DAEMON_HANDLER_ORDER,
     )
-    from buddyswitch.env.tool_runtime import registry
+    from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.composition import ModuleAssembly
 
     assert isinstance(CONTEXT, ModuleAssembly)
@@ -133,7 +134,6 @@ def test_context_is_one_passive_tool_contribution_selected_once_and_last() -> No
     assert application.modules[-1] is CONTEXT
     assert [module.name for module in application.modules].count("context") == 1
     assert [tool.definition.id for tool in application.tools].count("context") == 1
-    assert "context" not in registry.discover_tool_ids()
     assert DAEMON_HANDLER_ORDER == (
         "demand_triage",
         "task_goal",
@@ -197,7 +197,7 @@ def test_context_private_depends_only_on_public_components_and_generic_runtime()
 
 
 def test_context_specific_shared_host_residue_is_absent() -> None:
-    host_path = REPO_ROOT / "src/buddyswitch/env/tool_runtime/context.py"
+    host_path = REPO_ROOT / "src/buddyswitch/foundation/tool_runtime/context.py"
     tree = ast.parse(host_path.read_text(encoding="utf-8"), filename=str(host_path))
     classes = {
         node.name: node

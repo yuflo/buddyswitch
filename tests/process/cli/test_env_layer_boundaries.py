@@ -29,7 +29,7 @@ PERMISSION_PROFILE = "buddyswitch-runtime"
 
 def _tool_roots() -> dict[str, Path]:
     application = build_application()
-    explicit_tool_roots = {
+    return {
         registration.definition.id: (
             ROOT
             / "src"
@@ -37,16 +37,13 @@ def _tool_roots() -> dict[str, Path]:
         )
         for registration in application.tools
     }
-    dynamic_tool_roots = {
-        path.name: path
-        for path in (ROOT / "src/buddyswitch/env/tools").iterdir()
-        if path.is_dir()
-        and not path.name.startswith("_")
-        and (path / "__init__.py").is_file()
+
+
+def _tool_import_prefixes() -> dict[str, str]:
+    return {
+        registration.definition.id: registration.invoke.__module__.rsplit(".", 1)[0]
+        for registration in build_application().tools
     }
-    assert not (explicit_tool_roots.keys() & dynamic_tool_roots.keys())
-    tool_roots = {**dynamic_tool_roots, **explicit_tool_roots}
-    return tool_roots
 
 
 class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
@@ -78,7 +75,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
 
     def test_tool_package_cross_imports_are_forbidden(self) -> None:
         tool_roots = _tool_roots()
-        tool_ids = set(tool_roots)
+        tool_import_prefixes = _tool_import_prefixes()
         violations: list[str] = []
         for tool, package_dir in sorted(tool_roots.items()):
             if not package_dir.is_dir():
@@ -90,26 +87,23 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
-                            if alias.name.startswith("buddyswitch.env.tools."):
-                                parts = alias.name.split(".")
-                                if len(parts) >= 3:
-                                    target = parts[2]
-                                    if target in tool_ids and target != tool:
-                                        violations.append(f"{rel}:{node.lineno}: import {alias.name}")
+                            for target, prefix in tool_import_prefixes.items():
+                                if target != tool and (
+                                    alias.name == prefix
+                                    or alias.name.startswith(prefix + ".")
+                                ):
+                                    violations.append(
+                                        f"{rel}:{node.lineno}: import {alias.name}"
+                                    )
                     elif isinstance(node, ast.ImportFrom):
                         module = node.module or ""
-                        if module == "buddyswitch.env.tools":
-                            for alias in node.names:
-                                if alias.name in tool_ids and alias.name != tool:
-                                    violations.append(
-                                        f"{rel}:{node.lineno}: from buddyswitch.env.tools import {alias.name}"
-                                    )
-                        elif module.startswith("buddyswitch.env.tools."):
-                            parts = module.split(".")
-                            if len(parts) >= 3:
-                                target = parts[2]
-                                if target in tool_ids and target != tool:
-                                    violations.append(f"{rel}:{node.lineno}: from {module} import ...")
+                        for target, prefix in tool_import_prefixes.items():
+                            if target != tool and (
+                                module == prefix or module.startswith(prefix + ".")
+                            ):
+                                violations.append(
+                                    f"{rel}:{node.lineno}: from {module} import ..."
+                                )
 
         self.assertEqual(violations, [], msg="\n".join(violations))
 
@@ -376,20 +370,21 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         self.assertFalse(raw_probe.exists())
 
     def test_env_tool_services_do_not_write_files_directly(self) -> None:
-        completed = run_process(
-            [
-                "rg",
-                "-n",
-                r"\.mkdir\(|\.write_text\(|\.write_bytes\(|\.unlink\(|os\.replace\(|NamedTemporaryFile\(",
-                "src/buddyswitch/env/tools",
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
+        mutation_terms = (
+            ".mkdir(",
+            ".write_text(",
+            ".write_bytes(",
+            ".unlink(",
+            "os.replace(",
+            "NamedTemporaryFile(",
         )
-        self.assertIn(completed.returncode, {0, 1}, msg=completed.stderr)
-        hits = [line for line in completed.stdout.splitlines() if line.strip()]
+        hits: list[str] = []
+        for root in _tool_roots().values():
+            for path in sorted(root.rglob("*.py")):
+                source = path.read_text(encoding="utf-8")
+                for term in mutation_terms:
+                    if term in source:
+                        hits.append(f"{path.relative_to(ROOT)}: {term}")
         self.assertEqual(hits, [], msg="\n".join(hits))
 
     def test_object_state_sibling_imports_are_restricted_to_runtime_files(self) -> None:
@@ -496,7 +491,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
         roots = [
             ROOT / "src/buddyswitch/env/domain",
             ROOT / "src/buddyswitch/env/repos",
-            ROOT / "src/buddyswitch/env/tools",
             *(
                 ROOT / "src" / "buddyswitch" / "modules" / module.name
                 for module in application.modules

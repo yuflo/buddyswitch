@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from buddyswitch.env.tool_runtime.definition import ToolRegistration
+    from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
     from buddyswitch.launcher.cli_contract import CliCommandRegistration
     from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
     from buddyswitch.launcher.notification_center import InboundSourceRegistration

@@ -9,7 +9,7 @@ import sys
 from typing import Any, Callable
 
 
-from buddyswitch.env.tool_runtime import native_mcp  # noqa: E402
+from buddyswitch.foundation.tool_runtime import native_mcp  # noqa: E402
 from buddyswitch.runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 
 

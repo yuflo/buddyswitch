@@ -33,9 +33,9 @@ RETIRED_PATHS = (
     Path("tests/integration/env_tool/test_response_search.py"),
 )
 APPLICATION_COMPOSITION = Path("src/buddyswitch/application/composition.py")
-TOOL_CONTEXT = Path("src/buddyswitch/env/tool_runtime/context.py")
+TOOL_CONTEXT = Path("src/buddyswitch/foundation/tool_runtime/context.py")
 ALLOWED_SEARCH_IMPORT_PREFIXES = (
-    "buddyswitch.env.tool_runtime",
+    "buddyswitch.foundation.tool_runtime",
     "buddyswitch.foundation.composition",
     "buddyswitch.modules.search.private.adapters.tool",
     "buddyswitch.runtime_support.env_profiles",
@@ -72,7 +72,7 @@ def test_search_has_one_physical_owner_and_no_retired_live_path() -> None:
 def test_search_is_one_passive_tool_contribution_selected_once() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import COMPONENTS
-    from buddyswitch.env.tool_runtime import registry
+    from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.composition import ModuleAssembly
     from buddyswitch.modules.search.module import SEARCH
 
@@ -100,7 +100,6 @@ def test_search_is_one_passive_tool_contribution_selected_once() -> None:
         tool.definition.id
         for tool in application.tools
     ].count("search") == 1
-    assert "search" not in registry.discover_tool_ids()
     assert [handler.name for handler in application.daemon_handlers] == [
         "demand_triage",
         "task_goal",
@@ -134,28 +133,6 @@ def test_generic_hosts_import_no_search_private_module() -> None:
                     (path.relative_to(REPO_ROOT).as_posix(), imported)
                 )
     assert violations == []
-
-
-def test_browser_host_has_no_search_request_placeholder() -> None:
-    context_path = REPO_ROOT / TOOL_CONTEXT
-    tree = ast.parse(
-        context_path.read_text(encoding="utf-8"),
-        filename=str(context_path),
-    )
-    browser_access = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "BrowserAccess"
-    )
-    methods = {
-        node.name
-        for node in browser_access.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    assert "request" not in methods
-    assert "status" in methods
-    assert "issue_evidence_token" not in methods
-    assert "approve_downgrade" not in methods
 
 
 def test_current_guidance_does_not_teach_the_retired_search_path() -> None:

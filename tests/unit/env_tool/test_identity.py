@@ -12,7 +12,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_router  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 

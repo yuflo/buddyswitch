@@ -108,7 +108,7 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
 
     def test_tool_context_uses_identity_profile_without_actor_address(self) -> None:
         from buddyswitch.env.domain.identity import ActorIdentityProfile
-        from buddyswitch.env.tool_runtime.context import ToolContext
+        from buddyswitch.foundation.tool_runtime.context import ToolContext
 
         instance_root = self.runtime_root / "instances" / "act-dev-context"
         instance_json = instance_root / "actor.json"

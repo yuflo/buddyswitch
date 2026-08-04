@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from .tool import DEFINITION
-from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.modules.track.private.domain import (
     track_artifact_relations,
     track_comments as track_comment_rules,

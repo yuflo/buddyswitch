@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-from buddyswitch.env.tool_runtime import daemon_client  # noqa: E402
+from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.modules.task.private.adapters.goal import protocol  # noqa: E402
 
 TASK_GOAL_RESPONSE_TIMEOUT_SECONDS = 65.0

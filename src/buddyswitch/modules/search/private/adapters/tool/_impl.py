@@ -7,9 +7,8 @@ from typing import Any, TypedDict
 from urllib.parse import urlencode
 
 from buddyswitch.runtime_support import env_profiles
-from buddyswitch.env.tool_runtime.context import default_manifest_path as DEFAULT_MANIFEST
 from .tool import DEFINITION
-from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime import results as tool_results
 
 ALLOWED_BACKENDS = ("browser", "search_api")
 ALLOWED_ENGINES = ("google", "web", "reddit", "x")
@@ -42,10 +41,14 @@ class SearchServiceContext(TypedDict):
 
 
 def _load_search_boundary(context: SearchServiceContext) -> dict[str, Any]:
-    profile = env_profiles.require_env_profile(
-        context["active_role"],
-        manifest_path=context.get("manifest_path") or DEFAULT_MANIFEST,
-    )
+    manifest_path = context.get("manifest_path")
+    if manifest_path is None:
+        profile = env_profiles.require_env_profile(context["active_role"])
+    else:
+        profile = env_profiles.require_env_profile(
+            context["active_role"],
+            manifest_path=manifest_path,
+        )
     tool_capability = profile.get("tool_capability")
     if not isinstance(tool_capability, dict):
         raise ValueError("env profile tool_capability must be an object")

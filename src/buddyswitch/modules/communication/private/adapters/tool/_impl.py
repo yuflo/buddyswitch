@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from buddyswitch.env.tool_runtime import results as tool_results
+from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.modules.communication.private.adapters.actor import (
     im_client as im_client_module,
 )

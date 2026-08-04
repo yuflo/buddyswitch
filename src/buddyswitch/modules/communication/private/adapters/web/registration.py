@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from buddyswitch.env.domain.identity import ActorIdentityProfile
-from buddyswitch.env.tool_runtime import daemon_client
+from buddyswitch.foundation.daemon import client as daemon_client
 from buddyswitch.launcher.web_contracts import (
     ActorConsoleSectionRegistration,
     WebHostAccess,

@@ -11,8 +11,8 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.env.tool_runtime import registry as tool_registry  # noqa: E402
-from buddyswitch.env.tool_runtime import role_auth  # noqa: E402
+from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
+from buddyswitch.runtime_support import role_auth  # noqa: E402
 
 
 class RoleActionAuthPolicyTests(unittest.TestCase):
@@ -23,20 +23,26 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
         )
         self.operation_semantics = tool_registry.operation_semantics()
 
+    def _allowed_roles(self, required_permission: str) -> frozenset[str]:
+        return frozenset(
+            role
+            for role in self.roles
+            if role_auth.authorize(required_permission, role, self.manifest).allowed
+        )
+
     def test_manifest_roles_are_runtime_roles(self) -> None:
-        self.assertEqual(self.roles, role_auth.manifest_role_ids(self.manifest))
         self.assertEqual(self.roles, frozenset({"market", "pm", "design", "dev", "test"}))
 
     def test_policy_covers_every_registered_action_permission(self) -> None:
         for action_id, semantics in self.operation_semantics.items():
             required_permission = semantics["required_permission"]
             with self.subTest(action=action_id, required_permission=required_permission):
-                allowed_roles = role_auth.allowed_roles_for_permission(required_permission, self.manifest)
+                allowed_roles = self._allowed_roles(required_permission)
                 self.assertTrue(allowed_roles)
                 self.assertLessEqual(allowed_roles, self.roles)
 
     def test_none_permission_allows_every_manifest_role(self) -> None:
-        self.assertEqual(role_auth.allowed_roles_for_permission("none", self.manifest), self.roles)
+        self.assertEqual(self._allowed_roles("none"), self.roles)
         for role in self.roles:
             decision = role_auth.authorize("none", role, self.manifest)
             with self.subTest(role=role):
@@ -50,7 +56,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
     def test_track_owner_permissions_allow_every_manifest_role_at_policy_layer(self) -> None:
         for permission in ("track.create", "track.update_requirements", "track.update_status", "track.archive", "track.resolve_comment_thread"):
             with self.subTest(permission=permission):
-                self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
+                self.assertEqual(self._allowed_roles(permission), self.roles)
                 self.assertTrue(role_auth.authorize(permission, "pm", self.manifest).allowed)
                 self.assertTrue(role_auth.authorize(permission, "dev", self.manifest).allowed)
 
@@ -68,7 +74,7 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "task_sys.create",
         ):
             with self.subTest(permission=permission):
-                self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
+                self.assertEqual(self._allowed_roles(permission), self.roles)
 
     def test_every_demand_sys_permission_allows_every_manifest_role(self) -> None:
         expected = {
@@ -78,12 +84,16 @@ class RoleActionAuthPolicyTests(unittest.TestCase):
             "demand_sys.complete",
         }
         self.assertEqual(
-            {permission for permission in role_auth.COMMON_ROLE_PERMISSIONS if permission.startswith("demand_sys.")},
+            {
+                semantics["required_permission"]
+                for action_id, semantics in self.operation_semantics.items()
+                if action_id.startswith("demand_sys.")
+            },
             expected,
         )
         for permission in expected:
             with self.subTest(permission=permission):
-                self.assertEqual(role_auth.allowed_roles_for_permission(permission, self.manifest), self.roles)
+                self.assertEqual(self._allowed_roles(permission), self.roles)
 
     def test_unknown_active_role_is_denied(self) -> None:
         decision = role_auth.authorize("track.read", "ghost", self.manifest)
