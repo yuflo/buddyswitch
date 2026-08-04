@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 SOURCE REFRESH
-> Runtime authorization: none; no S5 packet exists
+> Current state: S0–S4 ACCEPTED; S5 READY — C1 TOOLHOST ONLY
+> Runtime authorization: `BS-MM-S5-TOOLHOST-R1-20260804-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -23,7 +23,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | SOURCE REFRESH |
+| S5 | `05-foundation-convergence.md` | READY — C1 TOOLHOST ONLY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -156,6 +156,15 @@ and is accepted in
 `04-independent-component-waves-plan/context/S4-CONTEXT-ACCEPTANCE.md`.
 Every S4 packet is consumed. S5 source refresh is unblocked, but no S5
 implementation is authorized before a fresh READY review.
+
+The S5 refresh found several independent Foundation lifecycle owners rather
+than one safe repository-wide merge unit. The ordered cutover blueprint is at
+`05-foundation-convergence-plan/README.md`. C1 converges only the explicit
+ToolHost, narrow ToolContext and generic Daemon client; source/consumer
+snapshot, representation-complete manifest, affected baselines, topology
+preflight, implementation plan and READY review have passed. Packet
+`BS-MM-S5-TOOLHOST-R1-20260804-01` is the sole execution authority. C2–C7 and
+S6 remain blocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage, or one explicitly independent S4 lane, with its exact plan and relevant

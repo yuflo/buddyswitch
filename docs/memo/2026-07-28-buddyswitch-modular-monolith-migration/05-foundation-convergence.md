@@ -1,9 +1,13 @@
 # S5 Foundation Convergence Charter
 
-> Current state: SOURCE REFRESH
+> Current state: READY — C1 TOOLHOST ONLY
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: none; READY preparation has not completed
-> Merge unit: final shared-host convergence
+> Execution authority: `BS-MM-S5-TOOLHOST-R1-20260804-01` only
+> Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
+
+The executable blueprint and current handoff live at
+`05-foundation-convergence-plan/README.md`. The charter's acceptance sentence
+still applies to the whole stage; C1 alone does not accept S5.
 
 ## Acceptance sentence
 
@@ -32,6 +36,9 @@
 - component Public and contribution contracts frozen;
 - no owner work deferred from S2–S4;
 - foundation plan proves behavior preservation.
+
+The stage entry gate is satisfied. Each later Foundation checkpoint still
+requires its own current-source READY gate before execution.
 
 ## Proof
 

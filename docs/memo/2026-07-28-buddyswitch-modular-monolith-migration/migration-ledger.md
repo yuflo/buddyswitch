@@ -8,12 +8,12 @@
 | Communication acceptance | `communication/S4-COMMUNICATION-ACCEPTANCE.md`; R3 exact `935615ad05c443fb9c730fc18430fca3`; cleanup/architecture `97e2ed6734e34e39b967e1ab7369a0db`; CLI/package `9adbb959051643edb648678801b56d57`; FINAL `ffefbc012a5d45fa887cd10c9520229c` |
 | Evidence acceptance | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` |
 | Active stage | S5 — Foundation Convergence |
-| State | SOURCE REFRESH |
-| Runtime migration authorized | none; no S5 packet exists |
+| State | READY — C1 TOOLHOST ONLY |
+| Runtime migration authorized | `BS-MM-S5-TOOLHOST-R1-20260804-01` only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | exact S5 source/consumer/hotspot trace and READY review |
+| Next gate | independent C1 execution return and hub acceptance review |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules |
 
 ## Stage ledger
@@ -25,7 +25,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | SOURCE REFRESH | S4 | coordinating hub | exact remaining shared hotspot list and READY review |
+| S5 Foundation | READY — C1 TOOLHOST ONLY | S4 | coordinating hub | execute/review ToolHost only; C2–C7 blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -354,6 +354,8 @@ state. Track–Artifact is accepted in
 | 2026-07-31 | S4 Evidence | REPLANNING — TERMINAL LOOP | READY — EVIDENCE R2 ONLY | coordinating hub | real Broker preflight reproduced the latent nonexistent-`feedback` mismatch, selected canonical ToolResult projection, classified one adapter and one process-test write, and consumed R1 |
 | 2026-08-03 | S4 Evidence | READY — EVIDENCE R2 ONLY | ACCEPTED | coordinating hub | frozen source/runtime identities reproduced; canonical command result, real-Broker success/failure, architecture replacement, cleanup and one FINAL accepted; both packets consumed |
 | 2026-08-04 | S4 Communication | READY — R3 FIX_AFTER_FINAL ONLY | ACCEPTED | coordinating hub | exact source/runtime identity reproduced; Communication cutover, recursive cleanup, effect-time destructive authority, truthful results and one frozen replacement FINAL accepted; all packets consumed |
+| 2026-08-04 | S4 Context / S4 | READY | ACCEPTED | coordinating hub | exact source/runtime identity, direct/affected/frozen FINAL, one final Context owner and retired host residue accepted; S4 closed |
+| 2026-08-04 | S5 Foundation | SOURCE REFRESH | READY — C1 TOOLHOST ONLY | coordinating hub | seven owner-bounded checkpoints selected; C1 source/consumer manifest, baselines, topology preflight, plan and READY review passed |
 
 ## Checkpoint record
 
@@ -398,6 +400,7 @@ state. Track–Artifact is accepted in
 | 2026-08-04 | S4 Context first preparation | REJECTED BEFORE EXECUTION | `context/S4-CONTEXT-PRE-HANDOFF-AUDIT.md`; packet `BS-MM-S4-CONTEXT-R1-20260804-01` consumed | correct intent/evidence/identity defects before executor time is spent |
 | 2026-08-04 | S4 Context handoff | READY | `context/S4-CONTEXT-READY-REVIEW.md`; direct `ec4ae6b40a3d4fcaa8494049c609d35c`; affected `58658371b1244b428ea3cccfb24eb393`; topology `S4CONTEXTP-20260804-02`; packet `BS-MM-S4-CONTEXT-R1-20260804-02` | user starts one independent Context task; hub pauses without polling |
 | 2026-08-04 | S4 Context and stage acceptance | ACCEPTED | `context/S4-CONTEXT-ACCEPTANCE.md`; structure `fec6cceada1d4bd6836bead804046587`; direct `fe22eecc03234f30af665678671a7ea6`; affected `8895133bfd2d4f74859801a9ed9c3fea`; FINAL `57bb518bb531437e95038f9ccf91f050` | checkpoint S4, then refresh S5 Foundation source/consumers/residue; never resume either Context packet |
+| 2026-08-04 | S5 C1 ToolHost handoff | READY | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-READY-REVIEW.md`; ToolHost `fc856633c1f942b0a15f7d2e13dd74ef`; Web/cleanup `d9048d5075ee4d529580f5a32c216eda`; Browser `81ea8226d61f44908ac341e3ba679724`; topology `S5TOOLP-20260804-01`; packet `BS-MM-S5-TOOLHOST-R1-20260804-01` | user starts one independent C1 task; hub pauses without polling; C2–C7 remain blocked |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -419,11 +422,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation
-Master state: SOURCE REFRESH
-Goal Packet: none
+Stage: S5 / Foundation / C1 ToolHost
+Master state: READY — C1 TOOLHOST ONLY
+Goal Packet: BS-MM-S5-TOOLHOST-R1-20260804-01
 Execution session: none
-Last hub checkpoint: S4 Context and stage accepted; checkpoint commit pending
-Next action: commit/push S4, then refresh exact S5 source/consumer/hotspot truth
-No-polling state: inactive
+Last hub checkpoint: S5 C1 source refresh, preflight and READY review complete
+Next action: user starts one independent C1 task and returns its result packet
+No-polling state: PAUSED_FOR_USER_RESULT after handoff
 ```
