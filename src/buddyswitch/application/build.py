@@ -22,8 +22,12 @@ from buddyswitch.launcher.web_contracts import (
     ActorConsoleSectionRegistration,
     WebRouteRegistration,
     WebWorkerRegistration,
+    validate_web_route_registrations,
 )
-from buddyswitch.runtime_support.env_cleanup import CleanupContribution
+from buddyswitch.runtime_support.env_cleanup import (
+    CleanupContribution,
+    validate_cleanup_contributions,
+)
 from buddyswitch.runtime_support.skill_contracts import SkillExport
 
 
@@ -66,11 +70,8 @@ def build_application(
     tool_ids: set[str] = set()
     cli_names: set[str] = set()
     skill_ids: set[str] = set()
-    cleanup_categories: set[str] = set()
     actor_console_names: set[str] = set()
     inbound_event_types: set[str] = set()
-    web_route_names: set[str] = set()
-    web_route_prefixes: set[str] = set()
     web_worker_names: set[str] = set()
     command_factory_ids: set[int] = set()
     daemon_handlers: list[DaemonHandlerRegistration] = []
@@ -141,19 +142,6 @@ def build_application(
             skills.append(export)
 
         for contribution in module.cleanup:
-            if not isinstance(contribution, CleanupContribution):
-                raise ValueError(
-                    "cleanup contribution must be CleanupContribution"
-                )
-            category = _text(
-                contribution.category,
-                label="cleanup category",
-            )
-            if not callable(contribution.discover):
-                raise ValueError(
-                    f"cleanup discoverer for '{category}' must be callable"
-                )
-            _unique(category, cleanup_categories, label="cleanup category")
             cleanup.append(contribution)
 
         for registration in module.actor_console_sections:
@@ -190,29 +178,6 @@ def build_application(
             inbound_sources.append(normalized)
 
         for registration in module.web_routes:
-            if not isinstance(registration, WebRouteRegistration):
-                raise ValueError(
-                    "Web route contribution must be WebRouteRegistration"
-                )
-            name = _text(registration.name, label="Web route name")
-            prefix = registration.prefix
-            if (
-                not isinstance(prefix, str)
-                or not prefix.startswith("/api/")
-                or not prefix.endswith("/")
-                or "?" in prefix
-                or "#" in prefix
-            ):
-                raise ValueError(
-                    f"Web route API prefix for '{name}' must start with "
-                    "'/api/' and end with '/'"
-                )
-            if not callable(registration.factory):
-                raise ValueError(
-                    f"Web route factory for '{name}' must be callable"
-                )
-            _unique(name, web_route_names, label="Web route name")
-            _unique(prefix, web_route_prefixes, label="Web route prefix")
             web_routes.append(registration)
 
         for registration in module.web_workers:
@@ -256,10 +221,10 @@ def build_application(
         tools=tuple(tools),
         cli_commands=tuple(cli_commands),
         skills=tuple(skills),
-        cleanup=tuple(cleanup),
+        cleanup=validate_cleanup_contributions(tuple(cleanup)),
         actor_console_sections=tuple(actor_console_sections),
         inbound_sources=tuple(inbound_sources),
-        web_routes=tuple(web_routes),
+        web_routes=validate_web_route_registrations(tuple(web_routes)),
         web_workers=tuple(web_workers),
     )
 

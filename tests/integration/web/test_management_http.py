@@ -765,8 +765,8 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             web_routes=(
                 WEB_MANAGEMENT.WebRouteRegistration(
                     name="im-router-probe",
-                    prefix="/api/im/",
                     factory=lambda _access: router,
+                    prefixes=("/api/im/",),
                 ),
             ),
         )

@@ -39,23 +39,41 @@ def test_contributed_route_is_instantiated_prepared_and_dispatched() -> None:
         web_routes=(
             route_type(
                 name="example",
-                prefix="/api/example/",
                 factory=factory,
+                exact_paths=("/api/example",),
+                prefixes=("/api/example/",),
             ),
         ),
     )
     assert [kind for kind, _value in calls] == ["factory"]
 
     service.prepare_routes()
-    result = service.handle_api(
+    exact_result = service.handle_api(
+        "GET",
+        "/api/example?trace=exact",
+        b"",
+        {"X-Test": "exact"},
+    )
+    prefix_result = service.handle_api(
         "POST",
         "/api/example/action?trace=1",
         b'{"value":1}',
         {"X-Test": "1"},
     )
 
-    assert result == (209, {"ok": True, "owner": "example"})
-    assert [kind for kind, _value in calls] == ["factory", "prepare", "handle"]
+    assert exact_result == (209, {"ok": True, "owner": "example"})
+    assert prefix_result == (209, {"ok": True, "owner": "example"})
+    with pytest.raises(web_management.HttpError) as raised:
+        service.handle_api("GET", "/api/example-extra", b"", None)
+    assert raised.value.status == 404
+    assert raised.value.code == "NOT_FOUND"
+    assert raised.value.message == "API route not found."
+    assert [kind for kind, _value in calls] == [
+        "factory",
+        "prepare",
+        "handle",
+        "handle",
+    ]
 
 
 def test_route_preparation_failure_is_not_published_as_ready() -> None:
@@ -74,8 +92,8 @@ def test_route_preparation_failure_is_not_published_as_ready() -> None:
         web_routes=(
             route_type(
                 name="unavailable",
-                prefix="/api/unavailable/",
                 factory=lambda _access: Route(),
+                prefixes=("/api/unavailable/",),
             ),
         ),
     )

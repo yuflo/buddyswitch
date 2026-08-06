@@ -45,5 +45,9 @@ service.
 ## Host contributions
 
 Track contributes one Tool, one CLI command, two Skills, Track/comment cleanup
-categories, one Actor Console section, and one `track.comment.added` inbound
-source through `ModuleAssembly`. The application selects Track exactly once.
+categories, one Actor Console section, one Web read route, and one
+`track.comment.added` inbound source through `ModuleAssembly`. The Web route
+declares exact `/api/tracks` and prefix `/api/tracks/` matchers and translates
+list/detail reads through Track Public. Application composition selects Track
+exactly once; the generic Web host validates and dispatches the passive route
+without importing Track or branching on Track paths.

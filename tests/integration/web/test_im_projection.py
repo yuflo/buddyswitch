@@ -27,8 +27,8 @@ def _web_service_with_im(
         web_routes=(
             web_management.WebRouteRegistration(
                 name="communication-im-test",
-                prefix="/api/im/",
                 factory=lambda _access: route,
+                prefixes=("/api/im/",),
             ),
         ),
     )

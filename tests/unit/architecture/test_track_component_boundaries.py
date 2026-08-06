@@ -145,6 +145,12 @@ def test_track_contributes_exact_surfaces_and_is_selected_once() -> None:
     assert [
         registration.event_type for registration in TRACK.inbound_sources
     ] == ["track.comment.added"]
+    assert [registration.name for registration in TRACK.web_routes] == [
+        "track-read"
+    ]
+    track_route = TRACK.web_routes[0]
+    assert track_route.exact_paths == ("/api/tracks",)
+    assert track_route.prefixes == ("/api/tracks/",)
 
     assert [component.name for component in COMPONENTS].count("track") == 1
     application = build_application()
@@ -155,6 +161,9 @@ def test_track_contributes_exact_surfaces_and_is_selected_once() -> None:
     assert [
         registration.event_type for registration in application.inbound_sources
     ].count("track.comment.added") == 1
+    assert [registration.name for registration in application.web_routes].count(
+        "track-read"
+    ) == 1
 
 
 def test_track_dependency_direction_and_stable_storage_are_exact() -> None:
@@ -194,6 +203,23 @@ def test_track_dependency_direction_and_stable_storage_are_exact() -> None:
     assert 'OBJECTS_ROOT / "track-comments"' in comments_source
     assert "TRACKS_DIR" not in runtime_source
     assert "TRACK_COMMENTS_DIR" not in runtime_source
+
+
+def test_generic_web_host_has_no_track_or_product_route_knowledge() -> None:
+    host_path = REPO_ROOT / "src/buddyswitch/launcher/web_management.py"
+    source = host_path.read_text(encoding="utf-8")
+
+    assert not [
+        imported
+        for imported in _imports(host_path)
+        if imported.startswith("buddyswitch.modules")
+    ]
+    for forbidden in (
+        "track_public",
+        "/api/tracks",
+        "_parse_track_detail_path",
+    ):
+        assert forbidden not in source
 
 
 def test_current_guidance_names_only_the_track_module_owner() -> None:

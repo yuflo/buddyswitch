@@ -785,6 +785,61 @@ class CleanupRepositoryTests(unittest.TestCase):
             msg=result,
         )
 
+    def test_cleanup_projection_fields_are_derived_from_selected_contributions(self) -> None:
+        relative_path = "buddyswitch/objects/probe/record.json"
+        selected = self._path(relative_path)
+        selected.parent.mkdir(parents=True, exist_ok=True)
+        selected.write_text("probe", encoding="utf-8")
+        contribution = env_cleanup.CleanupContribution(
+            category="probe_objects",
+            discover=lambda _root: (
+                env_cleanup.OwnedStatePath(
+                    relative_path=relative_path,
+                    owner_roles=("pm",),
+                    index_record={
+                        "id": "probe-1",
+                        "object_path": relative_path,
+                    },
+                ),
+            ),
+            index_projection=env_cleanup.CleanupIndexProjection(
+                object_ids_field="probe_object_ids",
+                records_field="probe_records",
+            ),
+        )
+
+        plan = env_cleanup.build_cleanup_plan(
+            scope="all-data",
+            role=None,
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            contributions=(contribution,),
+        )
+
+        self.assertEqual(plan["probe_object_ids"], ["probe-1"])
+        self.assertEqual(plan["probe_records"][0]["object_path"], relative_path)
+        for unselected_field in (
+            "artifact_object_ids",
+            "artifact_records",
+            "message_object_ids",
+            "message_records",
+            "comment_object_ids",
+            "comment_records",
+        ):
+            self.assertNotIn(unselected_field, plan)
+
+        result = env_cleanup.execute_cleanup_plan(
+            plan,
+            contributions=(contribution,),
+        )
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(result["probe_object_ids"], ["probe-1"])
+        self.assertNotIn("artifact_object_ids", result)
+        self.assertNotIn("message_object_ids", result)
+        self.assertNotIn("comment_object_ids", result)
+        self.assertFalse(selected.exists())
+
     def test_cleanup_executor_deletes_nested_paths_deepest_first(self) -> None:
         parent_path = "buddyswitch/objects/messages-retired"
         child_path = f"{parent_path}/nested/child.json"

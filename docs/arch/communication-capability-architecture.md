@@ -49,8 +49,9 @@ delivery. The worker factory receives only the bound server URL and owns the
 iMessage channel controller and worker.
 
 The generic Web host prepares routes before publishing readiness, dispatches
-by the validated API prefix, starts workers fail-soft, stops only started
-workers in reverse order, and closes the server last. It contains no
+by the shared validated exact/prefix matcher contract, starts workers
+fail-soft, stops only started workers in reverse order, and closes the server
+last. Communication declares only its `/api/im/` prefix. The host contains no
 Communication import, Message DTO, `/api/im/` branch, or iMessage construction.
 
 The generic Daemon host receives Communication's existing inbound-source

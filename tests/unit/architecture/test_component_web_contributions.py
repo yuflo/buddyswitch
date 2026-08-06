@@ -38,15 +38,17 @@ def test_web_contribution_contracts_are_passive_immutable_data() -> None:
     worker_factory = lambda server_url: server_url
     route = route_type(
         name="example-route",
-        prefix="/api/example/",
         factory=route_factory,
+        exact_paths=("/api/example",),
+        prefixes=("/api/example/",),
     )
     worker = worker_type(name="example-worker", factory=worker_factory)
     access = access_type(list_instances=lambda: [])
 
     assert route.name == "example-route"
-    assert route.prefix == "/api/example/"
     assert route.factory is route_factory
+    assert route.exact_paths == ("/api/example",)
+    assert route.prefixes == ("/api/example/",)
     assert worker.name == "example-worker"
     assert worker.factory is worker_factory
     assert access.list_instances() == []
@@ -79,8 +81,9 @@ def test_application_validates_web_contributions_without_calling_factories() -> 
                 web_routes=(
                     route_type(
                         name="example-route",
-                        prefix="/api/example/",
                         factory=route_factory,
+                        exact_paths=("/api/example",),
+                        prefixes=("/api/example/",),
                     ),
                 ),
                 web_workers=(
@@ -113,10 +116,39 @@ def test_application_rejects_invalid_and_duplicate_web_contributions() -> None:
         return object()
 
     invalid_routes = (
-        (route_type(name="", prefix="/api/example/", factory=route_factory), "route name"),
-        (route_type(name="route", prefix="example", factory=route_factory), "API prefix"),
-        (route_type(name="route", prefix="/api/example", factory=route_factory), "API prefix"),
-        (route_type(name="route", prefix="/api/example/", factory=None), "route factory"),
+        (
+            route_type(name="", factory=route_factory, prefixes=("/api/example/",)),
+            "route name",
+        ),
+        (route_type(name="route", factory=route_factory), "matcher"),
+        (
+            route_type(name="route", factory=route_factory, exact_paths=("example",)),
+            "exact path",
+        ),
+        (
+            route_type(
+                name="route",
+                factory=route_factory,
+                exact_paths=("/api/example?query=1",),
+            ),
+            "exact path",
+        ),
+        (
+            route_type(name="route", factory=route_factory, prefixes=("/api/example",)),
+            "prefix",
+        ),
+        (
+            route_type(
+                name="route",
+                factory=route_factory,
+                prefixes=("/api/example/?query=1",),
+            ),
+            "prefix",
+        ),
+        (
+            route_type(name="route", factory=None, prefixes=("/api/example/",)),
+            "route factory",
+        ),
     )
     for registration, message in invalid_routes:
         with pytest.raises(ValueError, match=message):
@@ -138,18 +170,46 @@ def test_application_rejects_invalid_and_duplicate_web_contributions() -> None:
 
     route = route_type(
         name="route",
-        prefix="/api/example/",
         factory=route_factory,
+        exact_paths=("/api/example",),
+        prefixes=("/api/example/",),
     )
     for duplicate in (
-        route_type(name="route", prefix="/api/other/", factory=route_factory),
-        route_type(name="other", prefix="/api/example/", factory=route_factory),
+        route_type(name="route", factory=route_factory, prefixes=("/api/other/",)),
+        route_type(name="other", factory=route_factory, exact_paths=("/api/example",)),
+        route_type(name="other", factory=route_factory, prefixes=("/api/example/admin/",)),
+        route_type(name="other", factory=route_factory, exact_paths=("/api/example/child",)),
+        route_type(name="reserved", factory=route_factory, prefixes=("/api/instances/admin/",)),
     ):
-        with pytest.raises(ValueError, match="duplicate Web route"):
+        with pytest.raises(ValueError):
             build_application(
                 (
                     ModuleAssembly(name="first", web_routes=(route,)),
                     ModuleAssembly(name="second", web_routes=(duplicate,)),
+                ),
+                daemon_handler_order=(),
+            )
+
+    for overlapping_matchers in (
+        route_type(
+            name="self-overlap-exact-prefix",
+            factory=route_factory,
+            exact_paths=("/api/example/child",),
+            prefixes=("/api/example/",),
+        ),
+        route_type(
+            name="self-overlap-prefixes",
+            factory=route_factory,
+            prefixes=("/api/example/", "/api/example/admin/"),
+        ),
+    ):
+        with pytest.raises(ValueError, match="overlapping Web route matchers"):
+            build_application(
+                (
+                    ModuleAssembly(
+                        name="self-overlap",
+                        web_routes=(overlapping_matchers,),
+                    ),
                 ),
                 daemon_handler_order=(),
             )

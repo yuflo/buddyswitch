@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from tests.support.paths import REPO_ROOT
 
 
@@ -99,7 +101,10 @@ def test_communication_is_selected_once_with_exact_contributions() -> None:
     assert COMMUNICATION.tools[0].definition.id == "message"
     assert len(COMMUNICATION.inbound_sources) == 1
     assert COMMUNICATION.inbound_sources[0].event_type == "im.message.created"
-    assert [route.prefix for route in COMMUNICATION.web_routes] == ["/api/im/"]
+    assert [route.exact_paths for route in COMMUNICATION.web_routes] == [()]
+    assert [route.prefixes for route in COMMUNICATION.web_routes] == [
+        ("/api/im/",)
+    ]
     assert [worker.name for worker in COMMUNICATION.web_workers] == [
         "communication-imessage"
     ]
@@ -213,6 +218,19 @@ def test_cleanup_host_uses_generic_multi_owner_and_index_projection_contracts() 
         "message_object_json_path",
     ):
         assert retired_helper not in source
+    for product_enumeration in (
+        "CATEGORY_ORDER",
+        '"message_objects"',
+        '"artifact_objects"',
+        '"comment_objects"',
+        '"artifact_object_ids"',
+        '"message_object_ids"',
+        '"comment_object_ids"',
+        '"artifact_records"',
+        '"message_records"',
+        '"comment_records"',
+    ):
+        assert product_enumeration not in source
     tree = ast.parse(source, filename=str(cleanup_path))
     category_branches = [
         node.lineno
@@ -229,6 +247,67 @@ def test_cleanup_host_uses_generic_multi_owner_and_index_projection_contracts() 
         )
     ]
     assert category_branches == []
+
+
+def test_application_rejects_cleanup_projection_collisions_without_discovery() -> None:
+    from buddyswitch.application.build import build_application
+    from buddyswitch.foundation.composition import ModuleAssembly
+    from buddyswitch.runtime_support.env_cleanup import (
+        CleanupContribution,
+        CleanupIndexProjection,
+    )
+
+    discoveries: list[str] = []
+
+    def discover(_root: Path):
+        discoveries.append("called")
+        return ()
+
+    valid = CleanupContribution(
+        category="probe_objects",
+        discover=discover,
+        index_projection=CleanupIndexProjection(
+            object_ids_field="probe_object_ids",
+            records_field="probe_records",
+        ),
+    )
+    application = build_application(
+        (ModuleAssembly(name="valid", cleanup=(valid,)),),
+        daemon_handler_order=(),
+    )
+    assert application.cleanup == (valid,)
+    assert discoveries == []
+
+    invalid_projections = (
+        CleanupIndexProjection("warnings", "probe_records_2"),
+        CleanupIndexProjection("same", "same"),
+    )
+    for index, projection in enumerate(invalid_projections):
+        invalid = CleanupContribution(
+            category=f"invalid_{index}",
+            discover=discover,
+            index_projection=projection,
+        )
+        with pytest.raises(ValueError, match="cleanup.*field"):
+            build_application(
+                (ModuleAssembly(name=f"invalid-{index}", cleanup=(invalid,)),),
+                daemon_handler_order=(),
+            )
+
+    duplicate = CleanupContribution(
+        category="duplicate_objects",
+        discover=discover,
+        index_projection=CleanupIndexProjection(
+            object_ids_field="probe_object_ids",
+            records_field="duplicate_records",
+        ),
+    )
+    with pytest.raises(ValueError, match="cleanup.*field"):
+        build_application(
+            (ModuleAssembly(name="duplicate", cleanup=(valid, duplicate)),),
+            daemon_handler_order=(),
+        )
+    assert discoveries == []
 
 
 def test_current_guidance_names_only_the_communication_owner_and_generic_host_edge() -> None:

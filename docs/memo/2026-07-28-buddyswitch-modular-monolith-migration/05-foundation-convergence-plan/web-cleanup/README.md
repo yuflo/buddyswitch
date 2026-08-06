@@ -1,6 +1,6 @@
 # S5 C2 WebHost and Cleanup Cutover
 
-> State: `READY`
+> State: `ACCEPTED`
 > Packet: `BS-MM-S5-WEB-CLEANUP-R1-20260804-01`
 > Executable base: `e687fa264408de0bf70f7f7411194e78d044dad9`
 
@@ -23,6 +23,8 @@ Read in order:
 3. `S5-C2-PREFLIGHT-COMMAND.md` for reproducibility evidence;
 4. `S5-C2-IMPLEMENTATION-PLAN.md`;
 5. `S5-C2-READY-REVIEW.md`;
-6. `S5-C2-GOAL-PACKET.md`.
+6. `S5-C2-GOAL-PACKET.md`;
+7. `S5-C2-ACCEPTANCE.md`.
 
-The packet authorizes C2 only. C3–C7 and S6 remain blocked.
+The packet is consumed and must not resume. C3 source refresh and READY
+preparation are unblocked; C3–C7 implementation and S6 remain unauthorized.

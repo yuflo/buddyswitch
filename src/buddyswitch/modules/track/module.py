@@ -19,7 +19,8 @@ from buddyswitch.modules.track.private.adapters.tool.tool import (
     build_invoke,
 )
 from buddyswitch.modules.track.private.adapters.web import (
-    REGISTRATION as WEB_REGISTRATION,
+    ACTOR_CONSOLE_REGISTRATION,
+    ROUTE_REGISTRATION,
 )
 from buddyswitch.modules.track.public.contracts import (
     ReadReferenceMetadata,
@@ -59,6 +60,7 @@ def build_track_module(
             TRACK_RECORDS_CONTRIBUTION,
             TRACK_COMMENTS_CONTRIBUTION,
         ),
-        actor_console_sections=(WEB_REGISTRATION,),
+        actor_console_sections=(ACTOR_CONSOLE_REGISTRATION,),
         inbound_sources=(track_comment_added_registration(),),
+        web_routes=(ROUTE_REGISTRATION,),
     )

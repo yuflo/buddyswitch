@@ -20,10 +20,20 @@ explicit user-visible exception: Web hands Terminal.app the same public
 
 ## Web interface
 
-The generic Web host owns its built-in browser routes and host DTO composition.
-It may combine Host Control facts with external-safe product reads, but it does
-not own lifecycle mechanics, Actor input, Demand/Task mutation, Communication
-routes, workers, identities, delivery, or Message semantics.
+The generic Web host owns its built-in browser routes, host DTO composition,
+and product-neutral route matching. It does not own lifecycle mechanics, Actor
+input, product read or mutation semantics, Communication routes, workers,
+identities, delivery, or Message semantics.
+
+Application composition selects passive `WebRouteRegistration` values exactly
+once. Each registration declares one or more query-free exact paths and/or API
+prefixes. Shared validation rejects malformed, duplicate, overlapping, and
+host-reserved matchers before any factory runs. After preparation, the generic
+host matches the parsed URL path and forwards the original path, query, body,
+and headers to the selected product adapter. Track owns the exact
+`/api/tracks` and prefix `/api/tracks/` read adapter; Communication owns the
+prefix `/api/im/` adapter. The host contains no branch or import for either
+product.
 
 `/api/actors/{id}/console` composes one Actor Console read model. The generic
 Web host owns the surrounding Actor, runtime, and capability DTO. It
@@ -37,7 +47,7 @@ repository fallback, and exposes no product mutation subroute.
 ## Web Message
 
 `/api/im/*` is the single browser-facing Message contract. Communication owns
-that route and contributes it through one typed `WebRouteRegistration`.
+that prefix route and contributes it through one typed `WebRouteRegistration`.
 Communication also contributes the optional iMessage channel through one
 `WebWorkerRegistration`. Application composition selects both; the generic Web
 host validates, instantiates, prepares, dispatches, starts, stops, and closes
@@ -105,6 +115,7 @@ Valid paths:
 Browser -> Web -> private Host Control
 Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session
 Browser -> Web -> typed Actor Console section projectors
+Browser -> generic Web host -> contributed Track read route -> Track Public
 Browser -> generic Web host -> contributed Communication route
 
 Public CLI -> private Host Control

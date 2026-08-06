@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -21,9 +22,23 @@ from buddyswitch.runtime_support.env_manifest import (
 )
 
 ROOT = runtime_files.ROOT
-CATEGORY_ORDER = (
-    "message_objects",
-    "actor_private_files",
+_PROJECTION_FIELD_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_RESERVED_PROJECTION_FIELDS = frozenset(
+    {
+        "scope",
+        "role",
+        "delete_paths",
+        "deleted_paths",
+        "deleted_count",
+        "warnings",
+        "counts_by_category",
+        "direct_delete_paths",
+        "external_delete_paths",
+        "path_categories",
+        "repo_root",
+        "shared_root",
+        "ok",
+    }
 )
 
 
@@ -50,6 +65,60 @@ class CleanupContribution:
     discover: Callable[[Path], tuple[OwnedStatePath, ...]]
     required_directories: tuple[str, ...] = ()
     index_projection: CleanupIndexProjection | None = None
+
+
+def validate_cleanup_contributions(
+    contributions: tuple[CleanupContribution, ...],
+) -> tuple[CleanupContribution, ...]:
+    if not isinstance(contributions, tuple):
+        raise ValueError("cleanup contributions must be a tuple")
+
+    categories: set[str] = set()
+    projection_fields = set(_RESERVED_PROJECTION_FIELDS)
+    for contribution in contributions:
+        if not isinstance(contribution, CleanupContribution):
+            raise ValueError("cleanup contribution must be CleanupContribution")
+        category = contribution.category
+        if (
+            not isinstance(category, str)
+            or not category.strip()
+            or category != category.strip()
+            or category == "actor_private_files"
+            or category in categories
+        ):
+            raise ValueError(f"invalid or duplicate cleanup category: {category}")
+        if not callable(contribution.discover):
+            raise ValueError(
+                f"cleanup discoverer for '{category}' must be callable"
+            )
+        categories.add(category)
+
+        projection = contribution.index_projection
+        if projection is None:
+            continue
+        if not isinstance(projection, CleanupIndexProjection):
+            raise ValueError(
+                f"cleanup index projection for '{category}' must be "
+                "CleanupIndexProjection"
+            )
+        fields = (
+            projection.object_ids_field,
+            projection.records_field,
+        )
+        for field_name in fields:
+            if (
+                not isinstance(field_name, str)
+                or _PROJECTION_FIELD_RE.fullmatch(field_name) is None
+                or field_name in projection_fields
+            ):
+                raise ValueError(
+                    f"cleanup projection field for '{category}' is invalid or duplicate: "
+                    f"{field_name!r}"
+                )
+            projection_fields.add(field_name)
+
+    _required_directories(contributions)
+    return contributions
 
 
 def rel(root: Path, path: Path) -> str:
@@ -151,23 +220,29 @@ def load_valid_roles(manifest_path: Path) -> set[str]:
     }
 
 
-def new_plan(scope: str, *, role: str | None = None) -> dict[str, Any]:
-    counts = {key: 0 for key in CATEGORY_ORDER}
-    return {
+def _new_plan(
+    scope: str,
+    *,
+    role: str | None,
+    contributions: tuple[CleanupContribution, ...],
+) -> dict[str, Any]:
+    counts = {"actor_private_files": 0}
+    plan: dict[str, Any] = {
         "scope": scope,
         "role": role,
         "delete_paths": [],
-        "artifact_object_ids": [],
-        "message_object_ids": [],
-        "comment_object_ids": [],
         "warnings": [],
         "counts_by_category": counts,
-        "artifact_records": [],
-        "message_records": [],
-        "comment_records": [],
         "direct_delete_paths": [],
         "external_delete_paths": {},
     }
+    for contribution in contributions:
+        counts[contribution.category] = 0
+        projection = contribution.index_projection
+        if projection is not None:
+            plan[projection.object_ids_field] = []
+            plan[projection.records_field] = []
+    return plan
 
 
 def add_warning(plan: dict[str, Any], message: str) -> None:
@@ -539,56 +614,20 @@ def build_cleanup_plan(
     shared_root: Path | None = None,
     contributions: tuple[CleanupContribution, ...] = (),
 ) -> dict[str, Any]:
+    contributions = validate_cleanup_contributions(contributions)
     manifest_path = manifest_path or default_manifest_path(repo_root)
     valid_roles = load_valid_roles(manifest_path)
     if scope == "role" and (role is None or role not in valid_roles):
         raise ValueError(f"Invalid role '{role}'. Check the installed BuddySwitch role catalog.")
 
-    plan = new_plan(scope, role=role)
+    plan = _new_plan(
+        scope,
+        role=role,
+        contributions=contributions,
+    )
     plan["repo_root"] = str(repo_root)
     plan["shared_root"] = str(shared_root) if shared_root is not None else None
     plan["_path_categories"] = {}
-    contribution_categories: set[str] = set()
-    for contribution in contributions:
-        if not isinstance(contribution, CleanupContribution):
-            raise ValueError(
-                "cleanup contribution must be CleanupContribution"
-            )
-        category = contribution.category
-        if (
-            not isinstance(category, str)
-            or not category.strip()
-            or category == "actor_private_files"
-            or category in contribution_categories
-        ):
-            raise ValueError(f"invalid or duplicate cleanup category: {category}")
-        if not callable(contribution.discover):
-            raise ValueError(
-                f"cleanup discoverer for '{category}' must be callable"
-            )
-        contribution_categories.add(category)
-        plan["counts_by_category"].setdefault(category, 0)
-        projection = contribution.index_projection
-        if projection is not None:
-            if not isinstance(projection, CleanupIndexProjection):
-                raise ValueError(
-                    f"cleanup index projection for '{category}' must be "
-                    "CleanupIndexProjection"
-                )
-            for field_name, label in (
-                (projection.object_ids_field, "object ids"),
-                (projection.records_field, "records"),
-            ):
-                if (
-                    not isinstance(field_name, str)
-                    or not field_name.strip()
-                    or not isinstance(plan.get(field_name), list)
-                ):
-                    raise ValueError(
-                        f"cleanup {label} field for '{category}' is invalid"
-                    )
-    _required_directories(contributions)
-
     if scope == "role":
         actor_private_relative_dir = ACTOR_PRIVATE_RELATIVE_DIR
         if shared_root is not None:
@@ -713,9 +752,10 @@ def build_cleanup_plan(
                 records.append(dict(record))
 
     plan["delete_paths"].sort()
-    plan["artifact_object_ids"].sort()
-    plan["message_object_ids"].sort()
-    plan["comment_object_ids"].sort()
+    for contribution in contributions:
+        projection = contribution.index_projection
+        if projection is not None:
+            plan[projection.object_ids_field].sort()
     plan["direct_delete_paths"] = sorted(set(plan["direct_delete_paths"]))
     plan["external_delete_paths"] = {
         key: plan["external_delete_paths"][key] for key in sorted(plan["external_delete_paths"])
@@ -747,10 +787,10 @@ def _actual_index_object_ids(
     deleted_paths: set[str],
     path_categories: dict[str, Any],
 ) -> dict[str, list[str]]:
-    fields = (
-        "artifact_object_ids",
-        "message_object_ids",
-        "comment_object_ids",
+    fields = tuple(
+        contribution.index_projection.object_ids_field
+        for contribution in contributions
+        if contribution.index_projection is not None
     )
     deleted_ids_by_field: dict[str, set[str]] = {field: set() for field in fields}
     for contribution in contributions:
@@ -792,6 +832,7 @@ def execute_cleanup_plan(
     *,
     contributions: tuple[CleanupContribution, ...] = (),
 ) -> dict[str, Any]:
+    contributions = validate_cleanup_contributions(contributions)
     root = Path(plan["repo_root"])
     planned_warnings = plan.get("warnings")
     warnings = list(planned_warnings) if isinstance(planned_warnings, list) else []
@@ -961,17 +1002,16 @@ def execute_cleanup_plan(
         warnings=warnings,
     )
     warnings.sort()
-    return {
+    result = {
         "ok": True,
         "scope": plan["scope"],
         "role": plan["role"],
         "deleted_paths": deleted_paths,
         "deleted_count": len(deleted_paths),
-        "artifact_object_ids": actual_object_ids["artifact_object_ids"],
-        "message_object_ids": actual_object_ids["message_object_ids"],
-        "comment_object_ids": actual_object_ids["comment_object_ids"],
         "warnings": warnings,
     }
+    result.update(actual_object_ids)
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -149,8 +149,8 @@ def project_actor_console(
 
 ROUTE_REGISTRATION = WebRouteRegistration(
     name="communication-im",
-    prefix="/api/im/",
     factory=build_web_route,
+    prefixes=("/api/im/",),
 )
 WORKER_REGISTRATION = WebWorkerRegistration(
     name="communication-imessage",

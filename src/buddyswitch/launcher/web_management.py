@@ -27,11 +27,12 @@ from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
 from buddyswitch.env.repos import runtime_files
 from buddyswitch.launcher.web_contracts import (
     ActorConsoleSectionRegistration,
+    HttpError,
     WebHostAccess,
     WebRouteRegistration,
     WebWorkerRegistration,
+    validate_web_route_registrations,
 )
-from buddyswitch.modules.track import public as track_public
 
 
 STATIC_ROOT = HELPER_DIR / "assets" / "web-management"
@@ -88,11 +89,7 @@ def configure_web_contributions(
     workers: tuple[WebWorkerRegistration, ...],
 ) -> None:
     global _WEB_ROUTES, _WEB_WORKERS
-    if not isinstance(routes, tuple) or not all(
-        isinstance(registration, WebRouteRegistration)
-        for registration in routes
-    ):
-        raise ValueError("Web route registrations must be a typed tuple")
+    routes = validate_web_route_registrations(routes)
     if not isinstance(workers, tuple) or not all(
         isinstance(registration, WebWorkerRegistration)
         for registration in workers
@@ -100,14 +97,6 @@ def configure_web_contributions(
         raise ValueError("Web worker registrations must be a typed tuple")
     _WEB_ROUTES = routes
     _WEB_WORKERS = workers
-
-
-@dataclass(frozen=True)
-class HttpError(Exception):
-    status: int
-    code: str
-    message: str
-    details: dict[str, Any] | None = None
 
 
 def utc_now_iso() -> str:
@@ -402,6 +391,7 @@ class WebManagementService:
         self,
         registrations: tuple[WebRouteRegistration, ...],
     ) -> tuple[tuple[WebRouteRegistration, Any], ...]:
+        registrations = validate_web_route_registrations(registrations)
         access = WebHostAccess(list_instances=self._list_instances)
         configured: list[tuple[WebRouteRegistration, Any]] = []
         for registration in registrations:
@@ -451,19 +441,11 @@ class WebManagementService:
         actor_console_id = self._parse_actor_console_path(route)
         if method == "GET" and actor_console_id is not None:
             return 200, {"ok": True, "console": self._actor_console(actor_console_id)}
-        if method == "GET" and route == "/api/tracks":
-            return 200, {"ok": True, "tracks": track_public.list_external_tracks()}
-        track_id = self._parse_track_detail_path(route)
-        if method == "GET" and track_id is not None:
-            try:
-                detail = track_public.get_external_track(track_id)
-            except ValueError as exc:
-                raise HttpError(status=400, code="INVALID_REQUEST", message=str(exc)) from exc
-            if detail is None:
-                raise HttpError(status=404, code="NOT_FOUND", message=f"track not found: {track_id}")
-            return 200, {"ok": True, "track": detail}
         for registration, contributed_route in self._web_routes:
-            if route.startswith(registration.prefix):
+            if route in registration.exact_paths or any(
+                route.startswith(prefix)
+                for prefix in registration.prefixes
+            ):
                 return contributed_route.handle(method, path, body, headers)
 
         instance_action = self._parse_instance_action_path(path)
@@ -545,14 +527,6 @@ class WebManagementService:
         suffix = "/console"
         if path.startswith(prefix) and path.endswith(suffix):
             return path[len(prefix) : -len(suffix)]
-        return None
-
-    def _parse_track_detail_path(self, path: str) -> str | None:
-        prefix = "/api/tracks/"
-        if path.startswith(prefix):
-            track_id = path[len(prefix) :]
-            if "/" not in track_id:
-                return track_id
         return None
 
     def _create_instance(self, body: bytes) -> dict[str, Any]:
