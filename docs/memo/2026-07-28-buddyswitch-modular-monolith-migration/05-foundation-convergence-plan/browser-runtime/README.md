@@ -27,6 +27,7 @@ classes. File names inside the new private owner are a reviewed reference
 topology, not coordinator-authored local coding instructions. Repository facts
 and the public test runner remain authoritative.
 
-C3 is accepted in `S5-C3-ACCEPTANCE.md` and neither packet may resume. C4
-source refresh and READY preparation are unblocked; C4–C7 implementation and
-S6 remain unauthorized until their own gates pass.
+C3 is accepted in `S5-C3-ACCEPTANCE.md` and neither packet may resume. C4 is
+now READY in `../identity-state-process/README.md`; only its named R1 packet is
+authorized. C5–C7 implementation and S6 remain unauthorized until their own
+gates pass.
