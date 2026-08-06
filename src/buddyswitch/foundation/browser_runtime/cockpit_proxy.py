@@ -17,8 +17,8 @@ import time
 from typing import Any
 from urllib.parse import urlencode
 
-from buddyswitch.env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-from buddyswitch.env import cdp_target  # noqa: E402
+from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
+from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
 from buddyswitch.runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 
@@ -371,7 +371,7 @@ def _browser_session_state_text(*, browser_url: str, instance_root: str | None) 
     if root is None:
         return "BuddySwitch browser page resource projection:\n- unavailable: instance root missing"
     try:
-        idle_state = browser_lifecycle._read_page_idle_state(root)
+        idle_state = browser_lifecycle.read_page_idle_state(root)
     except Exception as exc:
         return f"BuddySwitch browser page resource projection:\n- unavailable: {exc}"
     active_target_id = idle_state.get("active_tab_target_id")
@@ -417,7 +417,7 @@ def _browser_session_state_text(*, browser_url: str, instance_root: str | None) 
 
 def _schedule_release_if_no_tracked_pages(root: Path) -> str | None:
     try:
-        state = browser_lifecycle._read_page_idle_state(root)
+        state = browser_lifecycle.read_page_idle_state(root)
         targets = state.get("targets")
         if isinstance(targets, dict) and targets:
             return None

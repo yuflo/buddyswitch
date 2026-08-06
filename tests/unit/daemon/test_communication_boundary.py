@@ -36,8 +36,8 @@ PRODUCT_HANDLER_PATHS = (
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "task" / "private" / "adapters" / "goal" / "handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_orchestration_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "browser_page_expired_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "browser_release_handler.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "page_handlers.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "release_handler.py",
 )
 
 

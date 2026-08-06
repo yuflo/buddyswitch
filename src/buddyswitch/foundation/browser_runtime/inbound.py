@@ -7,8 +7,8 @@ import sys
 
 
 
-from buddyswitch.launcher import browser_page_expired_handler  # noqa: E402
-from buddyswitch.launcher import browser_release_handler  # noqa: E402
+from buddyswitch.foundation.browser_runtime import page_handlers  # noqa: E402
+from buddyswitch.foundation.browser_runtime import release_handler  # noqa: E402
 from buddyswitch.launcher import notification_center  # noqa: E402
 
 
@@ -31,7 +31,7 @@ def browser_page_expired_registration() -> notification_center.InboundSourceRegi
     return notification_center.InboundSourceRegistration(
         event_type=BROWSER_PAGE_EXPIRED_EVENT_TYPE,
         payload_contract=BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT,
-        handler_factory=browser_page_expired_handler.BrowserPageExpiredHandler,
+        handler_factory=page_handlers.BrowserPageExpiredHandler,
         owner_module=OWNER_MODULE,
     )
 
@@ -40,7 +40,7 @@ def browser_cockpit_release_registration() -> notification_center.InboundSourceR
     return notification_center.InboundSourceRegistration(
         event_type=BROWSER_COCKPIT_RELEASE_EVENT_TYPE,
         payload_contract=BROWSER_COCKPIT_RELEASE_PAYLOAD_CONTRACT,
-        handler_factory=browser_release_handler.BrowserReleaseHandler,
+        handler_factory=release_handler.BrowserReleaseHandler,
         owner_module=OWNER_MODULE,
     )
 
@@ -49,7 +49,7 @@ def browser_failed_open_page_cleanup_registration() -> notification_center.Inbou
     return notification_center.InboundSourceRegistration(
         event_type=BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE,
         payload_contract=BROWSER_FAILED_OPEN_PAGE_CLEANUP_PAYLOAD_CONTRACT,
-        handler_factory=browser_page_expired_handler.BrowserFailedOpenPageCleanupHandler,
+        handler_factory=page_handlers.BrowserFailedOpenPageCleanupHandler,
         owner_module=OWNER_MODULE,
     )
 
@@ -63,4 +63,4 @@ def inbound_registrations() -> list[notification_center.InboundSourceRegistratio
 
 
 if __name__ == "__main__":
-    raise SystemExit("browser_inbound is not a standalone command")
+    raise SystemExit("browser inbound registrations are not a standalone command")

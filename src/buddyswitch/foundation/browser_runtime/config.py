@@ -1,4 +1,4 @@
-"""Single host-global configuration for BuddySwitch browser TTL scheduling."""
+"""Single host-global configuration for Browser Foundation TTL scheduling."""
 
 from __future__ import annotations
 

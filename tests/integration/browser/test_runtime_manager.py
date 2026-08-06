@@ -24,7 +24,7 @@ from tests.support.processes import ResourceLedger
 
 ROOT = REPO_ROOT
 
-from buddyswitch.launcher import browser_runtime_manager as manager  # noqa: E402
+from buddyswitch.foundation.browser_runtime import runtime as manager  # noqa: E402
 from buddyswitch.launcher import daemon_state  # noqa: E402
 
 

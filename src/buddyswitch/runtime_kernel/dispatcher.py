@@ -12,7 +12,7 @@ from typing import Any, Iterator
 from buddyswitch.env.repos import runtime_files
 from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
-from buddyswitch.launcher import browser_runtime_manager
+from buddyswitch.foundation.browser_runtime import runtime as browser_runtime
 from buddyswitch.runtime_support.env_manifest import ManifestError, load_manifest
 
 
@@ -107,9 +107,9 @@ def _instance_shared_root(instance_json_path: Path) -> Path:
     return instance_root
 
 
-def _browser_runtime_manager_for_session(session: RuntimeBrokerSession) -> Any:
+def _browser_runtime_for_session(session: RuntimeBrokerSession) -> Any:
     del session
-    return browser_runtime_manager
+    return browser_runtime
 
 
 @contextlib.contextmanager
@@ -318,7 +318,7 @@ def _browser_dispatch(
     instance_json_path: Path,
     instance_record: dict[str, Any],
 ) -> dict[str, Any]:
-    manager = _browser_runtime_manager_for_session(session)
+    manager = _browser_runtime_for_session(session)
     if method == "browser.acquire":
         return _browser_acquire_dispatch(
             manager=manager,

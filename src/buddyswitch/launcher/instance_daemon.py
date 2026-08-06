@@ -11,7 +11,7 @@ from collections.abc import Sequence
 
 
 from buddyswitch.launcher import daemon_core  # noqa: E402
-from buddyswitch.launcher import browser_inbound  # noqa: E402
+from buddyswitch.foundation.browser_runtime import inbound as browser_inbound  # noqa: E402
 from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration  # noqa: E402
 from buddyswitch.launcher import notification_center  # noqa: E402
 

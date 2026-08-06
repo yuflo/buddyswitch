@@ -10,8 +10,8 @@ from typing import Any
 
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-from buddyswitch.env import cdp_target  # noqa: E402
+from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
+from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
 
 
 BROWSER_PAGE_EXPIRED_EVENT_TYPE = "browser.page.expired"
@@ -118,7 +118,7 @@ def _target_present(targets: list[dict[str, Any]], target_id: str) -> bool:
 
 
 def _tracked_target(instance_root: Path, target_id: str) -> bool:
-    targets = browser_lifecycle._read_page_idle_state(instance_root).get("targets")
+    targets = browser_lifecycle.read_page_idle_state(instance_root).get("targets")
     return isinstance(targets, dict) and target_id in targets
 
 
@@ -225,7 +225,7 @@ class BrowserFailedOpenPageCleanupHandler:
             )
         root = _instance_root(context)
         if root is not None:
-            targets = browser_lifecycle._read_page_idle_state(root).get("targets")
+            targets = browser_lifecycle.read_page_idle_state(root).get("targets")
             if isinstance(targets, dict) and not targets:
                 browser_lifecycle.schedule_browser_cockpit_release(
                     instance_root=root,
@@ -267,4 +267,4 @@ class BrowserFailedOpenPageCleanupHandler:
 
 
 if __name__ == "__main__":
-    raise SystemExit("browser_page_expired_handler is not a standalone command")
+    raise SystemExit("browser page handlers are not standalone commands")

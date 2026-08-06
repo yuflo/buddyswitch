@@ -13,7 +13,7 @@ import unittest
 
 class TestBrowserTtlConfig(unittest.TestCase):
     def setUp(self) -> None:
-        self.config = importlib.import_module("buddyswitch.env.browser_ttl_config")
+        self.config = importlib.import_module("buddyswitch.foundation.browser_runtime.config")
 
     def test_absent_config_is_created_at_shared_root_with_exact_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:

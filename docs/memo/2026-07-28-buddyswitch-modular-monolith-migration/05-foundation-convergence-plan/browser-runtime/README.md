@@ -1,7 +1,8 @@
 # S5 C3 Browser Runtime Cutover
 
-> State: `READY — C3 R1 ONLY`
-> Packet: `BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01`
+> State: `ACCEPTED`
+> Packets: `BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01` and
+> `BS-MM-S5-BROWSER-RUNTIME-R2-20260806-01` consumed
 > Executable base: `34cb192f2d9ee01a2c35b9b0d439c0802da66c7a`
 > Preparation HEAD: exact pushed docs checkpoint supplied in the handoff
 > Later checkpoints: blocked
@@ -19,12 +20,13 @@ Read in order:
 3. `S5-C3-IMPLEMENTATION-PLAN.md`;
 4. `S5-C3-READY-REVIEW.md`;
 5. `S5-C3-GOAL-PACKET.md`.
+6. `S5-C3-ACCEPTANCE.md`.
 
 The packet fixes the outcome, owner boundary, protected behavior and proof
 classes. File names inside the new private owner are a reviewed reference
 topology, not coordinator-authored local coding instructions. Repository facts
 and the public test runner remain authoritative.
 
-C4–C7 and S6 remain unauthorized. C3 must leave one runnable product path; it
-must not rely on C4 identity/state/process relocation or C5 Broker/Daemon
-relocation to complete Browser ownership.
+C3 is accepted in `S5-C3-ACCEPTANCE.md` and neither packet may resume. C4
+source refresh and READY preparation are unblocked; C4–C7 implementation and
+S6 remain unauthorized until their own gates pass.

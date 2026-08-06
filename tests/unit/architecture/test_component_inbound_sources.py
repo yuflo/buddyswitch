@@ -155,7 +155,8 @@ def test_component_inbound_sources_are_contributed_once_and_generic_daemon_stays
 
 def test_component_and_browser_inbound_handlers_remain_exact() -> None:
     from buddyswitch.application.build import build_application
-    from buddyswitch.launcher import browser_inbound, instance_daemon
+    from buddyswitch.foundation.browser_runtime import inbound as browser_inbound
+    from buddyswitch.launcher import instance_daemon
 
     application = build_application()
     handlers = instance_daemon.default_daemon_handlers(

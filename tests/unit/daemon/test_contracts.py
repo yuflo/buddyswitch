@@ -18,8 +18,8 @@ DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 HANDLER_PATHS = (
     ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "browser_page_expired_handler.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "browser_release_handler.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "page_handlers.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "release_handler.py",
 )
 
 

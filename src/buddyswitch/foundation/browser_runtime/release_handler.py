@@ -10,9 +10,9 @@ from typing import Any
 
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import browser_runtime_manager  # noqa: E402
-from buddyswitch.env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-from buddyswitch.env import cdp_target  # noqa: E402
+from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
+from buddyswitch.foundation.browser_runtime import runtime as browser_runtime  # noqa: E402
+from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
 
 
 BROWSER_COCKPIT_RELEASE_EVENT_TYPE = "browser.cockpit.release"
@@ -61,7 +61,7 @@ def _browser_endpoint(payload: dict[str, Any]) -> str | None:
 
 
 def _page_idle_targets(instance_root: Path) -> dict[str, Any]:
-    state = browser_lifecycle._read_page_idle_state(instance_root)
+    state = browser_lifecycle.read_page_idle_state(instance_root)
     targets = state.get("targets")
     return dict(targets) if isinstance(targets, dict) else {}
 
@@ -132,7 +132,7 @@ class BrowserReleaseHandler:
             endpoint = _browser_endpoint(instance_payload)
             if endpoint is not None and _has_real_user_page(endpoint):
                 return _skip("real_user_page_present")
-            result = browser_runtime_manager.release(
+            result = browser_runtime.release(
                 instance_root=root,
                 actor_id=actor_id.strip(),
                 reason=payload["reason"],
@@ -148,4 +148,4 @@ class BrowserReleaseHandler:
 
 
 if __name__ == "__main__":
-    raise SystemExit("browser_release_handler is not a standalone command")
+    raise SystemExit("browser release handler is not a standalone command")

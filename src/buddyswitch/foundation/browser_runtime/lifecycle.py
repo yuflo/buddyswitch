@@ -1,4 +1,4 @@
-"""Stable Chrome target lifecycle state and daemon schedules."""
+"""Browser-owned Chrome target lifecycle state and daemon schedules."""
 
 from __future__ import annotations
 
@@ -11,10 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
-SCRIPTS_ROOT = SCRIPTS_DIR.parent
-
-from buddyswitch.env import browser_ttl_config  # noqa: E402
+from buddyswitch.foundation.browser_runtime import config  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 
 
@@ -85,7 +82,7 @@ def _page_idle_state_lock(instance_root: Path) -> Any:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _read_page_idle_state(instance_root: Path) -> dict[str, Any]:
+def read_page_idle_state(instance_root: Path) -> dict[str, Any]:
     path = page_idle_state_file(instance_root)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -121,7 +118,7 @@ def _write_page_idle_state(instance_root: Path, payload: dict[str, Any]) -> None
 
 
 def active_tab_target_id(instance_root: Path) -> str | None:
-    value = _read_page_idle_state(instance_root).get("active_tab_target_id")
+    value = read_page_idle_state(instance_root).get("active_tab_target_id")
     return value if isinstance(value, str) and value else None
 
 
@@ -136,8 +133,8 @@ def refresh_tab_idle(
 ) -> dict[str, Any]:
     root = Path(instance_root)
     normalized_target_id = _normalize_tab_target_id(tab_target_id)
-    config = browser_ttl_config.load_browser_ttl_config(instance_root=root)
-    idle_seconds = config.page_idle_seconds
+    ttl_config = config.load_browser_ttl_config(instance_root=root)
+    idle_seconds = ttl_config.page_idle_seconds
     timestamp_value = now or _utc_now()
     daemon_client.schedule_trigger(
         instance_root=root,
@@ -148,7 +145,7 @@ def refresh_tab_idle(
         schedule_key=f"browser.page.idle:{normalized_target_id}",
     )
     with _page_idle_state_lock(root):
-        state = _read_page_idle_state(root)
+        state = read_page_idle_state(root)
         targets = state["targets"]
         record = dict(targets.get(normalized_target_id, {}))
         record.update(
@@ -207,7 +204,7 @@ def tab_idle_expiry_after_due_at(
         due_at_value = _parse_utc(due_at)
     except BrowserLifecycleError:
         return False
-    record = _read_page_idle_state(instance_root)["targets"].get(normalized_target_id)
+    record = read_page_idle_state(instance_root)["targets"].get(normalized_target_id)
     if not isinstance(record, dict):
         return False
     last_used_at = record.get("last_used_at")
@@ -228,7 +225,7 @@ def schedule_browser_cockpit_release(
     if not isinstance(reason, str) or not reason.strip():
         raise BrowserLifecycleError("release reason must be a non-empty string")
     root = Path(instance_root)
-    delay_seconds = browser_ttl_config.load_browser_ttl_config(instance_root=root).release_delay_seconds
+    delay_seconds = config.load_browser_ttl_config(instance_root=root).release_delay_seconds
     return daemon_client.schedule_trigger(
         instance_root=root,
         delay_seconds=delay_seconds,
@@ -276,7 +273,7 @@ def forget_tab_idle_target(*, instance_root: Path, tab_target_id: object) -> dic
     root = Path(instance_root)
     normalized_target_id = _normalize_tab_target_id(tab_target_id)
     with _page_idle_state_lock(root):
-        state = _read_page_idle_state(root)
+        state = read_page_idle_state(root)
         state["targets"].pop(normalized_target_id, None)
         if state.get("active_tab_target_id") == normalized_target_id:
             state.pop("active_tab_target_id", None)

@@ -1,4 +1,4 @@
-"""Minimal browser-level Chrome DevTools target transport."""
+"""Browser Foundation Chrome DevTools target transport."""
 
 from __future__ import annotations
 

@@ -16,6 +16,7 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/modules/artifact/assets/artifact-selection-v1.json",
     "buddyswitch/modules/artifact/assets/artifact-selection-v2.json",
     "buddyswitch/contracts/schemas/dev/dev-result.json",
+    "buddyswitch/foundation/browser_runtime/assets/chrome-devtools-mcp-1.1.1-tools.json",
     "buddyswitch/launcher/assets/roles/dev/AGENTS.md",
     "buddyswitch/launcher/assets/web-management/index.html",
     "buddyswitch/launcher/assets/web-management/vendor/dompurify/LICENSE",
@@ -162,3 +163,4 @@ def test_atomic_cutover_distribution_contains_every_required_runtime_resource(
 
     assert REQUIRED_CUTOVER_RESOURCES <= wheel_package_files
     assert wheel_package_files == source_package_files
+    assert "buddyswitch/launcher/assets/chrome-devtools-mcp-1.1.1-tools.json" not in wheel_package_files

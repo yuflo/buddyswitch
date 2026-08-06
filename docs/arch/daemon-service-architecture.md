@@ -37,7 +37,8 @@ The instance composition currently registers, among other owners:
 - `DemandTriageHandler` for isolated inbound Demand triage recovery;
 - `TaskGoalHandler` for canonical Task/native Goal convergence;
 - `DemandOrchestrationHandler` for Demand reconciliation and Task selection;
-- Message and Browser built-in handlers for their current source lifecycles;
+- Message built-in handlers and Browser Foundation registrations for their
+  current source lifecycles;
 - Track's contributed `track.comment.added` inbound registration and handler.
 
 These modules may import product domains and App Server adapters. Generic
@@ -110,9 +111,10 @@ demand_triage -> task_goal -> demand_orchestration
 one-to-one permutation of the contributed handler names and flattens each
 typed registration, including Task's mailbox command factory and Track's
 inbound source. `src/buddyswitch/launcher/instance_daemon.py` imports generic
-daemon orchestration plus the current Message and Browser built-ins. It
-combines Message, contributed Track, and Browser registrations without
-importing Track.
+daemon orchestration and the exact externally owned Browser registrations from
+`src/buddyswitch/foundation/browser_runtime/inbound.py`. It combines Message,
+contributed Track, and Browser handlers without importing Track or defining
+Browser event meaning.
 
 There is no plugin discovery, semantic event bus, central product workflow
 engine, or product service locator.

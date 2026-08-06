@@ -1,4 +1,4 @@
-"""Launcher-owned browser runtime lifecycle manager."""
+"""Actor-scoped Browser Foundation runtime lifecycle."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 
-from buddyswitch.env import cdp_browser_lifecycle as browser_lifecycle  # noqa: E402
-from buddyswitch.env import cdp_target  # noqa: E402
+from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
+from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 
@@ -424,7 +424,7 @@ def _port_listener_pids(port: int) -> list[int]:
 
 
 def _tab_idle_target_count(instance_root: Path) -> int:
-    state = browser_lifecycle._read_page_idle_state(instance_root)
+    state = browser_lifecycle.read_page_idle_state(instance_root)
     targets = state.get("targets")
     return len(targets) if isinstance(targets, dict) else 0
 
@@ -932,7 +932,7 @@ def _parse_port(value: str | None) -> int | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Manage BuddySwitch launcher-owned browser runtime.")
+    parser = argparse.ArgumentParser(description="Manage the BuddySwitch Actor-scoped browser runtime.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for name in ("acquire", "status", "release", "stop"):
         sub = subparsers.add_parser(name)

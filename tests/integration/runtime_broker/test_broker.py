@@ -243,7 +243,7 @@ class RuntimeBrokerTests(unittest.TestCase):
 
         patcher_manager = patch.object(
             dispatcher,
-            "browser_runtime_manager",
+            "browser_runtime",
             FakeBrowserRuntimeManager,
             create=True,
         )

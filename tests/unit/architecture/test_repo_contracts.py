@@ -147,8 +147,8 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
             "src/buddyswitch/modules/track/private/adapters/daemon/"
             "track_comment_added_handler.py"
         ),
-        Path("src/buddyswitch/launcher/browser_page_expired_handler.py"),
-        Path("src/buddyswitch/launcher/browser_release_handler.py"),
+        Path("src/buddyswitch/foundation/browser_runtime/page_handlers.py"),
+        Path("src/buddyswitch/foundation/browser_runtime/release_handler.py"),
         Path(
             "src/buddyswitch/modules/demand/private/adapters/daemon/"
             "demand_triage_handler.py"

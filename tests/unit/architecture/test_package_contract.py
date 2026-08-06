@@ -103,6 +103,7 @@ def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -
         "buddyswitch.catalog",
         "buddyswitch.config",
         "buddyswitch.contracts",
+        "buddyswitch.foundation.browser_runtime",
         "buddyswitch.launcher",
         "buddyswitch.modules.artifact",
         "buddyswitch.modules.demand",
@@ -227,6 +228,14 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
         ),
         REPO_ROOT / "docs" / "arch" / "daemon-service-architecture.md": (
+            "src/buddyswitch/launcher/instance_daemon.py",
+            "src/buddyswitch/foundation/browser_runtime/inbound.py",
+        ),
+        REPO_ROOT / "docs" / "arch" / "browser-runtime-architecture.md": (
+            "src/buddyswitch/foundation/browser_runtime/",
+            "src/buddyswitch/application/entrypoints/browser_runtime.py",
+            "src/buddyswitch/application/entrypoints/browser_cockpit_proxy.py",
+            "src/buddyswitch/runtime_kernel/dispatcher.py",
             "src/buddyswitch/launcher/instance_daemon.py",
         ),
         REPO_ROOT / "docs" / "arch" / "demand-sys-architecture.md": (

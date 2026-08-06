@@ -447,7 +447,7 @@ class ResourceLedger:
                     Path(str(args["log_file"])),
                 )
             elif strategy == "browser_stop":
-                from buddyswitch.launcher import browser_runtime_manager
+                from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 
                 result = browser_runtime_manager.release(
                     instance_root=Path(str(args["instance_root"])),

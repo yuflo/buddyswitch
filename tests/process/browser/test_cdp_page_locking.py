@@ -29,7 +29,7 @@ import sys
 
 instance_root = Path(sys.argv[2])
 
-from buddyswitch.env import cdp_browser_lifecycle as lifecycle
+from buddyswitch.foundation.browser_runtime import lifecycle
 
 lifecycle.forget_tab_idle_target(
     instance_root=instance_root,

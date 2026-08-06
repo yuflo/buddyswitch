@@ -29,6 +29,7 @@ from tests.support.cli import pid_alive, wait_until, write_executable
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
+BROWSER_RUNTIME = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime"
 
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
@@ -37,18 +38,19 @@ from buddyswitch.runtime_kernel import protocol  # noqa: E402
 
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-PROXY = ROOT / "src" / "buddyswitch" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+PROXY = BROWSER_RUNTIME / "cockpit_proxy.py"
 DAEMON_CORE = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 DAEMON_MAILBOX = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
-PAGE_EXPIRED_HANDLER = ROOT / "src" / "buddyswitch" / "launcher" / "browser_page_expired_handler.py"
-RELEASE_HANDLER = ROOT / "src" / "buddyswitch" / "launcher" / "browser_release_handler.py"
-BROWSER_RUNTIME_MANAGER = ROOT / "src" / "buddyswitch" / "launcher" / "browser_runtime_manager.py"
+PAGE_EXPIRED_HANDLER = BROWSER_RUNTIME / "page_handlers.py"
+RELEASE_HANDLER = BROWSER_RUNTIME / "release_handler.py"
+BROWSER_RUNTIME_MANAGER = BROWSER_RUNTIME / "runtime.py"
 TRIGGERS = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_triggers.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
-    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
+    module_path = path.relative_to(ROOT / "src").with_suffix("")
+    return importlib.reload(importlib.import_module(".".join(module_path.parts)))
 
 
 def port_accepts(port: int) -> bool:

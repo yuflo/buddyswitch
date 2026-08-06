@@ -172,7 +172,7 @@ class TestCdpPageLifecycle(CdpBrowserLifecycleHarness):
             )
             self.lifecycle.refresh_tab_idle(instance_root=instance_root, tab_target_id="stable-tab-1")
 
-            state = self.lifecycle._read_page_idle_state(instance_root)
+            state = self.lifecycle.read_page_idle_state(instance_root)
 
         self.assertEqual([call["delay_seconds"] for call in calls], [2, 7])
         self.assertEqual([call["payload"]["idle_seconds"] for call in calls], [2, 7])
@@ -267,6 +267,6 @@ class TestCdpPageLifecycle(CdpBrowserLifecycleHarness):
                 },
             )
 
-            state = self.lifecycle._read_page_idle_state(instance_root)
+            state = self.lifecycle.read_page_idle_state(instance_root)
 
         self.assertEqual(state, {"targets": {}})

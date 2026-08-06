@@ -36,7 +36,7 @@ LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from buddyswitch.runtime_kernel import protocol  # noqa: E402
 
-PROXY = ROOT / "src" / "buddyswitch" / "launcher" / "chrome_devtools_cockpit_proxy.py"
+PROXY = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "cockpit_proxy.py"
 DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 DAEMON_MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
 MODULE_COUNTER = count()

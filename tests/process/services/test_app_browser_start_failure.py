@@ -7,7 +7,7 @@ import subprocess
 import time
 
 from buddyswitch.launcher import app_server
-from buddyswitch.launcher import browser_runtime_manager
+from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 import pytest
 from buddyswitch.runtime_kernel import process_identity
 from tests.support.python import executable_python_source

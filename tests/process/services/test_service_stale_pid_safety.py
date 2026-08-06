@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 from buddyswitch.launcher import app_server
-from buddyswitch.launcher import browser_runtime_manager
+from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 from buddyswitch.launcher import daemon_core
 from buddyswitch.runtime_kernel import lifecycle, process_identity
 from tests.support.processes import ResourceLedger

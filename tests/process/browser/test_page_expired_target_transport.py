@@ -60,7 +60,7 @@ import sys
 
 instance_root = Path(sys.argv[1])
 
-from buddyswitch.launcher.browser_page_expired_handler import BrowserPageExpiredHandler
+from buddyswitch.foundation.browser_runtime.page_handlers import BrowserPageExpiredHandler
 
 context = SimpleNamespace(
     actor_id="act-browser",

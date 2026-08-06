@@ -98,7 +98,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         imports = imported_modules(INSTANCE_DAEMON_PATH)
 
         self.assertIn("buddyswitch.launcher.notification_center", imports)
-        self.assertIn("buddyswitch.launcher.browser_inbound", imports)
+        self.assertIn("buddyswitch.foundation.browser_runtime.inbound", imports)
         self.assertNotIn("buddyswitch.launcher.message_inbound", imports)
         self.assertFalse(
             any(name.startswith("buddyswitch.modules.communication") for name in imports),

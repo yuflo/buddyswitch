@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C2 ACCEPTED — C3 READY
-> Runtime authorization: `BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01` only
+> Current state: S0–S4 ACCEPTED; S5 C1–C3 ACCEPTED — C4 PREPARATION ONLY
+> Runtime authorization: none
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C2 ACCEPTED — C3 READY |
+| S5 | `05-foundation-convergence.md` | C1–C3 ACCEPTED — C4 PREPARATION ONLY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -183,8 +183,14 @@ asset, Broker/Daemon/application consumers, literal test paths and package
 projection. D-061 selects one `foundation/browser_runtime/**` owner without a
 facade or compatibility path. Preflight `S5C3P-20260806-01` proves the mapped
 owner graph is acyclic and the complete C3 plan is READY at
-`05-foundation-convergence-plan/browser-runtime/README.md`. Only the C3 packet
-is authorized; C4–C7 and S6 remain blocked.
+`05-foundation-convergence-plan/browser-runtime/README.md`. R1 completed the
+atomic owner move and behavior preservation. A bounded R2/hub review replaced
+an exact private topology assertion with invariant-based proof and removed an
+unearned lexical-analysis helper. Exact, affected and frozen FINAL
+`c6a7f1ad14c44df48dea1a96e0a4f5db` passed. C3 is accepted in
+`05-foundation-convergence-plan/browser-runtime/S5-C3-ACCEPTANCE.md`; both
+packets are consumed. C4
+preparation is unblocked, but C4–C7 implementation and S6 remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,
