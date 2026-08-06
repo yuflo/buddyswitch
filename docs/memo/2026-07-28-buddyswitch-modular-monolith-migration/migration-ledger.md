@@ -9,13 +9,14 @@
 | Evidence acceptance | `evidence/S4-EVIDENCE-ACCEPTANCE.md`; exact `2635192605a349a5af7b8c538af5daa6`; direct `24583e9ddefe441e94482b5d5e962993`; affected `12643e9d7351457c9b2485eaecbe3228`; FINAL `9ffe775dd313446dad2b17b0aa0aab26` |
 | S5 C1 acceptance | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; executable patch `23e7aab5…`; FINAL `7841f5d5614141728a2db56a4612d8f4` |
 | S5 C2 acceptance | `05-foundation-convergence-plan/web-cleanup/S5-C2-ACCEPTANCE.md`; patch `80f1aeeb…`; FINAL `c1a3466da1b6455ead00dfcdca86bf46` |
+| S5 C3 preparation | `05-foundation-convergence-plan/browser-runtime/README.md`; source manifest `20c58b57…`; topology `S5C3P-20260806-01` |
 | Active stage | S5 — Foundation Convergence |
-| State | C1–C2 ACCEPTED — C3 PREPARATION ONLY |
-| Runtime migration authorized | none |
+| State | C1–C2 ACCEPTED — C3 READY |
+| Runtime migration authorized | `BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01` only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | C3 current-source refresh, boundary preflight and READY review |
+| Next gate | execute C3 R1 and return for coordinating-hub acceptance |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules |
 
 ## Stage ledger
@@ -27,7 +28,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C2 ACCEPTED — C3 PREPARATION ONLY | S4 | coordinating hub | refresh and READY-review C3; implementation blocked |
+| S5 Foundation | C1–C2 ACCEPTED — C3 READY | S4 | coordinating hub | execute C3 R1 only; C4–C7 blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -329,7 +330,10 @@ route contribution and derived cleanup plan/result projections from selected
 typed contributions. Exact/affected proof and frozen FINAL
 `c1a3466da1b6455ead00dfcdca86bf46` passed on patch `80f1aeeb…`; C2 is accepted
 in `web-cleanup/S5-C2-ACCEPTANCE.md`. Its packet and evidence-only continuation
-are consumed. C3 preparation is now the only unlocked action.
+are consumed. C3 preparation then classified the complete Browser owner,
+asset, host consumers, literal paths and affected proof. D-061 and acyclic
+preflight `S5C3P-20260806-01` authorize one atomic C3 R1 packet; C4–C7 remain
+blocked.
 
 ## Transition record
 
@@ -379,6 +383,7 @@ are consumed. C3 preparation is now the only unlocked action.
 | 2026-08-04 | S5 C1 ToolHost | READY — C1 R2 COMPLETION ONLY | ACCEPTED — C2 PREPARATION ONLY | coordinating hub | final source/runtime identity, exact earned surfaces, explicit registrations, old-path absence, affected proof and replacement FINAL `7841f5d5614141728a2db56a4612d8f4` accepted; both C1 packets consumed |
 | 2026-08-04 | S5 C2 WebHost/cleanup | PREPARATION ONLY | READY — C2 R1 ONLY | coordinating hub | complete source/consumer trace, exact/prefix matcher and contribution-derived cleanup projection selected, assertion-level preservation and `S5C2P-20260804-02` passed |
 | 2026-08-06 | S5 C2 WebHost/cleanup | READY — C2 R1 ONLY | ACCEPTED — C3 PREPARATION ONLY | coordinating hub | candidate/runtime identity reproduced; exact/affected proof, contribution/absence proof and complete FINAL `c1a3466da1b6455ead00dfcdca86bf46` exit 0 accepted; C2 authority consumed |
+| 2026-08-06 | S5 C3 Browser runtime | PREPARATION ONLY | READY — C3 R1 ONLY | coordinating hub | complete Browser owner/consumer/asset/literal-path trace, source-equivalent preservation, D-061 and acyclic topology `S5C3P-20260806-01` passed READY review |
 
 ## Checkpoint record
 
@@ -428,6 +433,7 @@ are consumed. C3 preparation is now the only unlocked action.
 | 2026-08-04 | S5 C1 ToolHost acceptance | ACCEPTED | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; executable patch `23e7aab5…`; affected runs `5d0d14bc50c1403ea2c9c4b9fde061e6`, `b5033c61de0e415db1ae2060e16fd217`, `eabb70a77a8b4fb1b9b34b011d79a090`; FINAL `7841f5d5614141728a2db56a4612d8f4` | commit/push safe checkpoint, then refresh C2 source and READY inputs; never resume either C1 packet |
 | 2026-08-04 | S5 C2 WebHost/cleanup handoff | READY | `05-foundation-convergence-plan/web-cleanup/S5-C2-READY-REVIEW.md`; source-equivalent FINAL `7841f5d5614141728a2db56a4612d8f4`; runtime source `8a0bbe8f...`; topology `S5C2P-20260804-02`; packet `BS-MM-S5-WEB-CLEANUP-R1-20260804-01`; D-060 | execute one C2 candidate with Web and cleanup coherent blocks; C3–C7 remain blocked |
 | 2026-08-06 | S5 C2 WebHost/cleanup acceptance | ACCEPTED | `05-foundation-convergence-plan/web-cleanup/S5-C2-ACCEPTANCE.md`; patch `80f1aeeb…`; focused/affected `d21bcab06d024b6f9810c20bb6ecfb0d`, `f82b2f630e0142be88b6a6f17fd33430`, `97e1a28d6a194ca4bb34a2d7ff3c5367`, `fdc8e44e8c5441bc8b980f1af67d68af`, `c05aecfd37084c368bfaba405f6c4003`; FINAL `c1a3466da1b6455ead00dfcdca86bf46` | commit/push C2 checkpoint, then refresh C3 from committed source; never resume C2 authority |
+| 2026-08-06 | S5 C3 Browser runtime handoff | READY | `05-foundation-convergence-plan/browser-runtime/S5-C3-READY-REVIEW.md`; source manifest `20c58b57…`; runtime `9f138cbc…` / `996ac858…`; topology `S5C3P-20260806-01`; packet `BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01` | user starts one independent C3 task; hub pauses without polling; C4–C7 remain blocked |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -450,10 +456,10 @@ Stop/replan condition:
 
 ```text
 Stage: S5 / Foundation / C3 Browser preparation
-Master state: C1–C2 ACCEPTED — C3 PREPARATION ONLY
-Goal Packet: none
+Master state: C1–C2 ACCEPTED — C3 READY
+Goal Packet: BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01
 Execution session: none
-Last hub checkpoint: C2 accepted on patch `80f1aeeb…`; FINAL `c1a3466da1b6455ead00dfcdca86bf46`
-Next action: commit/push C2 safety checkpoint, then refresh C3 source/consumers/lifecycle and READY inputs
+Last hub checkpoint: C3 source/consumer/asset refresh and topology `S5C3P-20260806-01` READY
+Next action: commit/push C3 preparation, then execute C3 R1 in one independent session
 No-polling state: not entered
 ```

@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C2 ACCEPTED — C3 PREPARATION ONLY`
-> Current execution authority: none
+> Stage state: `C1–C2 ACCEPTED — C3 READY`
+> Current execution authority: `BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01`
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -20,9 +20,10 @@ C1 is accepted in `tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; both ToolHost packets
 are consumed. C2 is accepted in `web-cleanup/S5-C2-ACCEPTANCE.md`; its packet
 and evidence-only continuation are consumed. None may resume.
 
-Only C3 Browser source/consumer/lifecycle refresh and READY preparation are
-unblocked. Browser implementation, Daemon, Broker, Actor, App, physical Web/CLI
-host movement, RoleHost and final S5 implementation remain unauthorized.
+C3 source/consumer/lifecycle refresh, boundary preflight and READY review are
+complete in `browser-runtime/README.md`. Only its R1 packet may execute.
+Daemon, Broker, Actor, App, physical Web/CLI host movement, RoleHost and final
+S5 implementation remain unauthorized.
 
 ## Remaining checkpoints
 
@@ -30,7 +31,7 @@ host movement, RoleHost and final S5 implementation remain unauthorized.
 |---|---|---|
 | C1 | explicit ToolHost, narrow ToolContext, Daemon client placement | ACCEPTED |
 | C2 | WebHost route contribution and generic cleanup projection | ACCEPTED |
-| C3 | Browser runtime and public lifecycle operations | PREPARATION ONLY |
+| C3 | Browser runtime and public lifecycle operations | READY — R1 ONLY |
 | C4 | Identity, state and process primitives | BLOCKED |
 | C5 | Runtime Broker and Daemon host | BLOCKED |
 | C6 | Actor, App, Web and CLI host physical convergence | BLOCKED |
