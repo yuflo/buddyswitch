@@ -14,7 +14,6 @@ from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.repos import runtime_files
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo

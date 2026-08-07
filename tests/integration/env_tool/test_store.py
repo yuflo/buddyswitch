@@ -15,7 +15,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.modules.communication.private.state import messages as message_repo
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
@@ -156,9 +156,9 @@ class RuntimeRootFoundationTests(RuntimeWorkspaceTestCase):
     def test_environment_bound_runtime_roots_route_object_writes_to_state(self) -> None:
         runtime_root = self.runtime_root.resolve(strict=False)
         runtime_state_root = self.runtime_state_root.resolve(strict=False)
-        self.assertEqual(runtime_files.ROOT, runtime_root)
-        self.assertEqual(runtime_files.STATE_ROOT, runtime_state_root)
-        self.assertEqual(runtime_files.runtime_workspace_root(), runtime_root)
+        self.assertEqual(state_runtime.ROOT, runtime_root)
+        self.assertEqual(state_runtime.STATE_ROOT, runtime_state_root)
+        self.assertEqual(state_runtime.runtime_workspace_root(), runtime_root)
 
         artifact_id = f"art-pm-runtime-root-{uuid.uuid4().hex[:8]}-r1"
         object_builders.create_artifact_revision(
@@ -185,7 +185,7 @@ class RuntimeRootFoundationTests(RuntimeWorkspaceTestCase):
         alternate_runtime_root.mkdir(parents=True, exist_ok=True)
         alternate_state_root.mkdir(parents=True, exist_ok=True)
         (alternate_runtime_root / "AGENTS.md").write_text(
-            runtime_files.RUNTIME_WORKSPACE_AGENTS_HEADER + "\n",
+            state_runtime.RUNTIME_WORKSPACE_AGENTS_HEADER + "\n",
             encoding="utf-8",
         )
 
@@ -198,10 +198,10 @@ class RuntimeRootFoundationTests(RuntimeWorkspaceTestCase):
                     "BUDDYSWITCH_WORKSPACE_DIR": str(alternate_runtime_root),
                 },
             ):
-                runtime_files.refresh_runtime_roots_from_env()
-                self.assertEqual(runtime_files.ROOT, alternate_shared_root.resolve(strict=False))
-                self.assertEqual(runtime_files.STATE_ROOT, alternate_state_root.resolve(strict=False))
-                self.assertEqual(runtime_files.runtime_workspace_root(), alternate_runtime_root.resolve(strict=False))
+                state_runtime.refresh_runtime_roots_from_env()
+                self.assertEqual(state_runtime.ROOT, alternate_shared_root.resolve(strict=False))
+                self.assertEqual(state_runtime.STATE_ROOT, alternate_state_root.resolve(strict=False))
+                self.assertEqual(state_runtime.runtime_workspace_root(), alternate_runtime_root.resolve(strict=False))
 
                 artifact_id = f"art-pm-env-sync-{uuid.uuid4().hex[:8]}-r1"
                 object_builders.create_artifact_revision(
@@ -221,7 +221,7 @@ class RuntimeRootFoundationTests(RuntimeWorkspaceTestCase):
                 self.assertTrue(alternate_path.exists())
                 self.assertFalse(original_path.exists())
         finally:
-            runtime_files.refresh_runtime_roots_from_env()
+            state_runtime.refresh_runtime_roots_from_env()
 
 
 class ArtifactCompatibilityTests(RuntimeWorkspaceTestCase):

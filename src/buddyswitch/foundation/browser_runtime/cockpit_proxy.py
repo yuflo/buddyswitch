@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
 from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
 from buddyswitch.runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
-from buddyswitch.runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 
 STATIC_TOOLS_PATH = Path(__file__).resolve().parent / "assets" / "chrome-devtools-mcp-1.1.1-tools.json"

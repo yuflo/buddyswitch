@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
+from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef
 from buddyswitch.modules.task.private import read_model as task_read
 from buddyswitch.modules.task.private.domain import task_sys
 from tests.support.runtime import RuntimeWorkspaceTestCase

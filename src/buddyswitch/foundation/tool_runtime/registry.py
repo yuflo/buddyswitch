@@ -402,8 +402,8 @@ def _invoke_tool(*, tool: str, action: str, args: dict[str, Any], context: Any) 
 
 
 def _actor_identity_profile_from_dispatch(*, actor_id: str, active_role: str) -> Any:
-    from buddyswitch.env.domain.identity import ActorIdentityProfile
-    from buddyswitch.env.domain.identity import actor_identity
+    from buddyswitch.foundation.identity.model import ActorIdentityProfile
+    from buddyswitch.foundation.identity.model import actor_identity
 
     return ActorIdentityProfile(
         identity=actor_identity(actor_id),

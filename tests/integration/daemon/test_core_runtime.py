@@ -21,8 +21,8 @@ LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
 from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 
 DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
@@ -60,7 +60,7 @@ class DaemonCoreTestCase(unittest.TestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        runtime_files.refresh_runtime_roots_from_env()
+        state_runtime.refresh_runtime_roots_from_env()
 
 
 class DaemonCoreLifecycleTests(DaemonCoreTestCase):
@@ -389,8 +389,8 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(Path(temp_root))
             os.environ["BUDDYSWITCH_STATE_ROOT"] = str(Path(temp_root) / "state")
             os.environ["BUDDYSWITCH_ACTOR_ID"] = "act-dev-daed00000001"
-            runtime_files.refresh_runtime_roots_from_env()
-            expected_profile = identity_repo.save_actor_identity_profile(
+            state_runtime.refresh_runtime_roots_from_env()
+            expected_profile = identity_profiles.save_actor_identity_profile(
                 {"identity": {"id": "act-dev-daed00000001", "type": "actor"}, "role_id": "dev"}
             )
             self.core.daemon_pid_file(instance["instance_root"]).parent.mkdir(parents=True, exist_ok=True)
@@ -411,7 +411,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             payload = self.core.stop_daemon(instance["instance_json"])
 
             self.assertTrue(payload["terminated"])
-            self.assertEqual(identity_repo.get_actor_identity_profile("act-dev-daed00000001"), expected_profile)
+            self.assertEqual(identity_profiles.get_actor_identity_profile("act-dev-daed00000001"), expected_profile)
 
     def test_daemon_status_reports_paths_live_state_and_last_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
@@ -702,7 +702,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             wrong_root = Path(temp_root) / "wrong-state"
             os.environ.pop("BUDDYSWITCH_SHARED_ROOT", None)
             os.environ["BUDDYSWITCH_STATE_ROOT"] = str(wrong_root)
-            runtime_files.refresh_runtime_roots_from_env()
+            state_runtime.refresh_runtime_roots_from_env()
 
             fake_client = FakeRunDaemonClient(notifications=[StopDaemonLoop("stop")])
             self._patch_app_server_client(fake_client)
@@ -711,7 +711,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             fake_start_mailbox = self.core.start_daemon_mailbox
 
             def observing_start_mailbox(**kwargs: object) -> object:
-                observed_roots.append(runtime_files.STATE_ROOT)
+                observed_roots.append(state_runtime.STATE_ROOT)
                 return fake_start_mailbox(**kwargs)
 
             self.core.start_daemon_mailbox = observing_start_mailbox
@@ -722,7 +722,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             expected_state_root = Path(temp_root) / "state"
             expected_resolved_state_root = expected_state_root.resolve(strict=False)
             self.assertEqual(os.environ["BUDDYSWITCH_STATE_ROOT"], str(expected_state_root))
-            self.assertEqual(runtime_files.STATE_ROOT, expected_resolved_state_root)
+            self.assertEqual(state_runtime.STATE_ROOT, expected_resolved_state_root)
             self.assertEqual(observed_roots, [expected_resolved_state_root])
             self.assertEqual(len(communication["mailbox_closed"]), 1)
 
@@ -736,7 +736,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             fake_register = self.core.register_daemon_actor
 
             def observing_register(context: object, identity_route: dict[str, str]) -> dict[str, object]:
-                observed_profile_at_register.append(identity_repo.get_actor_identity_profile(identity_route["identity_id"]))
+                observed_profile_at_register.append(identity_profiles.get_actor_identity_profile(identity_route["identity_id"]))
                 return fake_register(context, identity_route)
 
             self.core.register_daemon_actor = observing_register
@@ -744,7 +744,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             with self.assertRaises(StopDaemonLoop):
                 self.core.run_daemon(instance["instance_json"], handlers=[])
 
-            profile = identity_repo.get_actor_identity_profile("act-dev-daed00000001")
+            profile = identity_profiles.get_actor_identity_profile("act-dev-daed00000001")
             self.assertEqual(
                 profile,
                 {"identity": {"id": "act-dev-daed00000001", "type": "actor"}, "role_id": "dev"},
@@ -758,8 +758,8 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(Path(temp_root))
             os.environ["BUDDYSWITCH_STATE_ROOT"] = str(Path(temp_root) / "state")
             os.environ["BUDDYSWITCH_ACTOR_ID"] = "act-dev-daed00000001"
-            runtime_files.refresh_runtime_roots_from_env()
-            identity_repo.save_actor_identity_profile(
+            state_runtime.refresh_runtime_roots_from_env()
+            identity_profiles.save_actor_identity_profile(
                 {"identity": {"id": "act-dev-daed00000001", "type": "actor"}, "role_id": "pm"}
             )
             fake_client = FakeRunDaemonClient(notifications=[])

@@ -8,7 +8,7 @@ from typing import Any
 
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.demand import public as demand_public  # noqa: E402
 from buddyswitch.modules.track.private.domain import (
     track_comments as track_comment_rules,
@@ -21,8 +21,8 @@ from buddyswitch.modules.track.private.state import tracks as track_repo
 
 def _context_identity_route(context: Any) -> dict[str, str]:
     return {
-        "identity_id": runtime_files.require_id(getattr(context, "actor_id", ""), "context.actor_id"),
-        "role_id": runtime_files.require_id(getattr(context, "role", ""), "context.role"),
+        "identity_id": state_runtime.require_id(getattr(context, "actor_id", ""), "context.actor_id"),
+        "role_id": state_runtime.require_id(getattr(context, "role", ""), "context.role"),
     }
 
 
@@ -48,16 +48,16 @@ class TrackCommentAddedHandler:
         if not isinstance(payload, dict):
             raise ValueError("track comment trigger payload must be an object")
         return {
-            "track_id": runtime_files.require_id(payload.get("track_id"), "track_id"),
-            "comment_id": runtime_files.require_id(payload.get("comment_id"), "comment_id"),
-            "thread_id": runtime_files.require_id(payload.get("thread_id"), "thread_id"),
+            "track_id": state_runtime.require_id(payload.get("track_id"), "track_id"),
+            "comment_id": state_runtime.require_id(payload.get("comment_id"), "comment_id"),
+            "thread_id": state_runtime.require_id(payload.get("thread_id"), "thread_id"),
         }
 
     def _ensure_target_identity(self, context: Any, trigger: Any) -> dict[str, str]:
         local_route = _context_identity_route(context)
         target_route = {
-            "identity_id": runtime_files.require_id(getattr(trigger, "target_identity_id", ""), "trigger.target_identity_id"),
-            "role_id": runtime_files.require_id(getattr(trigger, "target_role_id", ""), "trigger.target_role_id"),
+            "identity_id": state_runtime.require_id(getattr(trigger, "target_identity_id", ""), "trigger.target_identity_id"),
+            "role_id": state_runtime.require_id(getattr(trigger, "target_role_id", ""), "trigger.target_role_id"),
         }
         if target_route != local_route:
             raise PermissionError("wrong target identity for Track comment trigger")
@@ -68,8 +68,8 @@ class TrackCommentAddedHandler:
         if not isinstance(source_context, dict):
             raise ValueError("track comment trigger source_context must be an object")
         return {
-            "identity_id": runtime_files.require_id(source_context.get("source_identity_id"), "source_context.source_identity_id"),
-            "role_id": runtime_files.require_id(source_context.get("source_role_id"), "source_context.source_role_id"),
+            "identity_id": state_runtime.require_id(source_context.get("source_identity_id"), "source_context.source_identity_id"),
+            "role_id": state_runtime.require_id(source_context.get("source_role_id"), "source_context.source_role_id"),
         }
 
     def _comment(self, *, track_id: str, comment_id: str, thread_id: str) -> dict[str, Any]:

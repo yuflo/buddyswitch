@@ -23,7 +23,6 @@ HELPER_DIR = ROOT / "src" / "buddyswitch" / "launcher"
 ACTOR_SESSION_PATH = HELPER_DIR / "actor_session.py"
 
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
 from buddyswitch.launcher import actor_capability  # noqa: E402
 
 MODULE_COUNTER = count()

@@ -10,7 +10,8 @@ import sys
 from buddyswitch.launcher import app_server
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 from buddyswitch.launcher import daemon_core
-from buddyswitch.runtime_kernel import lifecycle, process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
+from buddyswitch.runtime_kernel import lifecycle
 from tests.support.processes import ResourceLedger
 
 

@@ -10,7 +10,8 @@ import time
 
 import pytest
 
-from buddyswitch.runtime_kernel import lifecycle, process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
+from buddyswitch.runtime_kernel import lifecycle
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger, run_process
 

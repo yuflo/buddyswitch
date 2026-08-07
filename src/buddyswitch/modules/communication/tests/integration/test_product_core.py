@@ -14,7 +14,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 from buddyswitch.modules.communication.private.state import messages as message_repo  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -27,7 +27,7 @@ class ImProductCoreTests(RuntimeWorkspaceTestCase):
 
     def _actor_identity(self, *, role: str = "market", label: str = "target") -> dict[str, object]:
         identity_id = self._runtime_actor_id(role=role, label=label)
-        identity_repo.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {"identity": {"id": identity_id, "type": "actor"}, "role_id": role}
         )
         return {"identity": {"id": identity_id, "type": "actor"}, "identity_id": identity_id, "role_id": role}

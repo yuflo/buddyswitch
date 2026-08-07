@@ -6,8 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.env.domain.identity import IdentityRef
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
 
 _COMMENT_STATUSES = {"open", "resolved"}
 _FORBIDDEN_TRACK_COMMENT_FIELDS = {
@@ -30,7 +30,7 @@ def _require_non_empty_text(value: Any, field: str) -> str:
 
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
-        return runtime_files.require_id(value.strip(), field)
+        return state_runtime.require_id(value.strip(), field)
     if isinstance(value, dict):
         if isinstance(value.get("identity"), dict):
             return IdentityRef.from_payload(value["identity"]).id
@@ -42,17 +42,17 @@ def _identity_id(value: Any, field: str) -> str:
 def track_comment_file(track_id: str, comment_id: str) -> Path:
     return (
         track_comments_dir()
-        / runtime_files.require_id(track_id, "track id")
-        / f"{runtime_files.require_id(comment_id, 'comment id')}.json"
+        / state_runtime.require_id(track_id, "track id")
+        / f"{state_runtime.require_id(comment_id, 'comment id')}.json"
     )
 
 
 def track_comments_dir() -> Path:
-    return runtime_files.OBJECTS_ROOT / "track-comments"
+    return state_runtime.OBJECTS_ROOT / "track-comments"
 
 
 def _track_comment_dir(track_id: str) -> Path:
-    return track_comments_dir() / runtime_files.require_id(track_id, "track id")
+    return track_comments_dir() / state_runtime.require_id(track_id, "track id")
 
 
 def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
@@ -60,8 +60,8 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if forbidden:
         raise ValueError(f"unsupported track comment fields: {', '.join(forbidden)}")
 
-    comment_id = runtime_files.require_id(comment.get("id", ""), "comment.id")
-    track_id = runtime_files.require_id(comment.get("track_id"), "comment.track_id")
+    comment_id = state_runtime.require_id(comment.get("id", ""), "comment.id")
+    track_id = state_runtime.require_id(comment.get("track_id"), "comment.track_id")
     by_identity_id = _identity_id(
         comment.get("by_identity_id"),
         "comment.by_identity_id",
@@ -72,14 +72,14 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
     if thread_id_raw is None:
         thread_id = comment_id
     else:
-        thread_id = runtime_files.require_id(
+        thread_id = state_runtime.require_id(
             _require_non_empty_text(thread_id_raw, "comment.thread_id"),
             "comment.thread_id",
         )
 
     reply_to = comment.get("reply_to")
     if reply_to is not None:
-        reply_to = runtime_files.require_id(reply_to, "comment.reply_to")
+        reply_to = state_runtime.require_id(reply_to, "comment.reply_to")
 
     status = _require_non_empty_text(comment.get("status", "open"), "comment.status")
     if status not in _COMMENT_STATUSES:
@@ -121,7 +121,7 @@ def validate_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
 
 
 def _read_comment_file(path: Path) -> dict[str, Any]:
-    return validate_track_comment(runtime_files.read_json_object(path))
+    return validate_track_comment(state_runtime.read_json_object(path))
 
 
 def list_track_comments() -> list[dict[str, Any]]:
@@ -134,7 +134,7 @@ def list_track_comments() -> list[dict[str, Any]]:
 
 
 def comments_for_track(track_id: str) -> list[dict[str, Any]]:
-    runtime_files.require_id(track_id, "track_id")
+    state_runtime.require_id(track_id, "track_id")
     rows: list[dict[str, Any]] = []
     track_dir = _track_comment_dir(track_id)
     if track_dir.is_dir():
@@ -145,7 +145,7 @@ def comments_for_track(track_id: str) -> list[dict[str, Any]]:
 
 
 def comments_for_track_thread(track_id: str, thread_id: str) -> list[dict[str, Any]]:
-    normalized_thread_id = runtime_files.require_id(thread_id, "thread_id")
+    normalized_thread_id = state_runtime.require_id(thread_id, "thread_id")
     rows = [row for row in comments_for_track(track_id) if row.get("thread_id") == normalized_thread_id]
     rows.sort(key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")))
     return rows
@@ -159,7 +159,7 @@ def get_track_comment(track_id: str, comment_id: str) -> dict[str, Any] | None:
 
 
 def _find_track_comment(comment_id: str) -> dict[str, Any] | None:
-    normalized_comment_id = runtime_files.require_id(comment_id, "comment_id")
+    normalized_comment_id = state_runtime.require_id(comment_id, "comment_id")
     for row in list_track_comments():
         if row.get("id") == normalized_comment_id:
             return row
@@ -168,8 +168,8 @@ def _find_track_comment(comment_id: str) -> dict[str, Any] | None:
 
 def save_track_comment(comment: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track_comment(comment)
-    runtime_files.require_runtime_workspace_write_root()
-    runtime_files.write_json_object(
+    state_runtime.require_runtime_workspace_write_root()
+    state_runtime.write_json_object(
         track_comment_file(str(normalized["track_id"]), str(normalized["id"])),
         normalized,
     )
@@ -206,18 +206,18 @@ def create_track_comment(
     thread_id: str | None = None,
     status: str = "open",
 ) -> dict[str, Any]:
-    normalized_track_id = runtime_files.require_id(track_id, "track_id")
+    normalized_track_id = state_runtime.require_id(track_id, "track_id")
     author_identity_id = _identity_id(by_identity, "by_identity")
     content_text = _require_non_empty_text(content, "content")
     if reply_to is not None:
-        runtime_files.require_id(reply_to, "reply_to")
+        state_runtime.require_id(reply_to, "reply_to")
     if thread_id is not None:
-        runtime_files.require_id(thread_id, "thread_id")
+        state_runtime.require_id(thread_id, "thread_id")
     if status not in _COMMENT_STATUSES:
         raise ValueError("status must be one of open|resolved")
 
     comment_id = f"comment-{uuid.uuid4().hex[:12]}"
-    runtime_files.require_id(comment_id, "comment id")
+    state_runtime.require_id(comment_id, "comment id")
     return save_track_comment(
         {
             "id": comment_id,
@@ -228,7 +228,7 @@ def create_track_comment(
             "reply_to": reply_to,
             "mentioned_identity_ids": _normalize_mentioned_identity_ids(mentioned_identities),
             "status": status,
-            "created_at": runtime_files.now_iso(),
+            "created_at": state_runtime.now_iso(),
             "resolved_by_identity_id": None,
             "resolved_at": None,
             "resolution_summary": None,
@@ -244,8 +244,8 @@ def reply_to_track_comment(
     content: str,
     mentioned_identities: list[dict[str, Any] | str] | None = None,
 ) -> dict[str, Any]:
-    normalized_track_id = runtime_files.require_id(track_id, "track_id")
-    normalized_reply_to = runtime_files.require_id(reply_to, "reply_to")
+    normalized_track_id = state_runtime.require_id(track_id, "track_id")
+    normalized_reply_to = state_runtime.require_id(reply_to, "reply_to")
     parent = _find_track_comment(normalized_reply_to)
     if parent is None:
         raise ValueError(f"reply_to comment not found: {normalized_reply_to}")
@@ -269,8 +269,8 @@ def resolve_track_comment_thread(
     resolved_by_identity: dict[str, Any] | str,
     resolution_summary: str,
 ) -> list[dict[str, Any]]:
-    normalized_track_id = runtime_files.require_id(track_id, "track_id")
-    normalized_comment_id = runtime_files.require_id(comment_id, "comment_id")
+    normalized_track_id = state_runtime.require_id(track_id, "track_id")
+    normalized_comment_id = state_runtime.require_id(comment_id, "comment_id")
     normalized_resolved_by_identity_id = _identity_id(resolved_by_identity, "resolved_by_identity")
     normalized_summary = _require_non_empty_text(resolution_summary, "resolution_summary")
 
@@ -287,7 +287,7 @@ def resolve_track_comment_thread(
     if all(row.get("status") == "resolved" for row in thread_rows):
         raise ValueError(f"comment thread '{thread_id}' is already resolved")
 
-    now = runtime_files.now_iso()
+    now = state_runtime.now_iso()
     normalized_updates: list[dict[str, Any]] = []
     for row in thread_rows:
         updated = dict(row)
@@ -297,9 +297,9 @@ def resolve_track_comment_thread(
         updated["resolution_summary"] = normalized_summary
         normalized_updates.append(validate_track_comment(updated))
 
-    runtime_files.require_runtime_workspace_write_root()
+    state_runtime.require_runtime_workspace_write_root()
     for row in normalized_updates:
-        runtime_files.write_json_object(
+        state_runtime.write_json_object(
             track_comment_file(str(row["track_id"]), str(row["id"])),
             row,
         )

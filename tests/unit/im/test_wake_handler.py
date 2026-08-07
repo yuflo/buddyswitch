@@ -6,8 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from buddyswitch.env.repos import identities as identity_repo
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.identity.profiles as identity_profiles
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.communication.private.adapters.daemon import (
     im_wake_handler,
 )
@@ -58,7 +58,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         self.enqueue_calls: list[dict[str, Any]] = []
 
     def _save_actor(self, actor_id: str, role_id: str) -> None:
-        identity_repo.save_actor_identity_profile({
+        identity_profiles.save_actor_identity_profile({
             "identity": {"id": actor_id, "type": "actor"},
             "role_id": role_id,
         })
@@ -108,7 +108,7 @@ class ImWakeHandlerTests(RuntimeWorkspaceTestCase):
         return {"schedule_id": "schedule-handler-probe"}
 
     def _task_records(self) -> list[dict[str, Any]]:
-        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        tasks_dir = state_runtime.OBJECTS_ROOT / "task-sys" / "tasks"
         return [
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(tasks_dir.glob("*.json"))

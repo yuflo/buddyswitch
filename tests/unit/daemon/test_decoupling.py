@@ -133,9 +133,9 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        runtime_files = sys.modules.get("buddyswitch.env.repos.runtime_files")
-        if runtime_files is not None:
-            runtime_files.refresh_runtime_roots_from_env()
+        state_runtime = sys.modules.get("buddyswitch.foundation.state.runtime")
+        if state_runtime is not None:
+            state_runtime.refresh_runtime_roots_from_env()
 
     def test_generic_daemon_command_modules_have_no_task_runtime_semantics(self) -> None:
         for path in (DAEMON_MAILBOX_PATH, DAEMON_RUNTIME_PATH, DAEMON_CLIENT_PATH):

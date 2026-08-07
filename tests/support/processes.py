@@ -14,7 +14,7 @@ import time
 from typing import IO, Any, Mapping, Sequence
 import uuid
 
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
 
 POLL_INTERVAL = 0.02

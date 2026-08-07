@@ -12,8 +12,8 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
-from buddyswitch.env.repos import identities  # noqa: E402
+from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 from buddyswitch.modules.communication.private.state import messages as message_repo  # noqa: E402
 from buddyswitch.foundation.tool_runtime import context as runtime_context  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
@@ -121,7 +121,7 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestCase):
 
     def test_im_delivery_payload_uses_target_identity_route(self) -> None:
         calls: dict[str, Any] = {}
-        identities.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": "act-dev-im-wake", "type": "actor"},
                 "role_id": "dev",

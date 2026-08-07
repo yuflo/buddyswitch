@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 from buddyswitch.launcher import app_server  # noqa: E402
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.task.private.adapters.goal import protocol  # noqa: E402
 from buddyswitch.modules.task.private.domain import task_sys  # noqa: E402
 
@@ -26,8 +26,8 @@ class TaskGoalInvariantError(RuntimeError):
 
 def _actor_target(context: daemon_contracts.DaemonContext) -> dict[str, str]:
     return {
-        "actor_id": runtime_files.require_id(context.actor_id, "context.actor_id"),
-        "role_id": runtime_files.require_id(context.role, "context.role"),
+        "actor_id": state_runtime.require_id(context.actor_id, "context.actor_id"),
+        "role_id": state_runtime.require_id(context.role, "context.role"),
     }
 
 
@@ -152,7 +152,7 @@ def reconcile_task(
     context: daemon_contracts.DaemonContext,
     task_id: str,
 ) -> dict[str, Any]:
-    normalized_id = runtime_files.require_id(task_id, "task_id")
+    normalized_id = state_runtime.require_id(task_id, "task_id")
     task = task_sys.get_task(normalized_id)
     _require_task_owner(context, task)
 

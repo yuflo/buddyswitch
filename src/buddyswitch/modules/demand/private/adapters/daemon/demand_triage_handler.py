@@ -13,7 +13,7 @@ from buddyswitch.launcher import actor_side_thread  # noqa: E402
 from buddyswitch.launcher import app_server  # noqa: E402
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
 from buddyswitch.launcher import side_thread_registry  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.demand.private.adapters.daemon import (  # noqa: E402
     demand_sys_daemon_adapter,
     demand_triage_runtime,
@@ -45,11 +45,11 @@ TRIAGE_ENV_TOOLS = [
 
 def _actor_target(context: Any) -> dict[str, str]:
     return {
-        "actor_id": runtime_files.require_id(
+        "actor_id": state_runtime.require_id(
             getattr(context, "actor_id", ""),
             "context.actor_id",
         ),
-        "role_id": runtime_files.require_id(
+        "role_id": state_runtime.require_id(
             getattr(context, "role", ""),
             "context.role",
         ),

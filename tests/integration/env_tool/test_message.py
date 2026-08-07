@@ -12,7 +12,7 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.modules.communication.private.adapters.tool import _impl as message_impl  # noqa: E402
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
@@ -116,7 +116,7 @@ class MessageToolImClientTests(unittest.TestCase):
 
 class ActorImClientTests(RuntimeWorkspaceTestCase):
     def _save_actor_profile(self, *, identity_id: str, role_id: str) -> None:
-        identity_repo.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": identity_id, "type": "actor"},
                 "role_id": role_id,

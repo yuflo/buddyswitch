@@ -23,11 +23,11 @@ from buddyswitch.launcher import daemon_runtime  # noqa: E402
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from buddyswitch.launcher import daemon_triggers  # noqa: E402
 from buddyswitch.launcher import runtime_event_log  # noqa: E402
-from buddyswitch.env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
-from buddyswitch.runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 
 DAEMON_CLIENT_NAME = "buddyswitch_daemon"
@@ -281,7 +281,7 @@ def identity_route_for_context(context: daemon_contracts.DaemonContext) -> dict[
 
 
 def ensure_actor_identity_profile(context: daemon_contracts.DaemonContext, identity_route: dict[str, str]) -> dict[str, Any]:
-    existing = identity_repo.get_actor_identity_profile(identity_route["identity_id"])
+    existing = identity_profiles.get_actor_identity_profile(identity_route["identity_id"])
     if isinstance(existing, dict):
         if existing.get("role_id") != identity_route["role_id"]:
             raise ValueError(
@@ -290,7 +290,7 @@ def ensure_actor_identity_profile(context: daemon_contracts.DaemonContext, ident
                 f"instance has {identity_route['role_id']}"
             )
         return existing
-    return identity_repo.save_actor_identity_profile(
+    return identity_profiles.save_actor_identity_profile(
         {
             "identity": {"id": identity_route["identity_id"], "type": "actor"},
             "role_id": identity_route["role_id"],
@@ -987,7 +987,7 @@ def run_daemon(
     pid_path = daemon_pid_file(context.instance_root)
     process_identity.write_record(pid_path, os.getpid())
     os.environ.update(derive_daemon_runtime_env(context))
-    runtime_files.refresh_runtime_roots_from_env()
+    state_runtime.refresh_runtime_roots_from_env()
     identity_route = identity_route_for_context(context)
     ensure_actor_identity_profile(context, identity_route)
     state = daemon_state.DaemonState.load(

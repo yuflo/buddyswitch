@@ -21,8 +21,7 @@ LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
 from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 
 DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
 INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
@@ -60,7 +59,7 @@ class DaemonCoreTestCase(unittest.TestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        runtime_files.refresh_runtime_roots_from_env()
+        state_runtime.refresh_runtime_roots_from_env()
 
 
 class DaemonCoreStateTests(DaemonCoreTestCase):

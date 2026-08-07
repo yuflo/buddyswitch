@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.artifact.private.domain import (
     artifact_visibility as artifact_visibility_domain,
 )
@@ -49,7 +49,7 @@ def normalize_source_refs(
 
         item: dict[str, Any] = {"type": ref_type}
         if ref_type in {"artifact", "track", "task"}:
-            item["id"] = runtime_files.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
+            item["id"] = state_runtime.require_id(raw.get("id"), f"source_refs.{ref_type}.id")
         elif ref_type == "external":
             label = raw.get("label")
             if not isinstance(label, str) or not label.strip():

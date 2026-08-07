@@ -18,7 +18,7 @@ from tests.support.python import PYTHON, executable_python_source
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger, run_process
 from tests.support.cli import write_executable
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "buddyswitch-codex"

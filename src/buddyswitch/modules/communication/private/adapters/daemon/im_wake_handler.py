@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.communication.private.domain import (
     messages as message_service,
 )  # noqa: E402
@@ -15,8 +15,8 @@ IM_MESSAGE_CREATED_EVENT_TYPE = "im.message.created"
 
 def _context_identity_route(context: Any) -> dict[str, str]:
     return {
-        "identity_id": runtime_files.require_id(getattr(context, "actor_id", ""), "context.actor_id"),
-        "role_id": runtime_files.require_id(getattr(context, "role", ""), "context.role"),
+        "identity_id": state_runtime.require_id(getattr(context, "actor_id", ""), "context.actor_id"),
+        "role_id": state_runtime.require_id(getattr(context, "role", ""), "context.role"),
     }
 
 
@@ -24,7 +24,7 @@ def _payload_id(trigger: Any, field: str) -> str:
     payload = getattr(trigger, "payload", None)
     if not isinstance(payload, dict):
         raise ValueError("IM wake payload must be an object")
-    return runtime_files.require_id(payload.get(field), field)
+    return state_runtime.require_id(payload.get(field), field)
 
 
 def _service_row(response: Any, field: str) -> dict[str, Any]:
@@ -42,7 +42,7 @@ def _service_row(response: Any, field: str) -> dict[str, Any]:
 
 
 def _actor_identity(actor_id: str) -> dict[str, str]:
-    return {"id": runtime_files.require_id(actor_id, "actor identity id"), "type": "actor"}
+    return {"id": state_runtime.require_id(actor_id, "actor identity id"), "type": "actor"}
 
 
 class ImMessageCreatedHandler:
@@ -68,8 +68,8 @@ class ImMessageCreatedHandler:
         try:
             local_route = _context_identity_route(context)
             target_route = {
-                "identity_id": runtime_files.require_id(getattr(trigger, "target_identity_id", ""), "trigger.target_identity_id"),
-                "role_id": runtime_files.require_id(getattr(trigger, "target_role_id", ""), "trigger.target_role_id"),
+                "identity_id": state_runtime.require_id(getattr(trigger, "target_identity_id", ""), "trigger.target_identity_id"),
+                "role_id": state_runtime.require_id(getattr(trigger, "target_role_id", ""), "trigger.target_role_id"),
             }
             if target_route != local_route:
                 raise PermissionError("wrong target identity for IM wake")

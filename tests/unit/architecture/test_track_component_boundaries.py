@@ -197,7 +197,7 @@ def test_track_dependency_direction_and_stable_storage_are_exact() -> None:
         track_private_root / "state/track_comments.py"
     ).read_text(encoding="utf-8")
     runtime_source = (
-        REPO_ROOT / "src/buddyswitch/env/repos/runtime_files.py"
+        REPO_ROOT / "src/buddyswitch/foundation/state/runtime.py"
     ).read_text(encoding="utf-8")
     assert 'OBJECTS_ROOT / "tracks"' in tracks_source
     assert 'OBJECTS_ROOT / "track-comments"' in comments_source

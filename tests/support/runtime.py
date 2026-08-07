@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from buddyswitch.runtime_support import turn_runtime
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from tests.support import task_fixtures
 
 
@@ -50,12 +50,12 @@ class RuntimeTestWorkspace:
         self._turn_root = patch.object(turn_runtime, "ROOT", self.root)
         self._environment.start()
         self._turn_root.start()
-        runtime_files.refresh_runtime_roots_from_env()
+        state_runtime.refresh_runtime_roots_from_env()
 
     def close(self) -> None:
         self._turn_root.stop()
         self._environment.stop()
-        runtime_files.refresh_runtime_roots_from_env()
+        state_runtime.refresh_runtime_roots_from_env()
         self._temporary.cleanup()
 
     def path(self, repo_path: str) -> Path:

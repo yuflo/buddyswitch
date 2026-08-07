@@ -21,7 +21,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
 from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
 from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 
 PORT_START = 9222

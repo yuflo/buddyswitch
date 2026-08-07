@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile
+from buddyswitch.foundation.identity.model import ActorIdentityProfile
 from buddyswitch.modules.task.private.domain import task_sys
 from buddyswitch.modules.task.public.contracts import (
     TaskCompletionEvidenceError,

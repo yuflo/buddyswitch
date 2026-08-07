@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Iterator
 
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.communication.private.adapters.web import (
     external_im_session,
 )
@@ -35,7 +35,7 @@ class WebImIdentityProvider:
 
     @property
     def identity_dir(self) -> Path:
-        return self._identity_dir or runtime_files.LOCAL_ROOT / "web-management"
+        return self._identity_dir or state_runtime.LOCAL_ROOT / "web-management"
 
     @property
     def identity_path(self) -> Path:
@@ -46,12 +46,12 @@ class WebImIdentityProvider:
         return self.identity_dir / "im-session.lock"
 
     def ensure(self) -> dict[str, Any]:
-        runtime_files.require_central_im_write_root()
+        state_runtime.require_central_im_write_root()
         with self._lock():
             record = self._read_existing()
             authenticated = self._authenticate_record(record) if record is not None else None
             if record is not None and authenticated is not None:
-                now = runtime_files.now_iso()
+                now = state_runtime.now_iso()
                 created_at = record.get("created_at")
                 updated = {
                     "schema_version": SCHEMA_VERSION,
@@ -72,7 +72,7 @@ class WebImIdentityProvider:
         if not path.exists():
             return None
         try:
-            payload = runtime_files.read_json_object(path)
+            payload = state_runtime.read_json_object(path)
         except ValueError:
             return None
         return payload
@@ -98,7 +98,7 @@ class WebImIdentityProvider:
         if result.get("ok") is not True:
             message = result.get("error", {}).get("message") if isinstance(result.get("error"), dict) else None
             raise WebImIdentityError(str(message or "Unable to create Web Management IM external session."))
-        now = runtime_files.now_iso()
+        now = state_runtime.now_iso()
         external_session_key = result.get("external_session_key")
         if not isinstance(external_session_key, str) or not external_session_key:
             raise WebImIdentityError("Web Management IM external session creation returned an invalid key.")
@@ -123,7 +123,7 @@ class WebImIdentityProvider:
         return record
 
     def _write(self, record: dict[str, Any]) -> None:
-        runtime_files.write_json_object(self.identity_path, record)
+        state_runtime.write_json_object(self.identity_path, record)
         try:
             os.chmod(self.identity_path, 0o600)
         except OSError:

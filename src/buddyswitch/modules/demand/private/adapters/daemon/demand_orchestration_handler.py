@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 
 from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
 import buddyswitch.modules.task.public as task_public  # noqa: E402
 
@@ -36,11 +36,11 @@ Attention:
 
 def _actor_target(context: Any) -> dict[str, str]:
     return {
-        "actor_id": runtime_files.require_id(
+        "actor_id": state_runtime.require_id(
             getattr(context, "actor_id", ""),
             "context.actor_id",
         ),
-        "role_id": runtime_files.require_id(
+        "role_id": state_runtime.require_id(
             getattr(context, "role", ""),
             "context.role",
         ),

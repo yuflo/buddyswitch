@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -16,8 +17,8 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.repos import runtime_files
-from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
+from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
@@ -32,6 +33,11 @@ from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 _EXPECTED_TOOLS = {"demand_sys", "task_sys", "track", "artifact", "context", "evidence", "search", "message"}
+
+
+def _fixture_slug(text: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return cleaned or "fixture"
 
 
 class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
@@ -104,7 +110,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertTrue(hasattr(context, "actor_private_root"))
         self.assertEqual(
             context.actor_private_root,
-            runtime_files.actor_private_dir(context.instance_payload).resolve(strict=False),
+            state_runtime.actor_private_dir(context.instance_payload).resolve(strict=False),
         )
         self.assertFalse(hasattr(context, "task_goal_runtime"))
         self.assertFalse(hasattr(runtime_context, "TaskGoalRuntimeAccess"))
@@ -160,9 +166,9 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         result = task_fixtures.create_task(
             actor_target={"actor_id": actor_id, "role_id": role},
             demand_ref={
-                "demand_id": f"demand-context-{runtime_files.slugify(source_type)}",
+                "demand_id": f"demand-context-{_fixture_slug(source_type)}",
                 "basis_revision": 1,
-                "demand_ref": f"dref-context-{runtime_files.slugify(source_type)}",
+                "demand_ref": f"dref-context-{_fixture_slug(source_type)}",
             },
             objective=detail,
             selection_reason=f"Context fixture selected {source_type}.",

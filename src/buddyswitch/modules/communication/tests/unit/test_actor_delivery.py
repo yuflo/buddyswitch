@@ -47,7 +47,7 @@ class ImActorDeliveryTests(RuntimeWorkspaceTestCase):
         return module
 
     def _profile(self, module: Any) -> None:
-        module.identity_repo.save_actor_identity_profile(
+        module.identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": "act-market-delivery", "type": "actor"},
                 "role_id": "market",

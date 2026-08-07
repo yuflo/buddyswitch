@@ -13,15 +13,15 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Callable
 
-from buddyswitch.env.repos import actor_private_files as actor_private_repo
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.actor_private as actor_private_state
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.runtime_support.env_manifest import (
     DEFAULT_MANIFEST,
     ManifestError,
     load_manifest as _load_manifest_full,
 )
 
-ROOT = runtime_files.ROOT
+ROOT = state_runtime.ROOT
 _PROJECTION_FIELD_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _RESERVED_PROJECTION_FIELDS = frozenset(
     {
@@ -509,11 +509,11 @@ def _delete_actor_private_target(
             return False, "target is missing"
         return False, "actor-private target is not a regular file"
     try:
-        deleted = actor_private_repo.delete_private_file(
+        deleted = actor_private_state.delete_private_file(
             root=private_root,
             logical_name=logical_name,
         )
-    except (actor_private_repo.ActorPrivateBoundaryError, IsADirectoryError) as exc:
+    except (actor_private_state.ActorPrivateBoundaryError, IsADirectoryError) as exc:
         return False, f"actor-private owner rejected the path: {exc}"
     if not deleted:
         return False, "actor-private owner reported no deletion"

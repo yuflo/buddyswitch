@@ -33,7 +33,7 @@ BROWSER_RUNTIME = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime
 
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.runtime_kernel import protocol  # noqa: E402
 
 
@@ -574,7 +574,7 @@ from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from tests.support.cli import pid_alive
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
 
 def endpoint_ready(port: int) -> bool:
@@ -1057,8 +1057,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 clear=False,
             )
             state_env.start()
-            runtime_files.refresh_runtime_roots_from_env()
-            self.addCleanup(runtime_files.refresh_runtime_roots_from_env)
+            state_runtime.refresh_runtime_roots_from_env()
+            self.addCleanup(state_runtime.refresh_runtime_roots_from_env)
             self.addCleanup(state_env.stop)
             instance_root = shared_root / "instances" / actor_id
             instance_json = self._instance_record(instance_root, actor_id, role)
@@ -1181,8 +1181,8 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 clear=False,
             )
             state_env.start()
-            runtime_files.refresh_runtime_roots_from_env()
-            self.addCleanup(runtime_files.refresh_runtime_roots_from_env)
+            state_runtime.refresh_runtime_roots_from_env()
+            self.addCleanup(state_runtime.refresh_runtime_roots_from_env)
             self.addCleanup(state_env.stop)
             instance_root = shared_root / "instances" / actor_id
             instance_json = self._instance_record(instance_root, actor_id, role)

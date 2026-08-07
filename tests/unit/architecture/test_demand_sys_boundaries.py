@@ -367,8 +367,8 @@ def test_dependency_direction_stays_inside_the_demand_owner_boundary() -> None:
     context_imports = _imports(CONTEXT)
 
     assert "buddyswitch.modules.demand.private.state.demands" in domain_imports
-    assert "buddyswitch.env.repos.runtime_files" in domain_imports
-    assert "buddyswitch.env.repos.runtime_files" in repository_imports
+    assert "buddyswitch.foundation.state.runtime" in domain_imports
+    assert "buddyswitch.foundation.state.runtime" in repository_imports
     assert "buddyswitch.modules.demand.private.domain.demand_sys" in read_imports
     assert not any(name.startswith("buddyswitch.env.repos") for name in read_imports)
     assert not any(name.startswith("buddyswitch.env.repos") for name in tool_impl_imports)

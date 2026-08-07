@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import ActorIdentityProfile
+import buddyswitch.foundation.state.runtime as state_runtime
 
 ACTIVE = "active"
 COMPLETED = "completed"
@@ -92,11 +92,11 @@ def _normalize_actor_target(value: Any) -> dict[str, str]:
     if set(target) != {"actor_id", "role_id"}:
         raise ValueError("actor_target must contain exactly actor_id and role_id")
     return {
-        "actor_id": runtime_files.require_id(
+        "actor_id": state_runtime.require_id(
             _require_text(target.get("actor_id"), "actor_target.actor_id"),
             "actor_target.actor_id",
         ),
-        "role_id": runtime_files.require_id(
+        "role_id": state_runtime.require_id(
             _require_text(target.get("role_id"), "actor_target.role_id"),
             "actor_target.role_id",
         ),
@@ -107,7 +107,7 @@ def _normalize_demand_ref(value: Any) -> dict[str, Any]:
     demand_ref = _require_mapping(value, "demand_ref")
     if set(demand_ref) != {"demand_id", "basis_revision", "demand_ref"}:
         raise ValueError("demand_ref must contain exactly demand_id, basis_revision, and demand_ref")
-    demand_id = runtime_files.require_id(
+    demand_id = state_runtime.require_id(
         _require_text(demand_ref.get("demand_id"), "demand_ref.demand_id"),
         "demand_ref.demand_id",
     )
@@ -243,7 +243,7 @@ def _validate_task(record: Any) -> dict[str, Any]:
         value = _require_mapping(record, "task")
         if set(value) != _TASK_KEYS or value.get("schema_version") != 1:
             raise ValueError("Task record does not match the current schema")
-        task_id = runtime_files.require_id(value.get("id"), "task.id")
+        task_id = state_runtime.require_id(value.get("id"), "task.id")
         if not task_id.startswith("task-demand-"):
             raise ValueError("task.id must be a Demand Task id")
         actor_target = _normalize_actor_target(value.get("actor_target"))
@@ -295,16 +295,16 @@ def _task_record_belongs_to_actor(
 
 
 def _tasks_dir() -> Path:
-    return runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+    return state_runtime.OBJECTS_ROOT / "task-sys" / "tasks"
 
 
 def _task_file(task_id: str) -> Path:
-    return _tasks_dir() / f"{runtime_files.require_id(task_id, 'task id')}.json"
+    return _tasks_dir() / f"{state_runtime.require_id(task_id, 'task id')}.json"
 
 
 def _actor_lock_file(actor_target: Mapping[str, str]) -> Path:
     return (
-        runtime_files.LOCAL_ROOT
+        state_runtime.LOCAL_ROOT
         / "locks"
         / "task-sys"
         / f"{actor_target['actor_id']}-{actor_target['role_id']}.lock"
@@ -317,7 +317,7 @@ def _new_task_id() -> str:
 
 def _persist_task(record: Mapping[str, Any]) -> dict[str, Any]:
     normalized = _validate_task(record)
-    runtime_files.write_json_object(_task_file(normalized["id"]), normalized)
+    state_runtime.write_json_object(_task_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -325,11 +325,11 @@ def _load_task(task_id: str) -> dict[str, Any]:
     path = _task_file(task_id)
     if not path.exists():
         raise ValueError(f"task not found: {task_id}")
-    return _validate_task(runtime_files.read_json_object(path))
+    return _validate_task(state_runtime.read_json_object(path))
 
 
 def _with_actor_lock(actor_target: Mapping[str, str]):
-    runtime_files.require_runtime_workspace_write_root()
+    state_runtime.require_runtime_workspace_write_root()
     lock_path = _actor_lock_file(actor_target)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     return lock_path.open("a+", encoding="utf-8")
@@ -349,7 +349,7 @@ def list_tasks(
         raise ValueError("statuses contains an unsupported Task status")
     rows: list[dict[str, Any]] = []
     for path in sorted(tasks_dir.glob("*.json")):
-        raw_record = runtime_files.read_json_object(path)
+        raw_record = state_runtime.read_json_object(path)
         if normalized_target is not None and not _task_record_belongs_to_actor(
             raw_record,
             normalized_target,
@@ -363,7 +363,7 @@ def list_tasks(
 
 
 def get_task(task_id: str) -> dict[str, Any]:
-    return _load_task(runtime_files.require_id(task_id, "task id"))
+    return _load_task(state_runtime.require_id(task_id, "task id"))
 
 
 def require_completed_task_for_demand(
@@ -373,7 +373,7 @@ def require_completed_task_for_demand(
     demand_id: str,
 ) -> dict[str, Any]:
     normalized_target = _normalize_actor_target(actor_target)
-    normalized_demand_id = runtime_files.require_id(
+    normalized_demand_id = state_runtime.require_id(
         demand_id,
         "demand id",
     )
@@ -382,7 +382,7 @@ def require_completed_task_for_demand(
             "Demand completion evidence requires a Demand id"
         )
     try:
-        task = _load_task(runtime_files.require_id(task_id, "task id"))
+        task = _load_task(state_runtime.require_id(task_id, "task id"))
     except (ValueError, FileNotFoundError) as exc:
         raise TaskCompletionEvidenceError(
             f"Demand completion Task evidence is unavailable: {task_id}"
@@ -435,7 +435,7 @@ def create(
             for existing in actor_tasks:
                 if existing["status"] == ACTIVE:
                     raise TaskActiveConflict(existing["id"], existing["status"])
-            now = runtime_files.now_iso()
+            now = state_runtime.now_iso()
             record = {
                 "schema_version": 1,
                 "id": _new_task_id(),
@@ -462,7 +462,7 @@ def create(
 
 
 def bind_goal(task_id: str, goal: Mapping[str, Any]) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    normalized_task_id = state_runtime.require_id(task_id, "task id")
     initial = _load_task(normalized_task_id)
     lock_file = _with_actor_lock(initial["actor_target"])
     with lock_file:
@@ -489,7 +489,7 @@ def bind_goal(task_id: str, goal: Mapping[str, Any]) -> dict[str, Any]:
                     "state_changed": False,
                 }
             record["goal_binding"] = binding
-            record["updated_at"] = runtime_files.now_iso()
+            record["updated_at"] = state_runtime.now_iso()
             persisted = _persist_task(record)
             return {
                 "ok": True,
@@ -518,7 +518,7 @@ def _require_bound_goal(task_id: str, record: Mapping[str, Any], goal: Mapping[s
 
 
 def record_goal_complete(task_id: str, goal: Mapping[str, Any]) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    normalized_task_id = state_runtime.require_id(task_id, "task id")
     initial = _load_task(normalized_task_id)
     lock_file = _with_actor_lock(initial["actor_target"])
     with lock_file:
@@ -538,7 +538,7 @@ def record_goal_complete(task_id: str, goal: Mapping[str, Any]) -> dict[str, Any
                 }
             if record["status"] != ACTIVE:
                 raise TaskGoalConflict(normalized_task_id, f"Task status {record['status']} cannot complete")
-            now = runtime_files.now_iso()
+            now = state_runtime.now_iso()
             binding = record["goal_binding"]
             record.update(
                 {
@@ -571,7 +571,7 @@ def record_goal_complete(task_id: str, goal: Mapping[str, Any]) -> dict[str, Any
 
 
 def record_task_cancel(task_id: str, reason: str) -> dict[str, Any]:
-    normalized_task_id = runtime_files.require_id(task_id, "task id")
+    normalized_task_id = state_runtime.require_id(task_id, "task id")
     normalized_reason = _require_text(reason, "reason")
     initial = _load_task(normalized_task_id)
     lock_file = _with_actor_lock(initial["actor_target"])
@@ -591,7 +591,7 @@ def record_task_cancel(task_id: str, reason: str) -> dict[str, Any]:
                 }
             if record["status"] != ACTIVE:
                 raise TaskGoalConflict(normalized_task_id, f"Task status {record['status']} cannot cancel")
-            now = runtime_files.now_iso()
+            now = state_runtime.now_iso()
             record.update(
                 {
                     "status": CANCELED,
@@ -653,6 +653,6 @@ def actor_task_projection(*, actor_profile: ActorIdentityProfile) -> dict[str, o
 
 
 def actor_task_detail(task_id: str) -> dict[str, Any]:
-    task = _load_task(runtime_files.require_id(task_id, "task id"))
+    task = _load_task(state_runtime.require_id(task_id, "task id"))
     task["demand_ref"] = _actor_demand_ref(task["demand_ref"])
     return task

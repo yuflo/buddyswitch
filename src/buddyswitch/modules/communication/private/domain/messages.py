@@ -9,9 +9,10 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from buddyswitch.env.domain.identity import ACTOR_ID_PATTERN, IdentityRef, ROLE_ID_PATTERN
-from buddyswitch.env.domain.identity import actor_identity
-from buddyswitch.env.domain.identity import external_identity
+from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, IdentityRef, ROLE_ID_PATTERN
+from buddyswitch.foundation.identity.model import actor_identity
+from buddyswitch.foundation.identity.model import external_identity
+import buddyswitch.foundation.state.runtime as state_runtime
 
 
 def _im_payload_error(message: str) -> dict[str, Any]:
@@ -47,15 +48,15 @@ def _identity_id(value: Any, field: str = "identity") -> str:
 
 
 def _actor_profile_exists(identity_id: str) -> bool:
-    from buddyswitch.env.repos import identities as identity_repo
+    import buddyswitch.foundation.identity.profiles as identity_profiles
 
-    return isinstance(identity_repo.get_actor_identity_profile(identity_id), dict)
+    return isinstance(identity_profiles.get_actor_identity_profile(identity_id), dict)
 
 
 def _external_profile_exists(identity_id: str) -> bool:
-    from buddyswitch.env.repos import identities as identity_repo
+    import buddyswitch.foundation.identity.profiles as identity_profiles
 
-    return isinstance(identity_repo.get_external_profile(identity_id), dict)
+    return isinstance(identity_profiles.get_external_profile(identity_id), dict)
 
 
 def _actor_contact_from_runtime_row(row: Any) -> dict[str, str] | None:
@@ -155,7 +156,7 @@ def identity_target_for_direct_conversation(target_identity_id: Any, *, field: s
 
 
 def create_external_session(*, display_name: str) -> dict[str, Any]:
-    from buddyswitch.env.repos import identities as identity_repo
+    import buddyswitch.foundation.identity.profiles as identity_profiles
     from buddyswitch.modules.communication.private.state import messages as message_repo
 
     normalized_display_name = display_name.strip() if isinstance(display_name, str) else ""
@@ -163,8 +164,8 @@ def create_external_session(*, display_name: str) -> dict[str, Any]:
         return {"ok": False, "error": {"code": "E_IM_PAYLOAD", "message": "display_name must be a non-empty string"}}
 
     external_identity_id = f"ext-{uuid.uuid4().hex[:12]}"
-    now = message_repo.runtime_files.now_iso()
-    identity_repo.save_external_profile(
+    now = state_runtime.now_iso()
+    identity_profiles.save_external_profile(
         {
             "identity": {"id": external_identity_id, "type": "external"},
             "display_name": normalized_display_name,
@@ -210,7 +211,7 @@ def authenticate_external_session_key(external_session_key: str) -> dict[str, An
         return {"ok": False, "error": {"code": "E_IM_AUTH", "message": str(exc)}}
     updated = dict(external_session)
     updated["identity_id"] = identity["id"]
-    updated["last_used_at"] = message_repo.runtime_files.now_iso()
+    updated["last_used_at"] = state_runtime.now_iso()
     saved = message_repo.save_external_session(updated)
     return {
         "ok": True,
@@ -279,7 +280,7 @@ def send_im_message(
     if target["id"] == sender["id"]:
         return _im_payload_error("target_identity must not be the sender identity")
 
-    now = message_repo.runtime_files.now_iso()
+    now = state_runtime.now_iso()
     existing = message_repo.find_im_direct_conversation([sender, target])
     if existing is None:
         conversation_id = _new_im_id("conv")
@@ -457,7 +458,7 @@ def _save_external_session_last_event(external_session: dict[str, Any], event_id
 
     updated = dict(external_session)
     updated["last_event_id"] = str(event_id)
-    updated["last_used_at"] = message_repo.runtime_files.now_iso()
+    updated["last_used_at"] = state_runtime.now_iso()
     saved = message_repo.save_external_session(updated)
     external_session.clear()
     external_session.update(saved)

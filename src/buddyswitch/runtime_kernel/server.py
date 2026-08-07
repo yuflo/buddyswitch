@@ -10,7 +10,8 @@ import socket
 import threading
 from typing import Any, Callable
 
-from buddyswitch.runtime_kernel import coordinator, dispatcher, process_identity, protocol
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
+from buddyswitch.runtime_kernel import coordinator, dispatcher, protocol
 
 
 @dataclass(frozen=True)

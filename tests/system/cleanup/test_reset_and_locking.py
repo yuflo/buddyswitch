@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from tests.system.support.launcher import SystemLauncherHarness
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger, run_process

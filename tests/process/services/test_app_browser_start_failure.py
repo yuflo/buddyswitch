@@ -9,7 +9,7 @@ import time
 from buddyswitch.launcher import app_server
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 import pytest
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from tests.support.python import executable_python_source
 from tests.support.network import open_loopback_listener
 from tests.support.cli import write_executable

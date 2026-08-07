@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile
+from buddyswitch.foundation.identity.model import ActorIdentityProfile
 from buddyswitch.launcher.web_contracts import (
     ActorConsoleSectionRegistration,
     HttpError,

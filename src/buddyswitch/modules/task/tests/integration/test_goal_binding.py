@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.task.private.adapters.tool.tool import DEFINITION
 from buddyswitch.modules.task.private.domain import task_sys
 from tests.support.runtime import RuntimeWorkspaceTestCase
@@ -59,7 +59,7 @@ class TaskGoalBindingContractTests(RuntimeWorkspaceTestCase):
         }
 
     def _task_path(self, task_id: str) -> Path:
-        return runtime_files.OBJECTS_ROOT / "task-sys" / "tasks" / f"{task_id}.json"
+        return state_runtime.OBJECTS_ROOT / "task-sys" / "tasks" / f"{task_id}.json"
 
     def test_create_writes_only_minimal_active_task_shape(self) -> None:
         result = self._create()
@@ -227,7 +227,7 @@ class TaskGoalBindingContractTests(RuntimeWorkspaceTestCase):
         self.assertEqual(self.demand_ref, created["task"]["demand_ref"])
 
     def test_retired_task_record_is_rejected_without_translation(self) -> None:
-        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        tasks_dir = state_runtime.OBJECTS_ROOT / "task-sys" / "tasks"
         tasks_dir.mkdir(parents=True)
         retired_path = tasks_dir / "task-retired-frame.json"
         retired_path.write_text(
@@ -275,7 +275,7 @@ class TaskGoalBindingContractTests(RuntimeWorkspaceTestCase):
         )
 
     def test_actor_scoped_list_rejects_owned_retired_task_record(self) -> None:
-        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        tasks_dir = state_runtime.OBJECTS_ROOT / "task-sys" / "tasks"
         tasks_dir.mkdir(parents=True)
         (tasks_dir / "task-demand-owned-retired.json").write_text(
             json.dumps(

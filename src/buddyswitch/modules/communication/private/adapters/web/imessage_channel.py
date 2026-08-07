@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterator
 from urllib import error, request
 
 
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 
 
 SCHEMA_VERSION = 6
@@ -60,7 +60,7 @@ class ChannelConfig:
     def effective_state_path(self) -> Path:
         if self.state_path is not None:
             return self.state_path
-        return runtime_files.LOCAL_ROOT / "imessage-channel" / "state.json"
+        return state_runtime.LOCAL_ROOT / "imessage-channel" / "state.json"
 
 
 @dataclass(frozen=True)
@@ -140,7 +140,7 @@ class ImessageChannelStateStore:
             "contacts": state.get("contacts") if isinstance(state.get("contacts"), dict) else {},
         }
         try:
-            runtime_files.write_json_object(self.path, payload)
+            state_runtime.write_json_object(self.path, payload)
         except (OSError, TypeError, ValueError) as exc:
             raise ChannelStateError(f"failed to save iMessage channel state: {exc}") from exc
         try:

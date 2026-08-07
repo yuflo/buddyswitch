@@ -10,7 +10,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from tests.support.cli import write_executable
 from tests.support.launcher import LauncherTestSupport
 from tests.support.paths import REPO_ROOT

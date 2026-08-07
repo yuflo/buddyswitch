@@ -10,15 +10,15 @@
 | S5 C1 acceptance | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; executable patch `23e7aab5…`; FINAL `7841f5d5614141728a2db56a4612d8f4` |
 | S5 C2 acceptance | `05-foundation-convergence-plan/web-cleanup/S5-C2-ACCEPTANCE.md`; patch `80f1aeeb…`; FINAL `c1a3466da1b6455ead00dfcdca86bf46` |
 | S5 C3 acceptance | `05-foundation-convergence-plan/browser-runtime/S5-C3-ACCEPTANCE.md`; patch `5691506f…`; FINAL `c6a7f1ad14c44df48dea1a96e0a4f5db` |
-| S5 C4 readiness | `05-foundation-convergence-plan/identity-state-process/S5-C4-READY-REVIEW.md`; baseline `64a171bd1ff847e1b4e25136c8c46eb3`; topology `S5C4P-20260806-01` |
+| S5 C4 acceptance | `05-foundation-convergence-plan/identity-state-process/S5-C4-ACCEPTANCE.md`; patch `6ff8fcd6…`; FINAL `e306abb4f43d42ce8b9517f08e3a5450` |
 | Active stage | S5 — Foundation Convergence |
-| State | C1–C3 ACCEPTED — C4 READY (R1 ONLY) |
-| Runtime migration authorized | `BS-MM-S5-FOUNDATION-PRIMITIVES-R1-20260806-01` only |
+| State | C1–C4 ACCEPTED — C5 PREPARATION ONLY |
+| Runtime migration authorized | none; C5 implementation awaits READY review |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent C4 execution and coordinating-hub acceptance review |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules, and one Browser Foundation owner |
+| Next gate | C5 current-source refresh, topology preflight, plan and READY review |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State and Process primitives |
 
 ## Stage ledger
 
@@ -29,7 +29,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C3 ACCEPTED — C4 READY (R1 ONLY) | S4 | coordinating hub | execute/accept C4; C5–C7 implementation blocked |
+| S5 Foundation | C1–C4 ACCEPTED — C5 PREPARATION ONLY | S4 | coordinating hub | source-refresh and READY-review C5; C5–C7 implementation blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -441,6 +441,7 @@ preparation is unblocked.
 | 2026-08-06 | S5 C3 Browser runtime handoff | READY | `05-foundation-convergence-plan/browser-runtime/S5-C3-READY-REVIEW.md`; source manifest `20c58b57…`; runtime `9f138cbc…` / `996ac858…`; topology `S5C3P-20260806-01`; packet `BS-MM-S5-BROWSER-RUNTIME-R1-20260806-01` | user starts one independent C3 task; hub pauses without polling; C4–C7 remain blocked |
 | 2026-08-06 | S5 C3 Browser runtime acceptance | ACCEPTED | `05-foundation-convergence-plan/browser-runtime/S5-C3-ACCEPTANCE.md`; product/test patch `5691506f…`; exact `2de2ea8507c343a091d264428de13bdd`; affected `02490afae9b54a1d9a49338af9e7373c`; FINAL `c6a7f1ad14c44df48dea1a96e0a4f5db` | commit/push C3 checkpoint, then refresh C4 from committed source; never resume either C3 packet |
 | 2026-08-06 | S5 C4 Foundation primitives handoff | READY | `05-foundation-convergence-plan/identity-state-process/S5-C4-READY-REVIEW.md`; owner manifest `0462cf2d…`; direct baseline `64a171bd1ff847e1b4e25136c8c46eb3`; source-equivalent FINAL `c6a7f1ad14c44df48dea1a96e0a4f5db`; topology `S5C4P-20260806-01`; packet `BS-MM-S5-FOUNDATION-PRIMITIVES-R1-20260806-01`; D-062 | user starts one independent C4 task; hub pauses without polling; C5–C7 remain blocked |
+| 2026-08-07 | S5 C4 Foundation primitives acceptance | ACCEPTED | `05-foundation-convergence-plan/identity-state-process/S5-C4-ACCEPTANCE.md`; patch `6ff8fcd6…`; focused/affected `d201c36743234e518465a8398aeb01b3`, `5e3f05baeebb42ae929cf7b6259a0ca9`, `0415b2114caf4dc29b56a78513bb461a`, `98ca3f7e2c564c48af636c75af02f7e4`, `b498c7abd22549c29017622b15ed172f`; FINAL `e306abb4f43d42ce8b9517f08e3a5450` | commit/push C4 checkpoint, then refresh C5 from committed source; never resume C4 R1 |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -462,11 +463,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / C4 execution handoff
-Master state: C1–C3 ACCEPTED — C4 READY (R1 ONLY)
-Goal Packet: BS-MM-S5-FOUNDATION-PRIMITIVES-R1-20260806-01
+Stage: S5 / Foundation / C5 source refresh
+Master state: C1–C4 ACCEPTED — C5 PREPARATION ONLY
+Goal Packet: none; C5 implementation awaits READY review
 Execution session: none
-Last hub checkpoint: C3 accepted; FINAL `c6a7f1ad14c44df48dea1a96e0a4f5db`
-Next action: commit/push C4 preparation, provide exact execution HEAD, then pause
+Last hub checkpoint: C4 accepted; FINAL `e306abb4f43d42ce8b9517f08e3a5450`
+Next action: commit/push C4, then refresh and READY-review C5
 No-polling state: not entered
 ```

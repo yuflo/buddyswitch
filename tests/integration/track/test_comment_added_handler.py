@@ -20,7 +20,7 @@ LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.track.private.state import track_comments as comment_repo  # noqa: E402
 from buddyswitch.modules.track.private.state import tracks as track_repo  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
@@ -84,7 +84,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        runtime_files.refresh_runtime_roots_from_env()
+        state_runtime.refresh_runtime_roots_from_env()
 
     def _instance(self, *, actor_id: str = "act-dev-track-handler", role: str = "dev") -> dict[str, Any]:
         instance_root = self.runtime_root / "instances" / actor_id
@@ -185,7 +185,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
         }
 
     def _task_records(self) -> list[dict[str, Any]]:
-        tasks_dir = runtime_files.OBJECTS_ROOT / "task-sys" / "tasks"
+        tasks_dir = state_runtime.OBJECTS_ROOT / "task-sys" / "tasks"
         return [
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(tasks_dir.glob("*.json"))
@@ -393,7 +393,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
 
             os.environ.update(self.daemon_core.derive_daemon_runtime_env(context))
             os.environ["BUDDYSWITCH_ACTOR_ID"] = "act-dev-track-handler"
-            runtime_files.refresh_runtime_roots_from_env()
+            state_runtime.refresh_runtime_roots_from_env()
 
             track_id = "track-comment-shared-root"
             self._seed_track(track_id)

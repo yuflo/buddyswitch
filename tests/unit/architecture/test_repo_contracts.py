@@ -221,7 +221,7 @@ def test_demand_actor_aggregate_has_one_atomic_repository_owner() -> None:
     calls = _called_names(repository)
 
     assert "fcntl" in imports
-    assert "buddyswitch.env.repos.runtime_files" in imports
+    assert "buddyswitch.foundation.state.runtime" in imports
     assert {"flock", "write_json_object"}.issubset(calls)
     assert _call_count(repository, "write_json_object") == 1
 

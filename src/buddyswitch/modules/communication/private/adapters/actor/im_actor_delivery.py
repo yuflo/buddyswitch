@@ -6,9 +6,8 @@ from pathlib import Path
 from typing import Any
 import uuid
 
-from buddyswitch.env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 
 
@@ -61,7 +60,7 @@ def deliver(
     except Exception as exc:
         return {"actor_handling_status": "handling_failed", "runtime_target": "none", "error": str(exc)}
 
-    profile = identity_repo.get_actor_identity_profile(target_identity_id)
+    profile = identity_profiles.get_actor_identity_profile(target_identity_id)
     if not isinstance(profile, dict):
         return {
             "actor_handling_status": "handling_failed",

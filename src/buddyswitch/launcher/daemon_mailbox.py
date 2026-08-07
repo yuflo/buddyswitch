@@ -11,8 +11,8 @@ import threading
 from typing import Any, Mapping
 
 
-from buddyswitch.env.repos import runtime_files  # noqa: E402
-from buddyswitch.env.domain.identity import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
+from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.launcher import daemon_triggers  # noqa: E402
 from buddyswitch.runtime_kernel import protocol  # noqa: E402
@@ -71,7 +71,7 @@ def daemon_signal_envelope(
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object")
     return {
-        "signal_id": runtime_files.require_id(signal_id, "signal_id"),
+        "signal_id": state_runtime.require_id(signal_id, "signal_id"),
         "type": _non_empty_string(signal_type, "type"),
         "source_identity_id": _actor_identity_id(source_identity_id, "source_identity_id"),
         "source_role_id": _role_id(source_role_id, "source_role_id"),

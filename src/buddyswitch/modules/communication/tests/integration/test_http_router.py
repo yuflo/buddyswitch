@@ -11,7 +11,7 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.web import im_http_router  # noqa: E402
@@ -20,7 +20,7 @@ from buddyswitch.modules.communication.private.adapters.web import im_http_route
 class ImHttpRouterTests(RuntimeWorkspaceTestCase):
     def _actor_identity(self) -> dict[str, str]:
         identity_id = self._runtime_actor_id(role="market", label="target")
-        identity_repo.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": identity_id, "type": "actor"},
                 "role_id": "market",

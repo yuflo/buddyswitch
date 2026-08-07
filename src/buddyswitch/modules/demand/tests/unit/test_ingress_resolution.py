@@ -239,9 +239,9 @@ class DemandIngressResolutionTests(RuntimeWorkspaceTestCase):
         attempt_id = self._begin("create")
 
         with patch.object(
-            demands.runtime_files,
+            demands.state_runtime,
             "write_json_object",
-            wraps=demands.runtime_files.write_json_object,
+            wraps=demands.state_runtime.write_json_object,
         ) as write_json_object:
             created = demand_sys.resolve_ingress(
                 self.actor_target,

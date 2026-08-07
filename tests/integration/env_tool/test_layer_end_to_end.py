@@ -14,13 +14,13 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 from buddyswitch.modules.communication.private.state import messages as message_repo  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -606,7 +606,7 @@ class EnvLayerProductRootSplitTests(unittest.TestCase):
             }
             with unittest.mock.patch.dict(os.environ, updates, clear=False):
                 try:
-                    runtime_files.refresh_runtime_roots_from_env()
+                    state_runtime.refresh_runtime_roots_from_env()
                     track_id = "track-e2e-product-state-root"
                     created = object_builders.create_track(
                         track_id,
@@ -619,4 +619,4 @@ class EnvLayerProductRootSplitTests(unittest.TestCase):
                     self.assertTrue((state_root / "buddyswitch" / "objects" / "tracks" / f"{track_id}.json").exists())
                     self.assertFalse((workspace_dir / "buddyswitch" / "objects" / "tracks" / f"{track_id}.json").exists())
                 finally:
-                    runtime_files.refresh_runtime_roots_from_env()
+                    state_runtime.refresh_runtime_roots_from_env()

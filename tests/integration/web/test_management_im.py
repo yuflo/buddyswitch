@@ -64,7 +64,9 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["count"], 1)
-        self.assertIsNone(identity_repo.get_actor_identity_profile("act-web-profile-missing"))
+        self.assertIsNone(
+            identity_profiles.get_actor_identity_profile("act-web-profile-missing")
+        )
 
     def test_im_session_creates_one_stable_web_identity_per_runtime(self) -> None:
         first = self._service()

@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from buddyswitch.env.domain.identity import IdentityRef
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
 
 
 def _route_payload(value: dict[str, Any], field: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an identity route payload")
-    identity_id = runtime_files.require_id(str(value.get("identity_id") or ""), f"{field}.identity_id")
-    role_id = runtime_files.require_id(str(value.get("role_id") or ""), f"{field}.role_id")
+    identity_id = state_runtime.require_id(str(value.get("identity_id") or ""), f"{field}.identity_id")
+    role_id = state_runtime.require_id(str(value.get("role_id") or ""), f"{field}.role_id")
     return {"identity_id": identity_id, "role_id": role_id}
 
 
@@ -22,7 +22,7 @@ def _same_identity_route(left: dict[str, str], right: dict[str, str]) -> bool:
 
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
-        return runtime_files.require_id(value.strip(), field)
+        return state_runtime.require_id(value.strip(), field)
     if isinstance(value, dict):
         if isinstance(value.get("identity"), dict):
             return IdentityRef.from_payload(value["identity"]).id
@@ -33,9 +33,9 @@ def _identity_id(value: Any, field: str) -> str:
 
 def track_comment_added_payload(comment: dict[str, Any]) -> dict[str, str]:
     return {
-        "track_id": runtime_files.require_id(comment.get("track_id"), "comment.track_id"),
-        "comment_id": runtime_files.require_id(comment.get("id"), "comment.id"),
-        "thread_id": runtime_files.require_id(comment.get("thread_id"), "comment.thread_id"),
+        "track_id": state_runtime.require_id(comment.get("track_id"), "comment.track_id"),
+        "comment_id": state_runtime.require_id(comment.get("id"), "comment.id"),
+        "thread_id": state_runtime.require_id(comment.get("thread_id"), "comment.thread_id"),
     }
 
 

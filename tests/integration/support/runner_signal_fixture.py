@@ -4,7 +4,7 @@ import subprocess
 import sys
 import time
 
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from tests.support.processes import ResourceLedger
 
 

@@ -17,8 +17,8 @@ ROOT = REPO_ROOT
 from buddyswitch.launcher import daemon_mailbox  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.web import im_http_router  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.daemon import im_wake_handler  # noqa: E402
-from buddyswitch.env.repos import identities  # noqa: E402
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_actor_delivery  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
@@ -105,7 +105,7 @@ class _WakeHandlerDispatcher:
 
 class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
     def _task_records(self) -> list[Path]:
-        return sorted((runtime_files.OBJECTS_ROOT / "task-sys" / "tasks").glob("*.json"))
+        return sorted((state_runtime.OBJECTS_ROOT / "task-sys" / "tasks").glob("*.json"))
 
     def _create_external_session(self, router: im_http_router.ImHttpRouter) -> str:
         status, created = router.handle(
@@ -124,7 +124,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
 
     def test_external_send_actor_reply_to_external_visible_once_without_cursor(self) -> None:
         actor_identity_id = self._runtime_actor_id(role="market", label="reply-loop")
-        identities.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": actor_identity_id, "type": "actor"},
                 "role_id": "market",
@@ -227,7 +227,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
     def test_wake_bridge_derives_role_from_identity_profile_not_sender_payload(self) -> None:
         target_identity_id = "act-market-wake"
         target_role_id = "market"
-        identities.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": target_identity_id, "type": "actor"},
                 "role_id": target_role_id,
@@ -310,7 +310,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
     def test_wake_bridge_reaches_real_mailbox_socket_and_im_handler(self) -> None:
         target_identity_id = "act-market-wake"
         target_role_id = "market"
-        identities.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": target_identity_id, "type": "actor"},
                 "role_id": target_role_id,
@@ -403,7 +403,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
         source_identity_id = self._runtime_actor_id(role="dev", label="act-dev-integrated-send")
         target_identity_id = self._runtime_actor_id(role="market", label="act-market-integrated-target")
         target_role_id = "market"
-        identities.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": target_identity_id, "type": "actor"},
                 "role_id": target_role_id,
@@ -517,7 +517,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
 
     def test_wake_bridge_reports_offline_target_without_mailbox_request(self) -> None:
         mailbox_calls: list[dict[str, Any]] = []
-        identities.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": "act-market-offline", "type": "actor"},
                 "role_id": "market",

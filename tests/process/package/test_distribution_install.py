@@ -30,6 +30,15 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/modules/track/skills/triage-track/SKILL.md",
     "buddyswitch/skills/dev/implement-scoped-change/SKILL.md",
 }
+REQUIRED_FOUNDATION_MODULE_FILES = {
+    "buddyswitch/foundation/identity/__init__.py",
+    "buddyswitch/foundation/identity/model.py",
+    "buddyswitch/foundation/identity/profiles.py",
+    "buddyswitch/foundation/state/__init__.py",
+    "buddyswitch/foundation/state/runtime.py",
+    "buddyswitch/foundation/state/actor_private.py",
+    "buddyswitch/foundation/process_runtime/process_identity.py",
+}
 
 
 def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path) -> None:
@@ -44,6 +53,9 @@ def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path
         for name in names
     )
     assert "buddyswitch/application/entrypoints/runtime_activation.py" in names
+    assert REQUIRED_FOUNDATION_MODULE_FILES <= set(names)
+    assert not any(name.startswith("buddyswitch/env/") for name in names)
+    assert "buddyswitch/runtime_kernel/process_identity.py" not in names
     assert "buddyswitch/modules/demand/skills/demand-triage/SKILL.md" in names
     assert "buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md" in names
     assert not [
@@ -63,10 +75,24 @@ def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path
 
     script = """
 import importlib.metadata
+import importlib
+import importlib.util
 import json
 from pathlib import Path
 import sys
 import buddyswitch
+
+current_modules = (
+    "buddyswitch.foundation.identity.model",
+    "buddyswitch.foundation.identity.profiles",
+    "buddyswitch.foundation.state.runtime",
+    "buddyswitch.foundation.state.actor_private",
+    "buddyswitch.foundation.process_runtime.process_identity",
+)
+module_files = {
+    name: str(Path(importlib.import_module(name).__file__).resolve())
+    for name in current_modules
+}
 
 distribution = importlib.metadata.distribution("buddyswitch")
 direct_url = distribution.read_text("direct_url.json")
@@ -76,6 +102,13 @@ print(json.dumps({
     "files": sorted(str(path) for path in distribution.files or ()),
     "direct_url": json.loads(direct_url) if direct_url else None,
     "sys_path": sys.path,
+    "module_files": module_files,
+    "retired_specs": {
+        "buddyswitch.env": importlib.util.find_spec("buddyswitch.env") is not None,
+        "buddyswitch.runtime_kernel.process_identity": importlib.util.find_spec(
+            "buddyswitch.runtime_kernel.process_identity"
+        ) is not None,
+    },
 }, sort_keys=True))
 """
     environment_probe = installed.run_module(
@@ -104,6 +137,21 @@ print(json.dumps({
     assert package_file.is_relative_to(installed.runtime_dir / "venv")
     assert not package_file.is_relative_to(installed.source_root / "src")
     assert str(REPO_ROOT) not in payload["sys_path"]
+    assert payload["retired_specs"] == {
+        "buddyswitch.env": False,
+        "buddyswitch.runtime_kernel.process_identity": False,
+    }
+    assert set(payload["module_files"]) == {
+        "buddyswitch.foundation.identity.model",
+        "buddyswitch.foundation.identity.profiles",
+        "buddyswitch.foundation.state.runtime",
+        "buddyswitch.foundation.state.actor_private",
+        "buddyswitch.foundation.process_runtime.process_identity",
+    }
+    assert all(
+        Path(module_file).is_relative_to(installed.runtime_dir / "venv")
+        for module_file in payload["module_files"].values()
+    )
     direct_url = payload["direct_url"]
     assert not (
         isinstance(direct_url, dict)

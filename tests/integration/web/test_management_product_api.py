@@ -5,7 +5,7 @@ from tests.integration.web.management_harness import *  # noqa: F401,F403
 
 class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
     def _use_capability_shared_root(self) -> Path:
-        from buddyswitch.env.repos import runtime_files
+        import buddyswitch.foundation.state.runtime as state_runtime
 
         shared_root = self.runtime_root / "shared-root"
         state_root = shared_root / "state"
@@ -16,11 +16,11 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
             "BUDDYSWITCH_WORKSPACE_DIR": str(shared_root),
         }
         original = {key: os.environ.get(key) for key in updates}
-        self.addCleanup(runtime_files.refresh_runtime_roots_from_env)
+        self.addCleanup(state_runtime.refresh_runtime_roots_from_env)
         for key, value in original.items():
             self.addCleanup(_restore_env_value, key, value)
         os.environ.update(updates)
-        runtime_files.refresh_runtime_roots_from_env()
+        state_runtime.refresh_runtime_roots_from_env()
         return shared_root
 
     def _service(self, host_control: RecordingHostControl | None = None) -> WEB_MANAGEMENT.WebManagementService:

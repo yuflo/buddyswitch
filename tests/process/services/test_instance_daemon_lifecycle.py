@@ -6,7 +6,7 @@ from pathlib import Path
 from buddyswitch.launcher import daemon_core
 from buddyswitch.launcher import daemon_mailbox
 import pytest
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
 
 def test_instance_daemon_early_exit_removes_pid_identity_and_mailbox(

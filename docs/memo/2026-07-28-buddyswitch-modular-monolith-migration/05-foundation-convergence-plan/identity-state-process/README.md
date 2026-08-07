@@ -1,6 +1,6 @@
 # S5 C4 Identity / State / Process Primitives
 
-> State: `READY — R1 ONLY` after the preparation commit is pushed
+> State: `ACCEPTED`
 > Predecessor: S5 C3 ACCEPTED
 > Execution authority: `S5-C4-GOAL-PACKET.md` only
 
@@ -17,7 +17,10 @@ Read in this order:
 2. `S5-C4-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
 3. `S5-C4-IMPLEMENTATION-PLAN.md`;
 4. `S5-C4-READY-REVIEW.md`;
-5. `S5-C4-GOAL-PACKET.md`.
+5. `S5-C4-GOAL-PACKET.md`;
+6. `S5-C4-ACCEPTANCE.md`.
 
-The packet authorizes one independent C4 task. C5–C7 and S6 remain blocked.
-No C1–C3 packet may resume.
+The R1 packet is consumed. Acceptance is recorded in
+`S5-C4-ACCEPTANCE.md`. C5 source refresh and READY preparation are unblocked;
+C5 implementation, C6–C7 and S6 remain unauthorized. No C1–C4 packet may
+resume.

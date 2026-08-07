@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from tests.support.environment import RunEnvironment
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import (
@@ -320,7 +320,7 @@ def test_descriptor_reconciliation_captures_replacement_process_identity() -> No
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        from buddyswitch.runtime_kernel import process_identity
+        import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
         process_identity.write_record(pid_file, first.pid)
         ledger.reconcile_descriptors()
@@ -349,7 +349,7 @@ def test_descriptor_reconciliation_captures_replacement_process_identity() -> No
 
 
 def test_descriptor_reconciliation_refuses_mismatched_identity_record() -> None:
-    from buddyswitch.runtime_kernel import process_identity
+    import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
     run = RunEnvironment.create()
     unrelated: subprocess.Popen[str] | None = None

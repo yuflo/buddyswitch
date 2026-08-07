@@ -9,7 +9,7 @@ import time
 
 from buddyswitch.launcher import central_daemon
 from buddyswitch.launcher import central_daemon_core
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from tests.support.processes import ResourceLedger
 
 

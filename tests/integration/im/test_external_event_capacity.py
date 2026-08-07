@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any
 
-from buddyswitch.env.repos import identities as identity_repo
+import buddyswitch.foundation.identity.profiles as identity_profiles
 from buddyswitch.modules.communication.private.domain import messages as message_service
 from tests.support.cli import wait_until
 from tests.support.runtime import RuntimeWorkspaceTestCase
@@ -117,7 +117,7 @@ class ExternalEventCapacityTests(RuntimeWorkspaceTestCase):
         self._message_id_by_event: dict[str, str] = {}
         self._available_at_by_event: dict[str, float] = {}
         actor_id = self._runtime_actor_id(role="market", label="capacity-probe")
-        identity_repo.save_actor_identity_profile(
+        identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": actor_id, "type": "actor"},
                 "role_id": "market",

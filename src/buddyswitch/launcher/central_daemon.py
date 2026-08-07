@@ -16,7 +16,7 @@ HELPER_DIR = Path(__file__).resolve().parent
 
 from buddyswitch.launcher import central_daemon_core  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
-from buddyswitch.runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 
 STOP_GRACE_SECONDS = 2.0
@@ -34,16 +34,6 @@ def read_pid(pid_file: Path) -> int | None:
         return int(raw)
     except ValueError:
         return None
-
-
-def pid_is_live(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 def terminate_record(record: process_identity.RecordedProcess) -> bool:

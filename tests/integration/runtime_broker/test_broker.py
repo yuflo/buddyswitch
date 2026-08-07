@@ -28,7 +28,6 @@ ROOT = REPO_ROOT
 
 import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
 import buddyswitch.runtime_kernel.client as runtime_client  # noqa: E402
-from buddyswitch.runtime_kernel import process_identity  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"

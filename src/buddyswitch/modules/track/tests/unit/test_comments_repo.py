@@ -13,7 +13,7 @@ from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.repos import runtime_files  # noqa: E402
+import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.track.private.state import track_comments as comment_repo  # noqa: E402
 
 
@@ -62,7 +62,7 @@ class TrackCommentsRepoTests(RuntimeWorkspaceTestCase):
             "reply_to": None,
             "mentioned_identity_ids": [],
             "status": "open",
-            "created_at": runtime_files.now_iso(),
+            "created_at": state_runtime.now_iso(),
             "resolved_by_identity_id": None,
             "resolved_at": None,
             "resolution_summary": None,

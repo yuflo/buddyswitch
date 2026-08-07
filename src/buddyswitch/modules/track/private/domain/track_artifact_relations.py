@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from typing import Any, TypedDict
 
-from buddyswitch.env.domain.identity import IdentityRef
+from buddyswitch.foundation.identity.model import IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from buddyswitch.modules.track.public.contracts import (
     PublicationCandidatePort,
@@ -27,7 +28,7 @@ class ProofRelationResult(TypedDict):
 
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
-        return track_repo.runtime_files.require_id(value.strip(), field)
+        return state_runtime.require_id(value.strip(), field)
     if isinstance(value, dict):
         if isinstance(value.get("identity"), dict):
             return IdentityRef.from_payload(value["identity"]).id

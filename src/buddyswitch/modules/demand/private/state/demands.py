@@ -7,7 +7,7 @@ import fcntl
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 
 
 SCHEMA_VERSION = 5
@@ -27,11 +27,11 @@ def normalize_actor_target(actor_target: Mapping[str, Any]) -> dict[str, str]:
     if set(actor_target) != _ACTOR_TARGET_FIELDS:
         raise ValueError("actor_target must contain exactly actor_id and role_id")
     return {
-        "actor_id": runtime_files.require_id(
+        "actor_id": state_runtime.require_id(
             actor_target.get("actor_id"),
             "actor_target.actor_id",
         ),
-        "role_id": runtime_files.require_id(
+        "role_id": state_runtime.require_id(
             actor_target.get("role_id"),
             "actor_target.role_id",
         ),
@@ -40,7 +40,7 @@ def normalize_actor_target(actor_target: Mapping[str, Any]) -> dict[str, str]:
 
 def _actor_state_path(actor_target: Mapping[str, Any]) -> Path:
     return (
-        runtime_files.OBJECTS_ROOT
+        state_runtime.OBJECTS_ROOT
         / "demand-sys"
         / "actors"
         / f"{actor_target['actor_id']}-{actor_target['role_id']}.json"
@@ -53,7 +53,7 @@ def actor_state_path(actor_target: Mapping[str, Any]) -> Path:
 
 def _actor_lock_path(actor_target: Mapping[str, Any]) -> Path:
     return (
-        runtime_files.LOCAL_ROOT
+        state_runtime.LOCAL_ROOT
         / "locks"
         / "demand-sys"
         / f"{actor_target['actor_id']}-{actor_target['role_id']}.lock"
@@ -95,7 +95,7 @@ def _validate_actor_state(
     if not isinstance(demands_by_id, dict):
         raise ValueError("Demand actor aggregate demands must be an object")
     for demand_id, demand in demands_by_id.items():
-        runtime_files.require_id(demand_id, "demand id")
+        state_runtime.require_id(demand_id, "demand id")
         if not isinstance(demand, dict):
             raise ValueError(f"Demand actor aggregate demands.{demand_id} must be an object")
     demand_pool_revision = payload.get("demand_pool_revision")
@@ -129,7 +129,7 @@ def _load_actor_state(
     if not path.exists():
         return _empty_actor_state(actor_target)
     return _validate_actor_state(
-        runtime_files.read_json_object(path),
+        state_runtime.read_json_object(path),
         actor_target,
     )
 
@@ -152,7 +152,7 @@ def transact_actor_state(
     normalized_target = normalize_actor_target(actor_target)
     state_path = _actor_state_path(normalized_target)
     lock_path = _actor_lock_path(normalized_target)
-    runtime_files.require_runtime_workspace_write_root()
+    state_runtime.require_runtime_workspace_write_root()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     with lock_path.open("a+", encoding="utf-8") as lock_file:
@@ -169,7 +169,7 @@ def transact_actor_state(
             changed, result = mutation
             if changed:
                 normalized_state = _validate_actor_state(state, normalized_target)
-                runtime_files.write_json_object(state_path, normalized_state)
+                state_runtime.write_json_object(state_path, normalized_state)
             return result
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)

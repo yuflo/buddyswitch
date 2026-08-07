@@ -10,8 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.env.domain.identity import IdentityRef
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
 
 VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
@@ -54,7 +54,7 @@ def _require_non_empty_text(value: Any, field: str) -> str:
 
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
-        return runtime_files.require_id(value.strip(), field)
+        return state_runtime.require_id(value.strip(), field)
     if isinstance(value, dict):
         if isinstance(value.get("identity"), dict):
             return IdentityRef.from_payload(value["identity"]).id
@@ -80,7 +80,7 @@ def _normalize_source_refs(raw_refs: Any) -> list[dict[str, Any]] | None:
         row: dict[str, Any] = {"type": ref_type}
 
         if ref_type in {"artifact", "track", "task"}:
-            row["id"] = runtime_files.require_id(raw.get("id"), f"source_ref.{ref_type}.id")
+            row["id"] = state_runtime.require_id(raw.get("id"), f"source_ref.{ref_type}.id")
         elif ref_type == "external":
             label = raw.get("label")
             if not isinstance(label, str) or not label.strip():
@@ -122,7 +122,7 @@ def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
     for raw in raw_rows:
         if not isinstance(raw, dict):
             raise ValueError("artifact.attachments rows must be objects")
-        attachment_id = runtime_files.require_id(raw.get("attachment_id"), "attachment.attachment_id")
+        attachment_id = state_runtime.require_id(raw.get("attachment_id"), "attachment.attachment_id")
         filename = _normalize_attachment_filename(raw.get("filename"))
         content_type = _require_non_empty_text(raw.get("content_type"), "attachment.content_type")
         size_bytes = raw.get("size_bytes")
@@ -148,26 +148,26 @@ def _normalize_attachment_rows(raw_rows: Any) -> list[dict[str, Any]]:
 
 
 def now_iso() -> str:
-    return runtime_files.now_iso()
+    return state_runtime.now_iso()
 
 
 def artifact_objects_dir() -> Path:
-    return runtime_files.OBJECTS_ROOT / "artifacts"
+    return state_runtime.OBJECTS_ROOT / "artifacts"
 
 
 def artifact_attachments_dir() -> Path:
-    return runtime_files.OBJECTS_ROOT / "artifact-attachments"
+    return state_runtime.OBJECTS_ROOT / "artifact-attachments"
 
 
 def artifact_file(artifact_id: str) -> Path:
-    return artifact_objects_dir() / f"{runtime_files.require_id(artifact_id, 'artifact id')}.json"
+    return artifact_objects_dir() / f"{state_runtime.require_id(artifact_id, 'artifact id')}.json"
 
 
 def attachment_file(artifact_id: str, attachment_id: str) -> Path:
     return (
         artifact_attachments_dir()
-        / runtime_files.require_id(artifact_id, "artifact id")
-        / f"{runtime_files.require_id(attachment_id, 'attachment id')}.bin"
+        / state_runtime.require_id(artifact_id, "artifact id")
+        / f"{state_runtime.require_id(attachment_id, 'attachment id')}.bin"
     )
 
 
@@ -175,7 +175,7 @@ def list_artifacts() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if artifact_objects_dir().exists():
         for path in artifact_objects_dir().glob("*.json"):
-            rows.append(validate_artifact(runtime_files.read_json_object(path)))
+            rows.append(validate_artifact(state_runtime.read_json_object(path)))
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
     return rows
 
@@ -184,14 +184,14 @@ def get_artifact(artifact_id: str) -> dict[str, Any] | None:
     path = artifact_file(artifact_id)
     if not path.exists():
         return None
-    return validate_artifact(runtime_files.read_json_object(path))
+    return validate_artifact(state_runtime.read_json_object(path))
 
 
 def save_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_artifact(artifact)
-    runtime_files.require_runtime_workspace_write_root()
+    state_runtime.require_runtime_workspace_write_root()
     artifact_objects_dir().mkdir(parents=True, exist_ok=True)
-    runtime_files.write_json_object(artifact_file(normalized["id"]), normalized)
+    state_runtime.write_json_object(artifact_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -228,7 +228,7 @@ def create_artifact_revision(
         raise ValueError("legacy artifact run lineage field is retired; use source_refs")
 
     resolved_id = artifact_id or f"art-{uuid.uuid4().hex[:10]}"
-    runtime_files.require_id(resolved_id, "artifact id")
+    state_runtime.require_id(resolved_id, "artifact id")
     if get_artifact(resolved_id):
         raise ValueError(f"artifact already exists: {resolved_id}")
 
@@ -246,7 +246,7 @@ def create_artifact_revision(
     new_is_current = True
     demote_previous: dict[str, Any] | None = None
     if supersedes_artifact_id is not None:
-        runtime_files.require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
+        state_runtime.require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
         previous = get_artifact(supersedes_artifact_id)
         if previous is None:
             raise ValueError(f"artifact not found: {supersedes_artifact_id}")
@@ -366,7 +366,7 @@ def adopt_local_attachment(
     }
 
     target_path = attachment_file(artifact_id, attachment_id)
-    runtime_files.require_runtime_workspace_write_root()
+    state_runtime.require_runtime_workspace_write_root()
     target_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.link(resolved_source, target_path)
@@ -403,7 +403,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     if forbidden:
         raise ValueError(f"legacy artifact fields are retired: {', '.join(forbidden)}")
 
-    artifact_id = runtime_files.require_id(artifact.get("id", ""), "artifact.id")
+    artifact_id = state_runtime.require_id(artifact.get("id", ""), "artifact.id")
     title = _require_non_empty_text(artifact.get("title"), "artifact.title")
 
     if "created_by" in artifact or "authors" in artifact:
@@ -431,7 +431,7 @@ def validate_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
 
     supersedes_artifact_id = artifact.get("supersedes_artifact_id")
     if supersedes_artifact_id is not None:
-        runtime_files.require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
+        state_runtime.require_id(supersedes_artifact_id, "artifact.supersedes_artifact_id")
 
     is_current = artifact.get("is_current")
     if not isinstance(is_current, bool):

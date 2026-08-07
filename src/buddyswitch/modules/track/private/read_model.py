@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from typing import Any
 
-from buddyswitch.env.domain.identity import IdentityRef
+from buddyswitch.foundation.identity.model import IdentityRef
 from buddyswitch.modules.track.private.state import (
     track_comments as track_comment_repo,
 )

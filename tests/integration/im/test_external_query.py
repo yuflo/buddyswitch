@@ -17,7 +17,7 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef  # noqa: E402
+from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef  # noqa: E402
 from buddyswitch.modules.track import public as track_public  # noqa: E402
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo  # noqa: E402
 from buddyswitch.modules.track.private.state import tracks as track_repo  # noqa: E402

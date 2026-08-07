@@ -9,7 +9,7 @@ import json
 from typing import Any, Mapping
 from uuid import uuid4
 
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.demand.private.state import demands
 
 
@@ -105,7 +105,7 @@ def _require_id(value: Any, prefix: str, field: str) -> str:
     if not isinstance(value, str) or not value.startswith(prefix):
         raise _payload_error(f"{field} must start with {prefix}")
     try:
-        return runtime_files.require_id(value, field)
+        return state_runtime.require_id(value, field)
     except ValueError as exc:
         raise _payload_error(str(exc)) from exc
 
@@ -477,7 +477,7 @@ def _new_demand_record(
     detail: str,
     source_refs: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    now = runtime_files.now_iso()
+    now = state_runtime.now_iso()
     return {
         "id": _new_id("demand", records),
         "description": description,
@@ -557,7 +557,7 @@ def _revise_record(
             "detail": detail,
             "source_refs": merged_refs,
             "revision": int(stored["revision"]) + 1,
-            "updated_at": runtime_files.now_iso(),
+            "updated_at": state_runtime.now_iso(),
         }
     )
     return True
@@ -588,7 +588,7 @@ def _terminalize_record(
     evidence_refs: list[dict[str, Any]] | None,
     source_refs: list[dict[str, Any]] | None = None,
 ) -> None:
-    now = runtime_files.now_iso()
+    now = state_runtime.now_iso()
     terminal: dict[str, Any] = {
         "type": terminal_type,
         "at": now,
@@ -718,7 +718,7 @@ def claim_ingress(
                 "source_key": normalized_source_key,
                 "state": existing["state"],
             }
-        now = runtime_files.now_iso()
+        now = state_runtime.now_iso()
         state["ingress_receipts"][normalized_source_key] = {
             "fingerprint": fingerprint,
             "fact": normalized_fact,
@@ -813,7 +813,7 @@ def begin_ingress_resolution(
                 "state": "resolving",
                 "attempt_id": attempt_id,
                 "outcome": None,
-                "updated_at": runtime_files.now_iso(),
+                "updated_at": state_runtime.now_iso(),
             }
         )
         return True, {
@@ -962,9 +962,9 @@ def resolve_ingress(
                             "message": (
                                 "The target Demand changed after triage read it."
                             ),
-                            "at": runtime_files.now_iso(),
+                            "at": state_runtime.now_iso(),
                         },
-                        "updated_at": runtime_files.now_iso(),
+                        "updated_at": state_runtime.now_iso(),
                     }
                 )
                 return True, {
@@ -988,7 +988,7 @@ def resolve_ingress(
                 "state": "settled",
                 "outcome": deepcopy(outcome),
                 "last_failure": None,
-                "updated_at": runtime_files.now_iso(),
+                "updated_at": state_runtime.now_iso(),
             }
         )
         return True, {
@@ -1035,7 +1035,7 @@ def fail_ingress_resolution(
                 f"Demand ingress receipt {normalized_source_key} resolution attempt changed"
             )
         next_state = "pending" if retriable else "failed"
-        now = runtime_files.now_iso()
+        now = state_runtime.now_iso()
         state["ingress_receipts"][normalized_source_key].update(
             {
                 "state": next_state,

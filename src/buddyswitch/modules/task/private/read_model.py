@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import ActorIdentityProfile
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.task.private.domain import task_sys
 
 
@@ -27,8 +27,8 @@ def _resolve_actor_target(
     if actor_target is None:
         return None
     return {
-        "actor_id": runtime_files.require_id(actor_target.get("actor_id"), "actor_target.actor_id"),
-        "role_id": runtime_files.require_id(actor_target.get("role_id"), "actor_target.role_id"),
+        "actor_id": state_runtime.require_id(actor_target.get("actor_id"), "actor_target.actor_id"),
+        "role_id": state_runtime.require_id(actor_target.get("role_id"), "actor_target.role_id"),
     }
 
 

@@ -416,7 +416,7 @@ buddyswitch_browser_pid_marker_is_active() {
 from pathlib import Path
 import sys
 
-from buddyswitch.runtime_kernel import process_identity
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
 record = process_identity.read_record(Path(sys.argv[1]))
 raise SystemExit(0 if record is not None and process_identity.is_running(record) else 1)

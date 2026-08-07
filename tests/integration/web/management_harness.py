@@ -33,7 +33,7 @@ NO_PROXY_OPENER = build_opener(ProxyHandler({}))
 from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.web import registration as communication_web  # noqa: E402
 from buddyswitch.application.build import build_application  # noqa: E402
-from buddyswitch.env.repos import identities as identity_repo  # noqa: E402
+import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 from buddyswitch.launcher import actor_capability  # noqa: E402
 
 
@@ -43,7 +43,7 @@ ACTOR_CONSOLE_SECTIONS = APPLICATION.actor_console_sections
 
 
 def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:
-    identity_repo.save_actor_identity_profile(
+    identity_profiles.save_actor_identity_profile(
         {
             "identity": {"id": actor_id, "type": "actor"},
             "role_id": role_id,

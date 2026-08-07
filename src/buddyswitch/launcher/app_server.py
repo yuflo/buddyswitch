@@ -20,7 +20,7 @@ from typing import Any, Mapping
 HELPER_DIR = Path(__file__).resolve().parent
 
 from buddyswitch.launcher import runtime_event_log  # noqa: E402
-from buddyswitch.runtime_kernel import process_identity  # noqa: E402
+import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WEBSOCKET_VERSION = "13"

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime
@@ -143,7 +143,7 @@ def _runtime_server_env(
         )
     previous = {key: os.environ.get(key) for key in updates}
     os.environ.update(updates)
-    runtime_files.refresh_runtime_roots_from_env()
+    state_runtime.refresh_runtime_roots_from_env()
     try:
         yield
     finally:
@@ -152,7 +152,7 @@ def _runtime_server_env(
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        runtime_files.refresh_runtime_roots_from_env()
+        state_runtime.refresh_runtime_roots_from_env()
 
 
 def _env_tool_dispatch(
@@ -186,8 +186,8 @@ def _env_tool_dispatch(
 def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, Any]) -> dict[str, Any]:
     actor_id = str(instance_record["actor_id"]).strip()
     active_role = str(instance_record["role"]).strip()
-    runtime_workspace_root = runtime_files.runtime_workspace_root(instance_record).resolve(strict=False)
-    runtime_state_root = runtime_files.STATE_ROOT.resolve(strict=False)
+    runtime_workspace_root = state_runtime.runtime_workspace_root(instance_record).resolve(strict=False)
+    runtime_state_root = state_runtime.STATE_ROOT.resolve(strict=False)
     return {
         "ok": True,
         "protocol": "buddyswitch-runtime-broker/v2",
@@ -200,7 +200,7 @@ def _ping_dispatch(*, session: RuntimeBrokerSession, instance_record: dict[str, 
         "runtime_state_root": str(runtime_state_root),
         "cwd": str(runtime_workspace_root),
         "env_store_root": str(runtime_state_root),
-        "runtime_workspace": runtime_files.is_runtime_workspace(runtime_workspace_root),
+        "runtime_workspace": state_runtime.is_runtime_workspace(runtime_workspace_root),
         "runtime_mode": "runless",
     }
 

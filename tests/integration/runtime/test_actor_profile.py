@@ -11,11 +11,11 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile  # noqa: E402
-from buddyswitch.env.domain.identity import ExternalIdentityProfile  # noqa: E402
-from buddyswitch.env.domain.identity import IdentityRef  # noqa: E402
-from buddyswitch.env.domain.identity import actor_identity  # noqa: E402
-from buddyswitch.env.domain.identity import external_identity  # noqa: E402
+from buddyswitch.foundation.identity.model import ActorIdentityProfile  # noqa: E402
+from buddyswitch.foundation.identity.model import ExternalIdentityProfile  # noqa: E402
+from buddyswitch.foundation.identity.model import IdentityRef  # noqa: E402
+from buddyswitch.foundation.identity.model import actor_identity  # noqa: E402
+from buddyswitch.foundation.identity.model import external_identity  # noqa: E402
 from buddyswitch.foundation.tool_runtime import context as context_module  # noqa: E402
 from buddyswitch.foundation.tool_runtime.context import ToolContext  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402

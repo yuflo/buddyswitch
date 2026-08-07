@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.env.domain.identity import IdentityRef
-from buddyswitch.env.domain.identity import actor_identity
-from buddyswitch.env.domain.identity import external_identity
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import IdentityRef
+from buddyswitch.foundation.identity.model import actor_identity
+from buddyswitch.foundation.identity.model import external_identity
+import buddyswitch.foundation.state.runtime as state_runtime
 
 
 INITIAL_IM_EVENT_CURSOR = "imev-000000000000"
@@ -52,11 +52,11 @@ _EVENT_FIELDS = frozenset(
 
 
 def im_root() -> Path:
-    return runtime_files.STATE_ROOT / "im"
+    return state_runtime.STATE_ROOT / "im"
 
 
 def _require_im_write_root() -> None:
-    runtime_files.require_central_im_write_root()
+    state_runtime.require_central_im_write_root()
 
 
 def _im_dir(name: str) -> Path:
@@ -65,19 +65,19 @@ def _im_dir(name: str) -> Path:
 
 def im_identity_id_for_row(row: Any, field: str) -> str:
     if isinstance(row, str):
-        return runtime_files.require_id(row, field)
+        return state_runtime.require_id(row, field)
     if isinstance(row, dict):
         if isinstance(row.get("id"), str) and isinstance(row.get("type"), str):
             return IdentityRef.from_payload(row).id
         if isinstance(row.get("identity"), dict):
             return IdentityRef.from_payload(row["identity"]).id
         if isinstance(row.get("identity_id"), str):
-            return runtime_files.require_id(row["identity_id"], field)
+            return state_runtime.require_id(row["identity_id"], field)
     raise ValueError(f"{field} must be an identity id or identity payload")
 
 
 def _identity_filename_key(identity_id: str) -> str:
-    return runtime_files.require_id(identity_id, "identity_id").replace(":", "--")
+    return state_runtime.require_id(identity_id, "identity_id").replace(":", "--")
 
 
 def _identity_ref(value: Any, field: str) -> dict[str, str]:
@@ -116,7 +116,7 @@ def save_external_session(external_session: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("external_session.external_session_key_hash must start with sha256:")
     normalized = dict(
         external_session_key_hash=key_hash,
-        identity_id=runtime_files.require_id(
+        identity_id=state_runtime.require_id(
             str(external_session.get("identity_id") or ""),
             "external_session.identity_id",
         ),
@@ -126,7 +126,7 @@ def save_external_session(external_session: dict[str, Any]) -> dict[str, Any]:
         last_used_at=_require_non_empty_text(external_session.get("last_used_at"), "external_session.last_used_at"),
     )
     _require_im_write_root()
-    runtime_files.write_json_object(_im_dir("external_sessions") / f"{key_hash.replace(':', '-', 1)}.json", normalized)
+    state_runtime.write_json_object(_im_dir("external_sessions") / f"{key_hash.replace(':', '-', 1)}.json", normalized)
     return normalized
 
 
@@ -137,26 +137,26 @@ def get_external_session_by_key_hash(key_hash: str) -> dict[str, Any] | None:
     path = _im_dir("external_sessions") / f"{normalized.replace(':', '-', 1)}.json"
     if not path.exists():
         return None
-    return runtime_files.read_json_object(path)
+    return state_runtime.read_json_object(path)
 
 
 def next_im_sequence() -> int:
     path = _im_dir("meta") / "sequence.json"
     current = 0
     if path.exists():
-        payload = runtime_files.read_json_object(path)
+        payload = state_runtime.read_json_object(path)
         value = payload.get("value")
         if isinstance(value, int) and value >= 0:
             current = value
     sequence = current + 1
     _require_im_write_root()
-    runtime_files.write_json_object(path, {"value": sequence})
+    state_runtime.write_json_object(path, {"value": sequence})
     return sequence
 
 
 def save_im_conversation(conversation: dict[str, Any]) -> dict[str, Any]:
     _reject_unknown_fields(conversation, _CONVERSATION_FIELDS, "conversation")
-    conversation_id = runtime_files.require_id(str(conversation.get("id") or ""), "conversation.id")
+    conversation_id = state_runtime.require_id(str(conversation.get("id") or ""), "conversation.id")
     identity_ids_raw = conversation.get("identity_ids")
     if isinstance(identity_ids_raw, list):
         identity_ids = [im_identity_id_for_row(row, "conversation.identity_ids[]") for row in identity_ids_raw]
@@ -170,23 +170,23 @@ def save_im_conversation(conversation: dict[str, Any]) -> dict[str, Any]:
         "identity_ids": identity_ids,
         "created_at": _require_non_empty_text(conversation.get("created_at"), "conversation.created_at"),
         "updated_at": _require_non_empty_text(conversation.get("updated_at"), "conversation.updated_at"),
-        "last_message_id": runtime_files.require_id(
+        "last_message_id": state_runtime.require_id(
             str(conversation.get("last_message_id") or ""),
             "conversation.last_message_id",
         ),
         "last_sequence": _require_non_negative_int(conversation.get("last_sequence"), "conversation.last_sequence"),
     }
     _require_im_write_root()
-    runtime_files.write_json_object(_im_dir("conversations") / f"{conversation_id}.json", normalized)
+    state_runtime.write_json_object(_im_dir("conversations") / f"{conversation_id}.json", normalized)
     return normalized
 
 
 def get_im_conversation(conversation_id: str) -> dict[str, Any] | None:
-    normalized_id = runtime_files.require_id(conversation_id, "conversation_id")
+    normalized_id = state_runtime.require_id(conversation_id, "conversation_id")
     path = _im_dir("conversations") / f"{normalized_id}.json"
     if not path.exists():
         return None
-    return runtime_files.read_json_object(path)
+    return state_runtime.read_json_object(path)
 
 
 def find_im_direct_conversation(identities: list[dict[str, Any] | str]) -> dict[str, Any] | None:
@@ -195,7 +195,7 @@ def find_im_direct_conversation(identities: list[dict[str, Any] | str]) -> dict[
     if not conversations_dir.is_dir():
         return None
     for path in sorted(conversations_dir.glob("*.json")):
-        row = runtime_files.read_json_object(path)
+        row = state_runtime.read_json_object(path)
         if row.get("type") != "direct":
             continue
         try:
@@ -211,13 +211,13 @@ def find_im_direct_conversation(identities: list[dict[str, Any] | str]) -> dict[
 
 def save_im_message(message: dict[str, Any]) -> dict[str, Any]:
     _reject_unknown_fields(message, _MESSAGE_FIELDS, "message")
-    message_id = runtime_files.require_id(str(message.get("id") or ""), "message.id")
-    conversation_id = runtime_files.require_id(str(message.get("conversation_id") or ""), "message.conversation_id")
+    message_id = state_runtime.require_id(str(message.get("id") or ""), "message.id")
+    conversation_id = state_runtime.require_id(str(message.get("conversation_id") or ""), "message.conversation_id")
     sender_identity = _identity_ref(message.get("sender_identity"), "message.sender_identity")
     target_identity = _identity_ref(message.get("target_identity"), "message.target_identity")
     reply_to = message.get("reply_to")
     if reply_to is not None:
-        reply_to = runtime_files.require_id(str(reply_to), "message.reply_to")
+        reply_to = state_runtime.require_id(str(reply_to), "message.reply_to")
     normalized = {
         "id": message_id,
         "conversation_id": conversation_id,
@@ -229,16 +229,16 @@ def save_im_message(message: dict[str, Any]) -> dict[str, Any]:
         "sequence": _require_non_negative_int(message.get("sequence"), "message.sequence"),
     }
     _require_im_write_root()
-    runtime_files.write_json_object(_im_dir("messages") / f"{message_id}.json", normalized)
+    state_runtime.write_json_object(_im_dir("messages") / f"{message_id}.json", normalized)
     return normalized
 
 
 def get_im_message(message_id: str) -> dict[str, Any] | None:
-    normalized_id = runtime_files.require_id(message_id, "message_id")
+    normalized_id = state_runtime.require_id(message_id, "message_id")
     path = _im_dir("messages") / f"{normalized_id}.json"
     if not path.exists():
         return None
-    return runtime_files.read_json_object(path)
+    return state_runtime.read_json_object(path)
 
 
 def list_im_messages() -> list[dict[str, Any]]:
@@ -246,22 +246,22 @@ def list_im_messages() -> list[dict[str, Any]]:
     messages_dir = _im_dir("messages")
     if messages_dir.is_dir():
         for path in messages_dir.glob("*.json"):
-            rows.append(runtime_files.read_json_object(path))
+            rows.append(state_runtime.read_json_object(path))
     rows.sort(key=lambda row: (str(row.get("created_at") or ""), _im_sequence_value(row), str(row.get("id") or "")))
     return rows
 
 
 def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
     _reject_unknown_fields(event, _EVENT_FIELDS, "event")
-    event_id = runtime_files.require_id(str(event.get("event_id") or ""), "event.event_id")
-    message_id = runtime_files.require_id(str(event.get("message_id") or ""), "event.message_id")
-    conversation_id = runtime_files.require_id(str(event.get("conversation_id") or ""), "event.conversation_id")
+    event_id = state_runtime.require_id(str(event.get("event_id") or ""), "event.event_id")
+    message_id = state_runtime.require_id(str(event.get("message_id") or ""), "event.message_id")
+    conversation_id = state_runtime.require_id(str(event.get("conversation_id") or ""), "event.conversation_id")
     sender_identity = _identity_ref(event.get("sender_identity"), "event.sender_identity")
     target_identity = _identity_ref(event.get("target_identity"), "event.target_identity")
     visible_to_identity_id = event.get("visible_to_identity_id")
     reply_to = event.get("reply_to")
     if reply_to is not None:
-        reply_to = runtime_files.require_id(str(reply_to), "event.reply_to")
+        reply_to = state_runtime.require_id(str(reply_to), "event.reply_to")
     normalized = {
         "event_id": event_id,
         "type": _require_non_empty_text(event.get("type"), "event.type"),
@@ -269,7 +269,7 @@ def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
         "conversation_id": conversation_id,
         "sender_identity": sender_identity,
         "target_identity": target_identity,
-        "visible_to_identity_id": runtime_files.require_id(
+        "visible_to_identity_id": state_runtime.require_id(
             str(visible_to_identity_id or ""),
             "event.visible_to_identity_id",
         ),
@@ -278,7 +278,7 @@ def save_im_event(event: dict[str, Any]) -> dict[str, Any]:
         "sequence": _require_non_negative_int(event.get("sequence"), "event.sequence"),
     }
     _require_im_write_root()
-    runtime_files.write_json_object(
+    state_runtime.write_json_object(
         _im_dir("events") / f"{event_id}--{_identity_filename_key(normalized['visible_to_identity_id'])}.json",
         normalized,
     )
@@ -289,29 +289,29 @@ def get_im_event(
     event_id: str,
     identity: dict[str, Any] | str,
 ) -> dict[str, Any] | None:
-    normalized_event_id = runtime_files.require_id(event_id, "event_id")
+    normalized_event_id = state_runtime.require_id(event_id, "event_id")
     identity_id = im_identity_id_for_row(identity, "identity_id")
     path = _im_dir("events") / f"{normalized_event_id}--{_identity_filename_key(identity_id)}.json"
     if not path.exists():
         return None
-    return runtime_files.read_json_object(path)
+    return state_runtime.read_json_object(path)
 
 
 def list_im_events_for_identity(identity: dict[str, Any] | str) -> list[dict[str, Any]]:
     if isinstance(identity, str):
-        identity_id = runtime_files.require_id(identity, "identity_id")
+        identity_id = state_runtime.require_id(identity, "identity_id")
     elif isinstance(identity, dict) and isinstance(identity.get("id"), str):
-        identity_id = runtime_files.require_id(identity["id"], "identity.id")
+        identity_id = state_runtime.require_id(identity["id"], "identity.id")
     elif isinstance(identity, dict) and isinstance(identity.get("identity"), dict):
         identity_payload = identity["identity"]
-        identity_id = runtime_files.require_id(str(identity_payload.get("id") or ""), "identity.id")
+        identity_id = state_runtime.require_id(str(identity_payload.get("id") or ""), "identity.id")
     else:
         raise ValueError("identity must be an identity id or identity payload")
     rows: list[dict[str, Any]] = []
     events_dir = _im_dir("events")
     if events_dir.is_dir():
         for path in events_dir.glob("*.json"):
-            row = runtime_files.read_json_object(path)
+            row = state_runtime.read_json_object(path)
             if row.get("visible_to_identity_id") == identity_id:
                 rows.append(row)
     rows.sort(key=lambda row: (str(row.get("created_at") or ""), _im_sequence_value(row), str(row.get("event_id") or "")))

@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile
+from buddyswitch.foundation.identity.model import ActorIdentityProfile
 
 
 _HOST_EXACT_PATHS = (

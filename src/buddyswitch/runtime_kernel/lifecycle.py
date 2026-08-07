@@ -15,7 +15,8 @@ import sys
 import time
 from typing import Any
 
-from buddyswitch.runtime_kernel import process_identity, protocol
+import buddyswitch.foundation.process_runtime.process_identity as process_identity
+from buddyswitch.runtime_kernel import protocol
 
 
 @dataclass(frozen=True)
@@ -95,16 +96,6 @@ def read_pid(pid_file: Path) -> int | None:
     if not raw.isdigit():
         return None
     return int(raw)
-
-
-def pid_is_live(pid: int | None) -> bool:
-    if pid is None or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 def _socket_is_unix(path: Path) -> bool:

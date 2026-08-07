@@ -17,10 +17,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST
-from buddyswitch.env.repos import runtime_files
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.foundation.tool_runtime import registry as tool_registry
 
-ROOT = runtime_files.ROOT
+ROOT = state_runtime.ROOT
 
 _RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
 _RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS = 30.0

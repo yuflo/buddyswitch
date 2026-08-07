@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 import uuid
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.env.domain.identity import IdentityRef
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
 
 VALID_TRACK_STATE = ("active", "blocked", "done")
 VALID_UPDATE_KIND = ("progress", "decision", "blocker")
@@ -40,7 +39,7 @@ def _require_non_empty_text(value: Any, field: str) -> str:
 
 def _identity_id(value: Any, field: str) -> str:
     if isinstance(value, str) and value.strip():
-        return runtime_files.require_id(value.strip(), field)
+        return state_runtime.require_id(value.strip(), field)
     if isinstance(value, dict):
         if isinstance(value.get("identity"), dict):
             return IdentityRef.from_payload(value["identity"]).id
@@ -63,11 +62,11 @@ def _normalize_text_list(value: Any, field: str) -> list[str]:
 
 
 def _track_file(track_id: str) -> Path:
-    return tracks_dir() / f"{runtime_files.require_id(track_id, 'track id')}.json"
+    return tracks_dir() / f"{state_runtime.require_id(track_id, 'track id')}.json"
 
 
 def tracks_dir() -> Path:
-    return runtime_files.OBJECTS_ROOT / "tracks"
+    return state_runtime.OBJECTS_ROOT / "tracks"
 
 
 def _normalize_now(value: Any) -> dict[str, Any]:
@@ -97,8 +96,8 @@ def _normalize_artifact_relation(row: Any) -> dict[str, Any]:
         raise ValueError(f"track.artifact_relations[].role must be one of {', '.join(VALID_ARTIFACT_RELATION_ROLE)}")
     return {
         "type": "artifact",
-        "relation_id": runtime_files.require_id(row.get("relation_id"), "track.artifact_relations[].relation_id"),
-        "artifact_id": runtime_files.require_id(row.get("artifact_id"), "track.artifact_relations[].artifact_id"),
+        "relation_id": state_runtime.require_id(row.get("relation_id"), "track.artifact_relations[].relation_id"),
+        "artifact_id": state_runtime.require_id(row.get("artifact_id"), "track.artifact_relations[].artifact_id"),
         "role": role,
         "label": _require_non_empty_text(row.get("label"), "track.artifact_relations[].label"),
         "template": _require_non_empty_text(row.get("template"), "track.artifact_relations[].template"),
@@ -118,7 +117,7 @@ def _normalize_update_ref(row: Any) -> dict[str, Any]:
     ref_type = row.get("type")
     if ref_type != "artifact":
         raise ValueError("track.updates[].refs[].type must be 'artifact'")
-    return {"type": "artifact", "id": runtime_files.require_id(row.get("id"), "track.updates[].refs[].id")}
+    return {"type": "artifact", "id": state_runtime.require_id(row.get("id"), "track.updates[].refs[].id")}
 
 
 def _normalize_update_row(row: Any) -> dict[str, Any]:
@@ -164,30 +163,15 @@ def _enforce_state_invariants(*, state: str, now: dict[str, Any], artifact_relat
     raise ValueError(f"track.state must be one of {', '.join(VALID_TRACK_STATE)}")
 
 
-def _call_test_save_hook_if_mock(track: dict[str, Any]) -> dict[str, Any] | None:
-    module = sys.modules.get("env" + "_legacy_store")
-    if module is None:
-        return None
-    save_fn = getattr(module, "save_track", None)
-    if not callable(save_fn):
-        return None
-    if not save_fn.__class__.__module__.startswith("unittest.mock"):
-        return None
-    payload = save_fn(track)
-    if isinstance(payload, dict):
-        return payload
-    return track
-
-
 def now_iso() -> str:
-    return runtime_files.now_iso()
+    return state_runtime.now_iso()
 
 
 def list_tracks() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if tracks_dir().exists():
         for path in tracks_dir().glob("*.json"):
-            rows.append(validate_track(runtime_files.read_json_object(path)))
+            rows.append(validate_track(state_runtime.read_json_object(path)))
     rows.sort(key=lambda row: (row.get("updated_at", ""), row["id"]), reverse=True)
     return rows
 
@@ -196,17 +180,14 @@ def get_track(track_id: str) -> dict[str, Any] | None:
     path = _track_file(track_id)
     if not path.exists():
         return None
-    return validate_track(runtime_files.read_json_object(path))
+    return validate_track(state_runtime.read_json_object(path))
 
 
 def save_track(track: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_track(track)
-    hooked = _call_test_save_hook_if_mock(normalized)
-    if isinstance(hooked, dict):
-        return validate_track(hooked)
-    runtime_files.require_runtime_workspace_write_root()
+    state_runtime.require_runtime_workspace_write_root()
     tracks_dir().mkdir(parents=True, exist_ok=True)
-    runtime_files.write_json_object(_track_file(normalized["id"]), normalized)
+    state_runtime.write_json_object(_track_file(normalized["id"]), normalized)
     return normalized
 
 
@@ -220,10 +201,10 @@ def create_track(
     acceptance_criteria: list[str] | None = None,
     non_goals: list[str] | None = None,
 ) -> dict[str, Any]:
-    runtime_files.require_id(track_id, "track id")
+    state_runtime.require_id(track_id, "track id")
     if get_track(track_id):
         raise ValueError(f"track already exists: {track_id}")
-    timestamp = runtime_files.now_iso()
+    timestamp = state_runtime.now_iso()
     track = {
         "id": track_id,
         "title": title,
@@ -261,7 +242,7 @@ def update_track(track_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         if key not in allowed:
             raise ValueError(f"unsupported track field: {key}")
         track[key] = value
-    track["updated_at"] = runtime_files.now_iso()
+    track["updated_at"] = state_runtime.now_iso()
     return save_track(track)
 
 
@@ -286,12 +267,12 @@ def append_track_update(
         "summary": summary,
         "kind": kind,
         "refs": refs or [],
-        "created_at": runtime_files.now_iso(),
+        "created_at": state_runtime.now_iso(),
     }
     updates = [entry for entry in track.get("updates", []) if isinstance(entry, dict)]
     updates.append(row)
     track["updates"] = updates
-    track["updated_at"] = runtime_files.now_iso()
+    track["updated_at"] = state_runtime.now_iso()
     track = save_track(track)
     return track, row
 
@@ -304,7 +285,7 @@ def validate_track(track: dict[str, Any]) -> dict[str, Any]:
     if forbidden:
         raise ValueError(f"legacy track fields are retired: {', '.join(forbidden)}")
 
-    track_id = runtime_files.require_id(track.get("id", ""), "track.id")
+    track_id = state_runtime.require_id(track.get("id", ""), "track.id")
     title = _require_non_empty_text(track.get("title"), "track.title")
     outcome = _require_non_empty_text(track.get("outcome"), "track.outcome")
     owner_identity_id = _identity_id(track.get("owner_identity_id"), "track.owner_identity_id")

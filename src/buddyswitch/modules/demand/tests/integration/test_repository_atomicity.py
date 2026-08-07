@@ -54,9 +54,9 @@ class DemandRepositoryAtomicityTests(RuntimeWorkspaceTestCase):
             return True, {"demand_id": demand_id}
 
         with patch.object(
-            demands.runtime_files,
+            demands.state_runtime,
             "write_json_object",
-            wraps=demands.runtime_files.write_json_object,
+            wraps=demands.state_runtime.write_json_object,
         ) as write_json_object:
             result = demands.transact_actor_state(ACTOR_TARGET, add_demand)
 

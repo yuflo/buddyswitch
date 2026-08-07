@@ -15,8 +15,8 @@ from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
     def test_actor_identity_profile_is_the_actor_static_identity_owner(self) -> None:
-        from buddyswitch.env.domain.identity import ActorIdentityProfile
-        from buddyswitch.env.domain.identity import IdentityRef
+        from buddyswitch.foundation.identity.model import ActorIdentityProfile
+        from buddyswitch.foundation.identity.model import IdentityRef
 
         profile = ActorIdentityProfile.from_payload(
             {
@@ -37,8 +37,8 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("actor_address", profile.to_payload())
 
     def test_external_identity_profile_is_the_external_static_identity_owner(self) -> None:
-        from buddyswitch.env.domain.identity import ExternalIdentityProfile
-        from buddyswitch.env.domain.identity import IdentityRef
+        from buddyswitch.foundation.identity.model import ExternalIdentityProfile
+        from buddyswitch.foundation.identity.model import IdentityRef
 
         profile = ExternalIdentityProfile.from_payload(
             {
@@ -55,8 +55,8 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("external_id", profile.to_payload())
 
     def test_identity_helpers_reject_cross_type_ids(self) -> None:
-        from buddyswitch.env.domain.identity import actor_identity
-        from buddyswitch.env.domain.identity import external_identity
+        from buddyswitch.foundation.identity.model import actor_identity
+        from buddyswitch.foundation.identity.model import external_identity
 
         with self.assertRaisesRegex(ValueError, "actor identity id"):
             actor_identity("ext-not-actor")
@@ -64,22 +64,22 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
             external_identity("act-not-external")
 
     def test_identity_domain_has_no_im_participant_adapter(self) -> None:
-        import buddyswitch.env.domain.identity as identity
+        import buddyswitch.foundation.identity.model as identity_model
 
         legacy_adapter = "identity" + "_from_im_participant"
-        self.assertFalse(hasattr(identity, legacy_adapter))
+        self.assertFalse(hasattr(identity_model, legacy_adapter))
 
     def test_identity_repo_persists_actor_and_external_profiles(self) -> None:
-        from buddyswitch.env.repos import identities as identity_repo
+        import buddyswitch.foundation.identity.profiles as identity_profiles
 
-        actor = identity_repo.save_actor_identity_profile(
+        actor = identity_profiles.save_actor_identity_profile(
             {
                 "identity": {"id": "act-dev-repo", "type": "actor"},
                 "role_id": "dev",
                 "label": "Dev",
             }
         )
-        external = identity_repo.save_external_profile(
+        external = identity_profiles.save_external_profile(
             {
                 "identity": {"id": "ext-web-repo", "type": "external"},
                 "display_name": "Web",
@@ -87,11 +87,11 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
         )
 
         self.assertEqual(actor["identity"], {"id": "act-dev-repo", "type": "actor"})
-        self.assertEqual(identity_repo.get_actor_identity_profile("act-dev-repo")["role_id"], "dev")
-        self.assertEqual([row["identity"]["id"] for row in identity_repo.list_actor_identity_profiles()], ["act-dev-repo"])
+        self.assertEqual(identity_profiles.get_actor_identity_profile("act-dev-repo")["role_id"], "dev")
+        self.assertEqual([row["identity"]["id"] for row in identity_profiles.list_actor_identity_profiles()], ["act-dev-repo"])
         self.assertEqual(external["identity"], {"id": "ext-web-repo", "type": "external"})
-        self.assertEqual(identity_repo.get_external_profile("ext-web-repo")["display_name"], "Web")
-        self.assertEqual([row["identity"]["id"] for row in identity_repo.list_external_profiles()], ["ext-web-repo"])
+        self.assertEqual(identity_profiles.get_external_profile("ext-web-repo")["display_name"], "Web")
+        self.assertEqual([row["identity"]["id"] for row in identity_profiles.list_external_profiles()], ["ext-web-repo"])
         self.assertTrue(
             (self.runtime_state_root / "buddyswitch" / "objects" / "identities" / "actors" / "act-dev-repo.json").is_file()
         )
@@ -107,7 +107,7 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
         )
 
     def test_tool_context_uses_identity_profile_without_actor_address(self) -> None:
-        from buddyswitch.env.domain.identity import ActorIdentityProfile
+        from buddyswitch.foundation.identity.model import ActorIdentityProfile
         from buddyswitch.foundation.tool_runtime.context import ToolContext
 
         instance_root = self.runtime_root / "instances" / "act-dev-context"

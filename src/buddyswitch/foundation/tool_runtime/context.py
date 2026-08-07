@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 import uuid
 
-from buddyswitch.env.domain.identity import ActorIdentityProfile as _ActorIdentityProfile
-from buddyswitch.env.domain.identity import IdentityRef as _IdentityRef
-from buddyswitch.env.domain.identity import actor_identity as _actor_identity
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import ActorIdentityProfile as _ActorIdentityProfile
+from buddyswitch.foundation.identity.model import IdentityRef as _IdentityRef
+from buddyswitch.foundation.identity.model import actor_identity as _actor_identity
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.foundation.daemon import client as daemon_client
 import re
 
@@ -130,7 +130,7 @@ class ToolContext(Mapping[str, Any]):
             instance_json=instance_json,
             instance_payload=instance_payload,
             manifest=manifest,
-            actor_private_root=runtime_files.actor_private_dir(
+            actor_private_root=state_runtime.actor_private_dir(
                 instance_payload
             ).resolve(strict=False),
             manifest_path=manifest_path,

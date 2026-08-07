@@ -39,11 +39,24 @@ PACKAGE_OWNER_FILES = (
     "catalog/manifest.toml",
     "config/__init__.py",
     "contracts/__init__.py",
-    "env/__init__.py",
     "launcher/__init__.py",
     "runtime_kernel/__init__.py",
     "runtime_support/__init__.py",
     "skills/__init__.py",
+)
+FOUNDATION_PRIMITIVE_FILES = (
+    "foundation/identity/__init__.py",
+    "foundation/identity/model.py",
+    "foundation/identity/profiles.py",
+    "foundation/state/__init__.py",
+    "foundation/state/runtime.py",
+    "foundation/state/actor_private.py",
+    "foundation/process_runtime/process_identity.py",
+)
+FOUNDATION_PRIMITIVE_DOC = "docs/arch/foundation-primitives-architecture.md"
+RETIRED_FOUNDATION_PATHS = (
+    "src/buddyswitch/env",
+    "src/buddyswitch/runtime_kernel/process_identity.py",
 )
 PACKAGE_ENTRYPOINTS = (
     "runtime_activation",
@@ -132,6 +145,8 @@ def test_minimal_package_and_activation_entrypoint_exist_under_src_only() -> Non
         PACKAGE_ROOT / "foundation" / "__init__.py",
         PACKAGE_ROOT / "foundation" / "process_runtime" / "__init__.py",
         PACKAGE_ROOT / "foundation" / "process_runtime" / "activation.py",
+        *(PACKAGE_ROOT / relative for relative in FOUNDATION_PRIMITIVE_FILES),
+        REPO_ROOT / FOUNDATION_PRIMITIVE_DOC,
     )
     assert [path.relative_to(REPO_ROOT).as_posix() for path in expected if not path.is_file()] == []
 
@@ -157,10 +172,16 @@ def test_atomic_cutover_has_one_source_and_entrypoint_topology() -> None:
             / f"{module}.py"
         ).is_file()
     ]
+    retired_foundation_paths = [
+        relative
+        for relative in RETIRED_FOUNDATION_PATHS
+        if (REPO_ROOT / relative).exists()
+    ]
 
     assert old_paths == []
     assert missing_owners == []
     assert missing_entrypoints == []
+    assert retired_foundation_paths == []
 
 
 def test_current_guidance_names_only_current_installed_package_owners() -> None:
@@ -272,6 +293,13 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/modules/communication/",
             "WebRouteRegistration",
             "WebWorkerRegistration",
+        ),
+        REPO_ROOT / FOUNDATION_PRIMITIVE_DOC: (
+            "src/buddyswitch/foundation/identity/model.py",
+            "src/buddyswitch/foundation/identity/profiles.py",
+            "src/buddyswitch/foundation/state/runtime.py",
+            "src/buddyswitch/foundation/state/actor_private.py",
+            "src/buddyswitch/foundation/process_runtime/process_identity.py",
         ),
     }
     missing_required_paths = sorted(

@@ -169,9 +169,9 @@ class ImessageStateTests(unittest.TestCase):
             store = imessage_channel.ImessageChannelStateStore(state_path)
 
             with mock.patch.object(
-                imessage_channel.runtime_files,
+                imessage_channel.state_runtime,
                 "write_json_object",
-                wraps=imessage_channel.runtime_files.write_json_object,
+                wraps=imessage_channel.state_runtime.write_json_object,
             ) as atomic_write:
                 store.save({"schema_version": 6, "contacts": {}})
 
@@ -182,7 +182,7 @@ class ImessageStateTests(unittest.TestCase):
             store = imessage_channel.ImessageChannelStateStore(Path(temp_root) / "state.json")
 
             with mock.patch.object(
-                imessage_channel.runtime_files,
+                imessage_channel.state_runtime,
                 "write_json_object",
                 side_effect=OSError("disk full"),
             ), self.assertRaisesRegex(

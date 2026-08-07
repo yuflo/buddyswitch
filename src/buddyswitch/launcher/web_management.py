@@ -23,8 +23,8 @@ HELPER_DIR = Path(__file__).resolve().parent
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
 from buddyswitch.launcher import host_control as host_control_module
 from buddyswitch.launcher import cli_contract
-from buddyswitch.env.domain.identity import ActorIdentityProfile, IdentityRef
-from buddyswitch.env.repos import runtime_files
+from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.launcher.web_contracts import (
     ActorConsoleSectionRegistration,
     HttpError,
@@ -179,7 +179,7 @@ def bind_web_runtime_state() -> None:
     if isinstance(raw_shared_root, str) and raw_shared_root.strip():
         shared_root = Path(raw_shared_root.strip()).expanduser()
         os.environ["BUDDYSWITCH_STATE_ROOT"] = str(shared_root / "state")
-    runtime_files.refresh_runtime_roots_from_env()
+    state_runtime.refresh_runtime_roots_from_env()
 
 
 def map_host_control_failure(error: host_control_module.HostControlError) -> HttpError:

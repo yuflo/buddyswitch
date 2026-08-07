@@ -220,7 +220,7 @@ def test_artifact_stable_storage_package_assets_and_guidance_are_exact() -> None
         REPO_ROOT / ARTIFACT_PRIVATE / "state/artifacts.py"
     ).read_text(encoding="utf-8")
     runtime_source = (
-        REPO_ROOT / "src/buddyswitch/env/repos/runtime_files.py"
+        REPO_ROOT / "src/buddyswitch/foundation/state/runtime.py"
     ).read_text(encoding="utf-8")
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'OBJECTS_ROOT / "artifacts"' in state_source

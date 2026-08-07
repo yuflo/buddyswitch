@@ -331,12 +331,12 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("[Message From", source)
 
     def test_web_runtime_binds_shared_state_for_server_owned_web_im_identity(self) -> None:
-        from buddyswitch.env.repos import runtime_files
+        import buddyswitch.foundation.state.runtime as state_runtime
 
         original_state_root = os.environ.get("BUDDYSWITCH_STATE_ROOT")
         original_shared_root = os.environ.get("BUDDYSWITCH_SHARED_ROOT")
         original_actor_id = os.environ.get("BUDDYSWITCH_ACTOR_ID")
-        self.addCleanup(runtime_files.refresh_runtime_roots_from_env)
+        self.addCleanup(state_runtime.refresh_runtime_roots_from_env)
         self.addCleanup(_restore_env_value, "BUDDYSWITCH_STATE_ROOT", original_state_root)
         self.addCleanup(_restore_env_value, "BUDDYSWITCH_SHARED_ROOT", original_shared_root)
         self.addCleanup(_restore_env_value, "BUDDYSWITCH_ACTOR_ID", original_actor_id)
@@ -347,7 +347,7 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
             os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             os.environ.pop("BUDDYSWITCH_STATE_ROOT", None)
             os.environ.pop("BUDDYSWITCH_ACTOR_ID", None)
-            runtime_files.refresh_runtime_roots_from_env()
+            state_runtime.refresh_runtime_roots_from_env()
 
             WEB_MANAGEMENT.bind_web_runtime_state()
             from buddyswitch.application.build import build_application

@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C3 ACCEPTED — C4 READY (R1 ONLY)
-> Runtime authorization: `BS-MM-S5-FOUNDATION-PRIMITIVES-R1-20260806-01`
+> Current state: S0–S4 ACCEPTED; S5 C1–C4 ACCEPTED — C5 PREPARATION ONLY
+> Runtime authorization: none; C5 implementation awaits READY review
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C3 ACCEPTED — C4 READY (R1 ONLY) |
+| S5 | `05-foundation-convergence.md` | C1–C4 ACCEPTED — C5 PREPARATION ONLY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -194,10 +194,12 @@ owners, 68 direct import representations and 63 direct test/support files.
 Focused preservation `64a171bd1ff847e1b4e25136c8c46eb3` and topology
 preflight `S5C4P-20260806-01` passed; D-062 freezes three direct Foundation
 primitive owners, no migration of zero-consumer helpers, and the C4/C5/C6 cut
-line. C4 is READY at
-`05-foundation-convergence-plan/identity-state-process/README.md`. Only packet
-`BS-MM-S5-FOUNDATION-PRIMITIVES-R1-20260806-01` is executable; C5–C7 and S6
-remain unauthorized.
+line. R1 then completed the direct-owner cutover, removed the retired
+`env/**` and old process-identity path, passed exact/affected proof and frozen
+FINAL `e306abb4f43d42ce8b9517f08e3a5450`, and is accepted in
+`05-foundation-convergence-plan/identity-state-process/S5-C4-ACCEPTANCE.md`.
+The packet is consumed. C5 source refresh and READY preparation are unlocked;
+C5 implementation, C6–C7 and S6 remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,
