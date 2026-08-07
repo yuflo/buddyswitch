@@ -1,8 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Current state: C1–C5A ACCEPTED — C5B PREPARATION ONLY
+> Current state: C1–C5A ACCEPTED — C5B READY
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: no implementation packet; C5B source refresh and READY review only
+> Execution authority: packet `BS-MM-S5-DAEMON-R1-20260807-01` authorizes C5B only
 > Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
 
 The executable blueprint and current handoff live at

@@ -62,7 +62,7 @@ Statuses:
 | R-FND-011 | CONFIRMED — S5 refresh classified remaining technical roots by owner; C5 source refresh further separated independently runnable Broker and Daemon service owners | S1–S5 | C1–C7 acceptance and generic final dependency/topology proofs; D-063 |
 | R-FND-012 | C1 TOOLHOST PORTION CLOSED — old Tool runtime/package/client/MCP paths and the zero-consumer Broker facade are absent; later technical roots retain their checkpoint owners | owning stage/S5 | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; S5 final foundation absence proof |
 | R-FND-013 | CLOSED — Runtime Broker has one `foundation/runtime_broker/**` owner; shared service-neutral framing has one process-runtime owner; `runtime_kernel/**` and installed residue are absent | S5 C5A | `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; exact/affected/frozen FINAL and replacement proof |
-| R-FND-014 | CONFIRMED — central and instance Daemon host remains physically spread across Launcher plus Foundation client after C5A framing-only consumer correction | S5 C5B | future source-refreshed C5B acceptance; no Broker dependency or product switch |
+| R-FND-014 | CONFIRMED / C5B READY — central and instance Daemon host remains physically spread across Launcher plus Foundation client; 76 current representations and the App/Actor capability, Browser registration and shared event-log cut lines are source-refreshed | S5 C5B | `05-foundation-convergence-plan/daemon/S5-C5B-READY-REVIEW.md`; future C5B acceptance, old-path absence and no product/Role/Broker dependency |
 
 ## Role residue
 

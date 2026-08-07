@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C5A ACCEPTED — C5B PREPARATION ONLY
-> Runtime authorization: no implementation packet; C5B source refresh and READY review only
+> Current state: S0–S4 ACCEPTED; S5 C1–C5A ACCEPTED — C5B READY
+> Runtime authorization: packet `BS-MM-S5-DAEMON-R1-20260807-01` authorizes C5B only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C5A ACCEPTED — C5B PREPARATION ONLY |
+| S5 | `05-foundation-convergence.md` | C1–C5A ACCEPTED — C5B READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -207,8 +207,15 @@ shared-framing cutover. Hub review removed Broker terminology from the shared
 primitive, passed exact/affected proof and new frozen FINAL
 `0edb068adf19462a863ce3445e8aab0c`. C5A is accepted in
 `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; its
-packet is consumed. Only C5B source refresh and READY preparation are now
-unblocked; C5B implementation, C6–C7 and S6 remain unauthorized.
+packet is consumed. C5B source refresh then classified 76 current
+source/test/current-doc representations and proved that App/Actor behavior
+must cross one narrow application-supplied capability, Browser registrations
+must enter through application composition, and the shared runtime-event log
+belongs to Process Runtime. Focused baseline `433a2e2766d34929b10b6aa2e4111213`,
+source-equivalent full `7643bdc832c648729ab87c0eef6e0c39` and topology
+`S5C5BP-20260807-01` passed. C5B is READY at
+`05-foundation-convergence-plan/daemon/README.md`; C6–C7 and S6 remain
+unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,
