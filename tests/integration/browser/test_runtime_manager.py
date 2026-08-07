@@ -305,7 +305,12 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             self.assertTrue(result.get("ok"), msg=result)
             self.assertEqual(result.get("browser_port"), port)
             self.assertEqual(result.get("state_changed"), False)
-            self.assertTrue(wait_until(chrome_argv.exists, timeout=5.0))
+            self.assertTrue(
+                wait_until(
+                    lambda: chrome_argv.exists() and chrome_argv.stat().st_size > 0,
+                    timeout=5.0,
+                )
+            )
             argv = [json.loads(line) for line in chrome_argv.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(argv), 1, "acquire should not start another Chrome when owned endpoint is ready")
 

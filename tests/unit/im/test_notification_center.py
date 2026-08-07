@@ -39,7 +39,7 @@ def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
     module_name = ".".join(path.relative_to(ROOT / "src").with_suffix("").parts)
-    return importlib.reload(importlib.import_module(module_name))
+    return importlib.import_module(module_name)
 
 
 def imported_modules(path: Path) -> set[str]:
