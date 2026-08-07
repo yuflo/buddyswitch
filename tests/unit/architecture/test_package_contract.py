@@ -40,7 +40,7 @@ PACKAGE_OWNER_FILES = (
     "config/__init__.py",
     "contracts/__init__.py",
     "launcher/__init__.py",
-    "runtime_kernel/__init__.py",
+    "foundation/runtime_broker/__init__.py",
     "runtime_support/__init__.py",
     "skills/__init__.py",
 )
@@ -51,12 +51,14 @@ FOUNDATION_PRIMITIVE_FILES = (
     "foundation/state/__init__.py",
     "foundation/state/runtime.py",
     "foundation/state/actor_private.py",
+    "foundation/process_runtime/json_framing.py",
     "foundation/process_runtime/process_identity.py",
 )
 FOUNDATION_PRIMITIVE_DOC = "docs/arch/foundation-primitives-architecture.md"
+RUNTIME_BROKER_DOC = "docs/arch/runtime-broker-architecture.md"
 RETIRED_FOUNDATION_PATHS = (
     "src/buddyswitch/env",
-    "src/buddyswitch/runtime_kernel/process_identity.py",
+    "src/buddyswitch/runtime_kernel",
 )
 PACKAGE_ENTRYPOINTS = (
     "runtime_activation",
@@ -197,6 +199,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         "spec_from_file_location",
         "--repo-root",
         "PYTHONPATH",
+        "src/buddyswitch/runtime_kernel",
+        "buddyswitch.runtime_kernel",
     )
     guidance_paths = (
         REPO_ROOT / "README.md",
@@ -237,8 +241,9 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/tool_runtime/registry.py",
             "src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}",
             "src/buddyswitch/modules/context/",
-            "src/buddyswitch/runtime_kernel/protocol.py",
-            "src/buddyswitch/runtime_kernel/dispatcher.py",
+            "src/buddyswitch/foundation/runtime_broker/protocol.py",
+            "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
+            "src/buddyswitch/foundation/process_runtime/json_framing.py",
             "src/buddyswitch/contracts/prepare-turn-context.json",
             "src/buddyswitch/contracts/{pm,design,dev,market,test}.md",
             "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
@@ -251,12 +256,13 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         REPO_ROOT / "docs" / "arch" / "daemon-service-architecture.md": (
             "src/buddyswitch/launcher/instance_daemon.py",
             "src/buddyswitch/foundation/browser_runtime/inbound.py",
+            "src/buddyswitch/foundation/process_runtime/json_framing.py",
         ),
         REPO_ROOT / "docs" / "arch" / "browser-runtime-architecture.md": (
             "src/buddyswitch/foundation/browser_runtime/",
             "src/buddyswitch/application/entrypoints/browser_runtime.py",
             "src/buddyswitch/application/entrypoints/browser_cockpit_proxy.py",
-            "src/buddyswitch/runtime_kernel/dispatcher.py",
+            "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
             "src/buddyswitch/launcher/instance_daemon.py",
         ),
         REPO_ROOT / "docs" / "arch" / "demand-sys-architecture.md": (
@@ -300,6 +306,17 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/state/runtime.py",
             "src/buddyswitch/foundation/state/actor_private.py",
             "src/buddyswitch/foundation/process_runtime/process_identity.py",
+            "src/buddyswitch/foundation/process_runtime/json_framing.py",
+        ),
+        REPO_ROOT / RUNTIME_BROKER_DOC: (
+            "src/buddyswitch/foundation/runtime_broker/",
+            "src/buddyswitch/foundation/runtime_broker/protocol.py",
+            "src/buddyswitch/foundation/runtime_broker/coordinator.py",
+            "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
+            "src/buddyswitch/foundation/runtime_broker/client.py",
+            "src/buddyswitch/foundation/runtime_broker/server.py",
+            "src/buddyswitch/foundation/runtime_broker/lifecycle.py",
+            "src/buddyswitch/foundation/process_runtime/json_framing.py",
         ),
     }
     missing_required_paths = sorted(

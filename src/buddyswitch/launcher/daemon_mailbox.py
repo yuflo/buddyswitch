@@ -15,7 +15,7 @@ import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.launcher import daemon_triggers  # noqa: E402
-from buddyswitch.runtime_kernel import protocol  # noqa: E402
+import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 
 
 SIGNAL_ALLOWED_KEYS = {
@@ -215,13 +215,13 @@ class DaemonMailboxServer:
         request_id: str | None = None
         with conn:
             try:
-                request = protocol.read_message(conn)
+                request = json_framing.read_message(conn)
                 request_id = request.get("request_id") if isinstance(request.get("request_id"), str) else None
                 response = self.dispatch(request)
             except Exception as exc:
                 response = self._response(request_id, code="mailbox_protocol_error", message=str(exc))
             try:
-                protocol.write_message(conn, response)
+                json_framing.write_message(conn, response)
             except OSError:
                 return
 

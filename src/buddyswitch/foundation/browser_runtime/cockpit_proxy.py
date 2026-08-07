@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 
 from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
 from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
-from buddyswitch.runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
+from buddyswitch.foundation.runtime_broker.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 

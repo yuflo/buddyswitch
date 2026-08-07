@@ -11,15 +11,15 @@
 | S5 C2 acceptance | `05-foundation-convergence-plan/web-cleanup/S5-C2-ACCEPTANCE.md`; patch `80f1aeeb…`; FINAL `c1a3466da1b6455ead00dfcdca86bf46` |
 | S5 C3 acceptance | `05-foundation-convergence-plan/browser-runtime/S5-C3-ACCEPTANCE.md`; patch `5691506f…`; FINAL `c6a7f1ad14c44df48dea1a96e0a4f5db` |
 | S5 C4 acceptance | `05-foundation-convergence-plan/identity-state-process/S5-C4-ACCEPTANCE.md`; patch `6ff8fcd6…`; FINAL `e306abb4f43d42ce8b9517f08e3a5450` |
-| S5 C5A readiness | `05-foundation-convergence-plan/runtime-broker/S5-C5A-READY-REVIEW.md`; direct `fed0d4f4…`; topology `S5C5AP-20260807-02` |
+| S5 C5A acceptance | `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; patch `6eabfe2b…`; FINAL `0edb068adf19462a863ce3445e8aab0c` |
 | Active stage | S5 — Foundation Convergence |
-| State | C1–C4 ACCEPTED — C5A READY |
-| Runtime migration authorized | C5A Runtime Broker only after preparation commit/push |
+| State | C1–C5A ACCEPTED — C5B PREPARATION ONLY |
+| Runtime migration authorized | none; C5B source refresh and READY review only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent execution of `BS-MM-S5-RUNTIME-BROKER-R1-20260807-01` |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State and Process primitives |
+| Next gate | commit/push C5A checkpoint, then source-bound C5B READY preparation |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State, Process and Runtime Broker owners |
 
 ## Stage ledger
 
@@ -30,7 +30,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C4 ACCEPTED — C5A READY | S4 | coordinating hub | execute C5A only; C5B–C7 implementation blocked |
+| S5 Foundation | C1–C5A ACCEPTED — C5B PREPARATION ONLY | S4 | coordinating hub | refresh C5B source and READY inputs; C5B–C7 implementation blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -340,6 +340,24 @@ changing product source. Exact/affected proof and frozen FINAL
 `browser-runtime/S5-C3-ACCEPTANCE.md`, both packets are consumed and only C4
 preparation is unblocked.
 
+C4 then converged Identity, canonical State, Actor-private deletion and exact
+process-start identity into direct Foundation owners, removed the retired
+`env/**` and old process-identity paths, and preserved the installed runtime
+and lifecycle contracts. Its frozen FINAL
+`e306abb4f43d42ce8b9517f08e3a5450` passed and C4 is accepted in
+`identity-state-process/S5-C4-ACCEPTANCE.md`.
+
+C5A moved Runtime Broker protocol, coordination, dispatch, client/server,
+lifecycle and the Broker-private lock into one
+`foundation/runtime_broker/**` owner. Shared Content-Length JSON framing moved
+to a service-neutral process-runtime primitive used directly by Broker and
+Daemon, and `runtime_kernel/**` was deleted. Hub review caught Broker wording
+inside the shared primitive before acceptance, closed it through exact RED,
+reprovisioned the installed runtime, passed 98 direct/affected tests and one
+new frozen FINAL `0edb068adf19462a863ce3445e8aab0c`. C5A is accepted in
+`runtime-broker/S5-C5A-ACCEPTANCE.md`; its R1 packet is consumed and only C5B
+source refresh/READY preparation is unblocked.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -444,6 +462,7 @@ preparation is unblocked.
 | 2026-08-06 | S5 C4 Foundation primitives handoff | READY | `05-foundation-convergence-plan/identity-state-process/S5-C4-READY-REVIEW.md`; owner manifest `0462cf2d…`; direct baseline `64a171bd1ff847e1b4e25136c8c46eb3`; source-equivalent FINAL `c6a7f1ad14c44df48dea1a96e0a4f5db`; topology `S5C4P-20260806-01`; packet `BS-MM-S5-FOUNDATION-PRIMITIVES-R1-20260806-01`; D-062 | user starts one independent C4 task; hub pauses without polling; C5–C7 remain blocked |
 | 2026-08-07 | S5 C4 Foundation primitives acceptance | ACCEPTED | `05-foundation-convergence-plan/identity-state-process/S5-C4-ACCEPTANCE.md`; patch `6ff8fcd6…`; focused/affected `d201c36743234e518465a8398aeb01b3`, `5e3f05baeebb42ae929cf7b6259a0ca9`, `0415b2114caf4dc29b56a78513bb461a`, `98ca3f7e2c564c48af636c75af02f7e4`, `b498c7abd22549c29017622b15ed172f`; FINAL `e306abb4f43d42ce8b9517f08e3a5450` | commit/push C4 checkpoint, then refresh C5 from committed source; never resume C4 R1 |
 | 2026-08-07 | S5 C5A Runtime Broker handoff | READY | `05-foundation-convergence-plan/runtime-broker/S5-C5A-READY-REVIEW.md`; source-equivalent FINAL `e306abb4f...`; direct Broker `fed0d4f4...`; independent Daemon `35589e1b...`; topology `S5C5AP-20260807-02`; packet `BS-MM-S5-RUNTIME-BROKER-R1-20260807-01`; D-063 | execute C5A only; C5B–C7 remain blocked |
+| 2026-08-07 | S5 C5A Runtime Broker acceptance | ACCEPTED | `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; patch `6eabfe2b…`; hub RED `db81260a…`; exact/affected `a0f40b51…`; FINAL `0edb068adf19462a863ce3445e8aab0c` | commit/push C5A checkpoint, then refresh C5B from the clean committed owner; never resume C5A R1 |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -465,11 +484,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / C5A Runtime Broker
-Master state: C1–C4 ACCEPTED — C5A READY
-Goal Packet: BS-MM-S5-RUNTIME-BROKER-R1-20260807-01
+Stage: S5 / Foundation / C5B Daemon preparation
+Master state: C1–C5A ACCEPTED — C5B PREPARATION ONLY
+Goal Packet: none
 Execution session: none
-Last hub checkpoint: C4 accepted; FINAL `e306abb4f43d42ce8b9517f08e3a5450`
-Next action: commit/push C5A preparation, then hand off the exact clean commit
+Last hub checkpoint: C5A accepted; FINAL `0edb068adf19462a863ce3445e8aab0c`
+Next action: commit/push C5A implementation and acceptance, then source-refresh C5B
 No-polling state: not entered
 ```

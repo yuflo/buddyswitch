@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
-from buddyswitch.runtime_kernel import lifecycle
+from buddyswitch.foundation.runtime_broker import lifecycle
 from tests.support.processes import ResourceLedger
 
 from tests.integration.browser.market_evidence_harness import *  # noqa: F401,F403

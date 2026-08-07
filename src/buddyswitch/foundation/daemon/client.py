@@ -13,7 +13,7 @@ from typing import Any
 import uuid
 
 
-from buddyswitch.runtime_kernel import protocol  # noqa: E402
+import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 
 
 CENTRAL_DAEMON_PROTOCOL = "buddyswitch-central-daemon/v1"
@@ -105,8 +105,8 @@ def _request_envelope(
                 sock.settimeout(max(0.05, connect_timeout_seconds))
                 sock.connect(str(socket_path))
                 sock.settimeout(max(0.05, response_timeout_seconds))
-                protocol.write_message(sock, request)
-                response = protocol.read_message(sock)
+                json_framing.write_message(sock, request)
+                response = json_framing.read_message(sock)
         except OSError as exc:
             last_error = exc
             if (
@@ -123,7 +123,7 @@ def _request_envelope(
                 message=f"daemon socket unavailable at {socket_path}: {exc}",
                 retriable=True,
             )
-        except protocol.BrokerProtocolError as exc:
+        except json_framing.JsonFramingError as exc:
             return _error_envelope(
                 protocol_name,
                 request_id,

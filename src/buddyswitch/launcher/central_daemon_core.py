@@ -15,7 +15,7 @@ from typing import Any
 from buddyswitch.launcher import daemon_mailbox  # noqa: E402
 from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
-from buddyswitch.runtime_kernel import protocol  # noqa: E402
+import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 
@@ -414,7 +414,7 @@ class CentralDaemonSocketServer:
         request_id: str | None = None
         with conn:
             try:
-                request = protocol.read_message(conn)
+                request = json_framing.read_message(conn)
                 request_id = request.get("request_id") if isinstance(request.get("request_id"), str) else None
                 response = self.service.dispatch(request)
             except Exception as exc:
@@ -425,6 +425,6 @@ class CentralDaemonSocketServer:
                     "error": {"code": "central_daemon_protocol_error", "message": str(exc), "retriable": False},
                 }
             try:
-                protocol.write_message(conn, response)
+                json_framing.write_message(conn, response)
             except OSError:
                 return

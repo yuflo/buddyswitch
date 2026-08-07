@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 from buddyswitch.launcher import app_server
-from buddyswitch.runtime_kernel import lifecycle
+from buddyswitch.foundation.runtime_broker import lifecycle
 
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process

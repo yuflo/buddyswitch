@@ -16,7 +16,7 @@ from buddyswitch.launcher import central_daemon_core
 from buddyswitch.launcher import daemon_core
 from buddyswitch.launcher import daemon_mailbox
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
-from buddyswitch.runtime_kernel import lifecycle
+from buddyswitch.foundation.runtime_broker import lifecycle
 from tests.support.launcher import LauncherTestSupport
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process

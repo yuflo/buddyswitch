@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C4 ACCEPTED — C5A READY
-> Runtime authorization: C5A Runtime Broker only after its preparation commit is pushed
+> Current state: S0–S4 ACCEPTED; S5 C1–C5A ACCEPTED — C5B PREPARATION ONLY
+> Runtime authorization: no implementation packet; C5B source refresh and READY review only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C4 ACCEPTED — C5A READY |
+| S5 | `05-foundation-convergence.md` | C1–C5A ACCEPTED — C5B PREPARATION ONLY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -202,8 +202,13 @@ The packet is consumed. C5 source refresh found two independent service owners,
 so D-063 refines the former combined unit into C5A Runtime Broker followed by
 C5B Daemon. Broker baseline `fed0d4f4...`, independent Daemon baseline
 `35589e1b...` and topology `S5C5AP-20260807-02` passed. C5A packet
-`BS-MM-S5-RUNTIME-BROKER-R1-20260807-01` is READY after its preparation commit
-is pushed; C5B, C6–C7 and S6 remain unauthorized.
+`BS-MM-S5-RUNTIME-BROKER-R1-20260807-01` then completed the direct Broker and
+shared-framing cutover. Hub review removed Broker terminology from the shared
+primitive, passed exact/affected proof and new frozen FINAL
+`0edb068adf19462a863ce3445e8aab0c`. C5A is accepted in
+`05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; its
+packet is consumed. Only C5B source refresh and READY preparation are now
+unblocked; C5B implementation, C6–C7 and S6 remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

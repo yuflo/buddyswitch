@@ -19,7 +19,7 @@ from buddyswitch.modules.artifact.private.state import artifacts as artifact_rep
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
-import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
 from buddyswitch.modules.artifact.private.domain import source_refs  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 

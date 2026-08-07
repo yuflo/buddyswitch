@@ -42,9 +42,11 @@ The verified application bridges remain
 `src/buddyswitch/application/entrypoints/browser_cockpit_proxy.py`. Shell
 commands call those entrypoints and do not import Browser implementation.
 
-`src/buddyswitch/runtime_kernel/dispatcher.py` retains Broker request parsing,
-identity validation, and error/result translation. It calls Browser acquire,
-status, and release operations. `src/buddyswitch/launcher/instance_daemon.py`
+`src/buddyswitch/foundation/runtime_broker/dispatcher.py` owns the Broker-side
+request parsing, identity validation, and error/result translation for Browser
+acquire, status, and release. Browser consumers call
+`src/buddyswitch/foundation/runtime_broker/client.py` directly.
+`src/buddyswitch/launcher/instance_daemon.py`
 retains generic handler ordering, duplicate validation, and execution. It
 combines the exact registrations from
 `src/buddyswitch/foundation/browser_runtime/inbound.py` without defining

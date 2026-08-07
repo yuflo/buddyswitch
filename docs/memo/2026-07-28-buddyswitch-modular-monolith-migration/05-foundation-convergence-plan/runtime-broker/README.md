@@ -1,7 +1,7 @@
 # S5 C5A Runtime Broker
 
-> State: `READY`
-> Execution authority: packet `BS-MM-S5-RUNTIME-BROKER-R1-20260807-01` only
+> State: `ACCEPTED`
+> Execution authority: none; packet `BS-MM-S5-RUNTIME-BROKER-R1-20260807-01` is consumed
 
 C5A converges the existing local Runtime Broker into one earned Foundation
 owner and removes the retired `runtime_kernel/**` root. It also gives the
@@ -14,8 +14,9 @@ Read in order:
 2. `S5-C5A-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
 3. `S5-C5A-IMPLEMENTATION-PLAN.md`;
 4. `S5-C5A-READY-REVIEW.md`;
-5. `S5-C5A-GOAL-PACKET.md`.
+5. `S5-C5A-GOAL-PACKET.md`;
+6. `S5-C5A-ACCEPTANCE.md`.
 
-C5B Daemon, C6, C7 and S6 are blocked. C5A may update current Daemon files
-only where they consume the shared framing primitive; it may not move or
-redesign Daemon ownership.
+C5B source refresh and READY preparation are unblocked. C5B implementation,
+C6, C7 and S6 remain blocked until their own source-bound gates pass. C5A may
+not resume.

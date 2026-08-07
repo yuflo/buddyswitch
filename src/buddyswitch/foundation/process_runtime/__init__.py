@@ -1,1 +1,1 @@
-"""Installed process-runtime identity and activation contracts."""
+"""Installed process-runtime identity, activation, invocation, and JSON framing contracts."""

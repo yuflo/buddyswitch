@@ -15,7 +15,7 @@ CURRENT_OWNER_ASSET = BROWSER_ROOT / "assets" / "chrome-devtools-mcp-1.1.1-tools
 HOST_PATHS = (
     PACKAGE_ROOT / "application" / "entrypoints" / "browser_runtime.py",
     PACKAGE_ROOT / "application" / "entrypoints" / "browser_cockpit_proxy.py",
-    PACKAGE_ROOT / "runtime_kernel" / "dispatcher.py",
+    PACKAGE_ROOT / "foundation" / "runtime_broker" / "dispatcher.py",
     PACKAGE_ROOT / "launcher" / "instance_daemon.py",
 )
 RETIRED_PATHS = (

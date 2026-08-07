@@ -11,7 +11,7 @@ from typing import Any
 
 
 from buddyswitch.foundation.tool_runtime import registry as tool_registry
-from buddyswitch.runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
+from buddyswitch.foundation.runtime_broker.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 _PRODUCT_MODE_ENV_KEYS = (
     "BUDDYSWITCH_ACTOR_ID",

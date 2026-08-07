@@ -11,7 +11,7 @@ import time
 import pytest
 
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
-from buddyswitch.runtime_kernel import lifecycle
+from buddyswitch.foundation.runtime_broker import lifecycle
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import ResourceLedger, run_process
 

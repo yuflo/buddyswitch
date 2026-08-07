@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 
 from buddyswitch.foundation.tool_runtime import native_mcp  # noqa: E402
-from buddyswitch.runtime_kernel.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
+from buddyswitch.foundation.runtime_broker.client import RuntimeBrokerError, request_runtime_broker  # noqa: E402
 
 
 MCP_PROTOCOL_VERSION = "2025-06-18"

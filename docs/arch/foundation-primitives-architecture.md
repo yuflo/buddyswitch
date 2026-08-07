@@ -3,8 +3,9 @@
 ## Purpose
 
 Foundation primitives provide small, product-neutral owners for identity,
-runtime state, actor-private cleanup, and process-start identity. Product and
-host modules import these owners directly; the package roots are inert.
+runtime state, actor-private cleanup, process-start identity, and local-socket
+JSON framing. Product and host modules import these owners directly; the
+package roots are inert.
 
 ## Owners
 
@@ -19,6 +20,8 @@ host modules import these owners directly; the package roots are inert.
   deletion used by runtime cleanup.
 - `src/buddyswitch/foundation/process_runtime/process_identity.py` owns exact
   process-start records and liveness checks used by lifecycle controllers.
+- `src/buddyswitch/foundation/process_runtime/json_framing.py` owns the shared
+  Content-Length framed JSON-object read/write algorithm and byte limits.
 
 ## Dependency direction
 
@@ -26,12 +29,13 @@ host modules import these owners directly; the package roots are inert.
 identity model <- identity profiles -> state runtime
 product or host consumer -----------> direct Foundation owner
 lifecycle controller ---------------> process identity
+Broker/Daemon socket transport ------> JSON framing
 runtime cleanup --------------------> actor-private deletion
 ```
 
-Foundation primitive owners do not import product modules, launchers, runtime
-kernel modules, or runtime-support modules. Composition and consumer policy
-remain outside Foundation.
+Foundation primitive owners do not import product modules, launchers, Runtime
+Broker services, or runtime-support modules. Composition and consumer policy
+remain outside these primitives.
 
 ## State and mutation
 

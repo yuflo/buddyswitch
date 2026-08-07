@@ -25,13 +25,12 @@ from tests.support.fake_cdp import FakeCdpServer, write_fake_chrome
 
 ROOT = REPO_ROOT
 
-import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-import buddyswitch.runtime_kernel.client as runtime_client  # noqa: E402
+import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
+import buddyswitch.foundation.runtime_broker.client as runtime_client  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
-PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
 
 def port_accepts(port: int) -> bool:
@@ -55,7 +54,8 @@ def _require_module(name: str):
 
 class RuntimeBrokerProtocolTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.protocol = _require_module("buddyswitch.runtime_kernel.protocol")
+        self.protocol = _require_module("buddyswitch.foundation.runtime_broker.protocol")
+        self.framing = _require_module("buddyswitch.foundation.process_runtime.json_framing")
 
     def _framed(self, payload: dict[str, object]) -> bytes:
         body = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
@@ -67,8 +67,8 @@ class RuntimeBrokerProtocolTests(unittest.TestCase):
             first = {"a": 1}
             second = {"b": 2}
             left.sendall(self._framed(first) + self._framed(second))
-            self.assertEqual(self.protocol.read_message(right), first)
-            self.assertEqual(self.protocol.read_message(right), second)
+            self.assertEqual(self.framing.read_message(right), first)
+            self.assertEqual(self.framing.read_message(right), second)
         finally:
             left.close()
             right.close()
@@ -78,12 +78,12 @@ class RuntimeBrokerProtocolTests(unittest.TestCase):
         try:
             left.sendall(b"{}\n")
             left.shutdown(socket.SHUT_WR)
-            with self.assertRaises(self.protocol.BrokerProtocolError) as raised:
-                self.protocol.read_message(right)
+            with self.assertRaises(self.framing.JsonFramingError) as raised:
+                self.framing.read_message(right)
         finally:
             left.close()
             right.close()
-        self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PROTOCOL")
+        self.assertIn("unexpected EOF", raised.exception.message)
 
     def test_protocol_rejects_invalid_json_body(self) -> None:
         left, right = socket.socketpair()
@@ -91,20 +91,65 @@ class RuntimeBrokerProtocolTests(unittest.TestCase):
             body = b'{"ok":'
             header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
             left.sendall(header + body)
-            with self.assertRaises(self.protocol.BrokerProtocolError) as raised:
-                self.protocol.read_message(right)
+            with self.assertRaises(self.framing.JsonFramingError) as raised:
+                self.framing.read_message(right)
         finally:
             left.close()
             right.close()
-        self.assertEqual(raised.exception.code, "E_RUNTIME_BROKER_PROTOCOL")
         self.assertIn("invalid JSON", raised.exception.message)
+
+    def test_framing_preserves_header_and_body_limits(self) -> None:
+        for wire, limits, message in (
+            (b"X: 1\r\n\r\n", {"header_limit_bytes": 3}, "header exceeds limit"),
+            (b"Content-Length: 2\r\n\r\n{}", {"body_limit_bytes": 1}, "body exceeds limit"),
+        ):
+            with self.subTest(message=message):
+                left, right = socket.socketpair()
+                try:
+                    left.sendall(wire)
+                    with self.assertRaises(self.framing.JsonFramingError) as raised:
+                        self.framing.read_message(right, **limits)
+                finally:
+                    left.close()
+                    right.close()
+                self.assertIn(message, raised.exception.message)
+
+    def test_framing_rejects_body_eof_and_non_object_json(self) -> None:
+        for wire, message in (
+            (b"Content-Length: 3\r\n\r\n{}", "unexpected EOF while reading framed JSON body"),
+            (b"Content-Length: 2\r\n\r\n[]", "must decode to JSON object"),
+        ):
+            with self.subTest(message=message):
+                left, right = socket.socketpair()
+                try:
+                    left.sendall(wire)
+                    left.shutdown(socket.SHUT_WR)
+                    with self.assertRaises(self.framing.JsonFramingError) as raised:
+                        self.framing.read_message(right)
+                finally:
+                    left.close()
+                    right.close()
+                self.assertIn(message, raised.exception.message)
+
+    def test_framing_write_is_compact_ascii_object_sendall(self) -> None:
+        left, right = socket.socketpair()
+        try:
+            self.framing.write_message(left, {"snow": "雪"})
+            expected_body = b'{"snow":"\\u96ea"}'
+            expected = f"Content-Length: {len(expected_body)}\r\n\r\n".encode("ascii") + expected_body
+            self.assertEqual(right.recv(len(expected)), expected)
+            with self.assertRaises(self.framing.JsonFramingError):
+                self.framing.write_message(left, ["not", "an", "object"])
+        finally:
+            left.close()
+            right.close()
 
     def test_validate_request_requires_v2_protocol_request_id_method_params_deadline(self) -> None:
         valid = {
             "protocol": BROKER_V2_PROTOCOL,
             "request_id": "req-1",
-            "method": "prepare",
-            "params": {"text": "x"},
+            "method": "env.tool",
+            "params": {"tool": "context", "action": "summarize", "args": {}},
             "deadline_ms": 35000,
         }
         for missing in ("protocol", "request_id", "method", "params", "deadline_ms"):
@@ -113,16 +158,16 @@ class RuntimeBrokerProtocolTests(unittest.TestCase):
             with self.assertRaises(self.protocol.BrokerProtocolError, msg=missing):
                 self.protocol.validate_request(request)
 
-    def test_write_methods_require_idempotency_key(self) -> None:
+    def test_validate_request_accepts_current_env_tool_method(self) -> None:
         request = {
             "protocol": BROKER_V2_PROTOCOL,
             "request_id": "req-2",
-            "method": "persist",
-            "params": {"context": {}, "result": {}},
+            "method": "env.tool",
+            "params": {"tool": "context", "action": "summarize", "args": {}},
             "deadline_ms": 35000,
         }
         validated = self.protocol.validate_request(request)
-        self.assertEqual(validated["method"], "persist")
+        self.assertEqual(validated["method"], "env.tool")
 
     def test_response_envelopes_use_result_or_error(self) -> None:
         success = self.protocol.success_response("req-ok", {"ok": True, "value": 1})
@@ -148,14 +193,15 @@ class RuntimeBrokerProtocolTests(unittest.TestCase):
 
 class RuntimeBrokerCoordinatorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.coordinator = _require_module("buddyswitch.runtime_kernel.coordinator")
+        self.coordinator = _require_module("buddyswitch.foundation.runtime_broker.coordinator")
 
-    def test_lock_mode_for_prepare_and_persist_is_write(self) -> None:
-        self.assertEqual(self.coordinator.lock_mode_for_request("prepare", {"text": "x"}), self.coordinator.LockMode.WRITE)
-        self.assertEqual(
-            self.coordinator.lock_mode_for_request("persist", {"context": {}, "result": {}}),
-            self.coordinator.LockMode.WRITE,
-        )
+    def test_lock_mode_for_browser_methods_is_write(self) -> None:
+        for method in ("browser.acquire", "browser.status", "browser.release"):
+            with self.subTest(method=method):
+                self.assertEqual(
+                    self.coordinator.lock_mode_for_request(method, {}),
+                    self.coordinator.LockMode.WRITE,
+                )
 
     def test_lock_mode_for_read_only_env_tool_is_read(self) -> None:
         for params in (
@@ -196,7 +242,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
 
         session = {"instance_json": Path("instance.json"), "manifest_path": MANIFEST}
         with patch(
-            "buddyswitch.runtime_support.turn_runtime._hold_product_runtime_lock",
+            "buddyswitch.foundation.runtime_broker.coordinator._hold_product_runtime_lock",
             side_effect=fake_lock,
         ):
             for method in ("ping", "status"):
@@ -226,13 +272,13 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
         request = {
             "protocol": BROKER_V2_PROTOCOL,
             "request_id": "req-lock-timeout",
-            "method": "prepare",
-            "params": {"text": "x"},
+            "method": "env.tool",
+            "params": {"tool": "task_sys", "action": "close", "args": {"task_id": "task-missing"}},
             "deadline_ms": 35000,
         }
         session = {"instance_json": Path("instance.json"), "manifest_path": MANIFEST}
         with patch(
-            "buddyswitch.runtime_support.turn_runtime._hold_product_runtime_lock",
+            "buddyswitch.foundation.runtime_broker.coordinator._hold_product_runtime_lock",
             side_effect=timeout_lock,
         ):
             response = self.coordinator.dispatch_with_coordination(request, session, dispatch_fn)

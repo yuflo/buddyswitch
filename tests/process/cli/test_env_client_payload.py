@@ -19,7 +19,7 @@ from tests.support.processes import run_process
 ROOT = REPO_ROOT
 
 from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
-from buddyswitch.runtime_kernel.client import RuntimeBrokerError  # noqa: E402
+from buddyswitch.foundation.runtime_broker.client import RuntimeBrokerError  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 
 

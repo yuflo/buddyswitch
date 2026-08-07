@@ -36,7 +36,7 @@ ALLOWED_EVIDENCE_IMPORT_PREFIXES = (
     "buddyswitch.foundation.composition",
     "buddyswitch.modules.artifact.public",
     "buddyswitch.modules.evidence",
-    "buddyswitch.runtime_kernel.client",
+    "buddyswitch.foundation.runtime_broker.client",
 )
 
 
@@ -164,7 +164,7 @@ def test_stable_entrypoint_delegates_to_evidence_runtime_broker_entrypoint() -> 
         in application_imports
     )
     evidence_imports = _imports(REPO_ROOT / EVIDENCE_ENTRYPOINT)
-    assert "buddyswitch.runtime_kernel.client" in evidence_imports
+    assert "buddyswitch.foundation.runtime_broker.client" in evidence_imports
     assert not [
         imported
         for imported in application_imports | evidence_imports

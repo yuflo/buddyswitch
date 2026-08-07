@@ -9,7 +9,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from buddyswitch.runtime_support import turn_runtime
 import buddyswitch.foundation.state.runtime as state_runtime
 from tests.support import task_fixtures
 
@@ -47,13 +46,10 @@ class RuntimeTestWorkspace:
                 "BUDDYSWITCH_RUNTIME_WORKSPACE_ROOT": str(self.root),
             },
         )
-        self._turn_root = patch.object(turn_runtime, "ROOT", self.root)
         self._environment.start()
-        self._turn_root.start()
         state_runtime.refresh_runtime_roots_from_env()
 
     def close(self) -> None:
-        self._turn_root.stop()
         self._environment.stop()
         state_runtime.refresh_runtime_roots_from_env()
         self._temporary.cleanup()

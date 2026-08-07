@@ -1,14 +1,91 @@
-"""Runtime broker coordination policy and runtime lock integration."""
+"""Runtime Broker coordination policy and advisory runtime lock."""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+import fcntl
+import os
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, Iterator
 
-from buddyswitch.runtime_support import turn_runtime
+import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.foundation.tool_runtime import registry as tool_registry
+
+
+_RUNTIME_LOCK_TIMEOUT_ENV = "BUDDYSWITCH_RUNTIME_LOCK_TIMEOUT_SECONDS"
+_RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS = 30.0
+_RUNTIME_LOCK_POLL_SECONDS = 0.05
+
+
+def _runtime_lock_timeout_seconds(default: float = _RUNTIME_LOCK_DEFAULT_TIMEOUT_SECONDS) -> float:
+    raw = os.environ.get(_RUNTIME_LOCK_TIMEOUT_ENV)
+    if raw is None:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    if parsed <= 0:
+        return default
+    return parsed
+
+
+def _runtime_session_root(product_session: dict[str, Any]) -> Path:
+    payload = product_session.get("payload")
+    if isinstance(payload, dict):
+        workspace_dir = payload.get("workspace_dir")
+        if isinstance(workspace_dir, str) and workspace_dir.strip():
+            return Path(workspace_dir.strip()).expanduser().resolve(strict=False)
+
+    instance_json = product_session.get("instance_json")
+    if isinstance(instance_json, Path):
+        if instance_json.parent.name == "instances":
+            return instance_json.parent.parent
+        return instance_json.parent
+
+    return state_runtime.ROOT
+
+
+def _runtime_lock_path(product_session: dict[str, Any]) -> Path:
+    workspace_root = _runtime_session_root(product_session)
+    return workspace_root / ".runtime" / "locks" / "runtime.lock"
+
+
+@contextmanager
+def _hold_product_runtime_lock(
+    product_session: dict[str, Any],
+    *,
+    mode: str = "write",
+    timeout_seconds: float | None = None,
+) -> Iterator[None]:
+    """Acquire the Broker-scoped advisory lock for runtime requests."""
+
+    if mode not in {"read", "write"}:
+        raise ValueError("mode must be 'read' or 'write'")
+
+    timeout = _runtime_lock_timeout_seconds() if timeout_seconds is None else max(0.0, float(timeout_seconds))
+    lock_path = _runtime_lock_path(product_session)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lock_mode = fcntl.LOCK_SH if mode == "read" else fcntl.LOCK_EX
+    deadline = time.monotonic() + timeout
+
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), lock_mode | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"runtime lock acquisition timed out after {timeout:.2f}s")
+                time.sleep(_RUNTIME_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 class LockMode(str, Enum):
@@ -19,7 +96,6 @@ class LockMode(str, Enum):
 
 @dataclass(frozen=True)
 class RequestDeadline:
-    request_id: str
     started_monotonic: float
     deadline_ms: int
     response_margin_ms: int
@@ -41,7 +117,6 @@ def _error(
     *,
     retriable: bool,
     retry_after_ms: int | None = None,
-    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ok": False,
@@ -53,8 +128,6 @@ def _error(
     }
     if retry_after_ms is not None:
         payload["error"]["retry_after_ms"] = retry_after_ms
-    if extra:
-        payload.update(extra)
     return payload
 
 
@@ -80,7 +153,7 @@ def lock_mode_for_request(method: str, params: dict[str, Any]) -> LockMode:
 
 def _lock_context(*, session: dict[str, Any], mode: LockMode, timeout_seconds: float):
     lock_mode = "read" if mode == LockMode.READ else "write"
-    return turn_runtime._hold_product_runtime_lock(session, mode=lock_mode, timeout_seconds=timeout_seconds)
+    return _hold_product_runtime_lock(session, mode=lock_mode, timeout_seconds=timeout_seconds)
 
 
 def dispatch_with_coordination(
@@ -94,12 +167,10 @@ def dispatch_with_coordination(
     params = request.get("params")
     if not isinstance(params, dict):
         params = {}
-    request_id = str(request.get("request_id", "<unknown>"))
     deadline_ms_raw = request.get("deadline_ms")
     deadline_ms = int(deadline_ms_raw) if isinstance(deadline_ms_raw, int) else 35000
 
     deadline = RequestDeadline(
-        request_id=request_id,
         started_monotonic=time.monotonic(),
         deadline_ms=deadline_ms,
         response_margin_ms=response_margin_ms,
@@ -134,11 +205,4 @@ def dispatch_with_coordination(
             str(exc),
             retriable=True,
             retry_after_ms=250,
-        )
-    except turn_runtime.RuntimeFeedbackError as exc:
-        return _error(
-            exc.code,
-            exc.message,
-            retriable=False,
-            extra=exc.details,
         )

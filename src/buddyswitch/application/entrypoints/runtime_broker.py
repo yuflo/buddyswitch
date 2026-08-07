@@ -2,7 +2,7 @@
 
 from buddyswitch.application.build import activate_application
 from buddyswitch.foundation.process_runtime.invocation import run_verified
-from buddyswitch.runtime_kernel import broker
+from buddyswitch.foundation.runtime_broker import broker
 
 
 def main() -> int:

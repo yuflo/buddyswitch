@@ -1,8 +1,7 @@
-"""Runtime broker v2 Unix socket server with bounded request isolation."""
+"""Runtime Broker v2 Unix socket server with bounded request isolation."""
 
 from __future__ import annotations
 
-import inspect
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,8 +9,9 @@ import socket
 import threading
 from typing import Any, Callable
 
+import buddyswitch.foundation.process_runtime.json_framing as json_framing
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
-from buddyswitch.runtime_kernel import coordinator, dispatcher, protocol
+from buddyswitch.foundation.runtime_broker import coordinator, dispatcher, protocol
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,12 @@ class RuntimeBrokerConfig:
 
 
 class RuntimeBrokerServer:
-    def __init__(self, *, config: RuntimeBrokerConfig, dispatch_fn: Callable[..., dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        *,
+        config: RuntimeBrokerConfig,
+        dispatch_fn: Callable[[dict[str, Any], dispatcher.RuntimeBrokerSession], dict[str, Any]],
+    ) -> None:
         self.config = config
         self.dispatch_fn = dispatch_fn
         self._stop_event = threading.Event()
@@ -39,7 +44,6 @@ class RuntimeBrokerServer:
             socket_path=config.socket_path,
             pid_file=config.pid_file,
         )
-        self._dispatch_wants_session = len(inspect.signature(dispatch_fn).parameters) >= 2
 
     def close(self) -> None:
         self._stop_event.set()
@@ -81,11 +85,6 @@ class RuntimeBrokerServer:
                 if self.config.marker_file is not None:
                     self.config.marker_file.unlink(missing_ok=True)
 
-    def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
-        if self._dispatch_wants_session:
-            return self.dispatch_fn(request, self._session)
-        return self.dispatch_fn(request)
-
     def _dispatch_with_coordination(self, request: dict[str, Any]) -> dict[str, Any]:
         business = coordinator.dispatch_with_coordination(
             request,
@@ -96,24 +95,38 @@ class RuntimeBrokerServer:
                 "active_role": None,
                 "payload": {},
             },
-            lambda req, _session: self._dispatch(req),
+            lambda req, _session: self.dispatch_fn(req, self._session),
             response_margin_ms=self.config.response_margin_ms,
         )
         return business
 
     def _write_response(self, conn: socket.socket, payload: dict[str, Any]) -> None:
-        protocol.write_message(conn, payload)
+        json_framing.write_message(conn, payload)
 
     def _handle_connection(self, conn: socket.socket) -> None:
         request_id: str | None = None
         with conn:
             try:
-                request = protocol.read_message(
+                request = json_framing.read_message(
                     conn,
                     body_limit_bytes=self.config.request_body_limit_bytes,
                 )
                 validated = protocol.validate_request(request)
                 request_id = validated.get("request_id") if isinstance(validated.get("request_id"), str) else None
+            except json_framing.JsonFramingError as exc:
+                try:
+                    self._write_response(
+                        conn,
+                        protocol.error_response(
+                            request_id,
+                            code="E_RUNTIME_BROKER_PROTOCOL",
+                            message=exc.message,
+                            retriable=False,
+                        ),
+                    )
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
+                return
             except protocol.BrokerProtocolError as exc:
                 try:
                     self._write_response(

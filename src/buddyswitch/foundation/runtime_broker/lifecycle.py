@@ -1,4 +1,4 @@
-"""Runtime broker lifecycle, health checks, and ensure/stop helpers."""
+"""Runtime Broker lifecycle, health checks, and ensure/stop helpers."""
 
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ import sys
 import time
 from typing import Any
 
+import buddyswitch.foundation.process_runtime.json_framing as json_framing
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
-from buddyswitch.runtime_kernel import protocol
+from buddyswitch.foundation.runtime_broker import protocol
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,7 @@ def ping_broker(
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout_seconds)
             sock.connect(str(paths.socket_path))
-            protocol.write_message(
+            json_framing.write_message(
                 sock,
                 protocol.make_request(
                     request_id=request_id,
@@ -123,7 +124,7 @@ def ping_broker(
                     deadline_ms=1500,
                 ),
             )
-            response = protocol.read_message(sock)
+            response = json_framing.read_message(sock)
     except OSError as exc:
         err = getattr(exc, "errno", None)
         if err in {errno.ECONNRESET, errno.EPIPE}:
@@ -143,7 +144,7 @@ def ping_broker(
                 "retriable": True,
             },
         }
-    except protocol.BrokerProtocolError as exc:
+    except json_framing.JsonFramingError as exc:
         return {
             "ok": False,
             "error": {

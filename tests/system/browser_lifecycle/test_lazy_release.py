@@ -34,7 +34,8 @@ BROWSER_RUNTIME = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime
 from buddyswitch.launcher import daemon_state  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
-from buddyswitch.runtime_kernel import protocol  # noqa: E402
+from buddyswitch.foundation.runtime_broker import protocol  # noqa: E402
+import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
@@ -755,7 +756,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                         break
                     with conn:
                         try:
-                            request = protocol.read_message(conn)
+                            request = json_framing.read_message(conn)
                         except Exception:
                             continue
                         if not isinstance(request, dict):
@@ -773,7 +774,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                                 message=f"unsupported fake broker method: {method}",
                                 retriable=False,
                             )
-                        protocol.write_message(conn, response)
+                        json_framing.write_message(conn, response)
 
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()

@@ -1,4 +1,4 @@
-"""Runtime broker request dispatcher for runless env.tool flows."""
+"""Runtime Broker request dispatcher for Tool, Browser, and health methods."""
 
 from __future__ import annotations
 

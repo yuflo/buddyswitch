@@ -20,8 +20,8 @@ from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 from tests.support import task_fixtures
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
-import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-import buddyswitch.runtime_kernel.lifecycle as runtime_lifecycle  # noqa: E402
+import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
+import buddyswitch.foundation.runtime_broker.lifecycle as runtime_lifecycle  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
@@ -50,7 +50,14 @@ class RunlessRuntimeContractTests(unittest.TestCase):
         return events
 
     def test_runtime_dispatcher_integration_surface_avoids_env_store_import(self) -> None:
-        dispatcher_source = (ROOT / "src" / "buddyswitch" / "runtime_kernel" / "dispatcher.py").read_text(encoding="utf-8")
+        dispatcher_source = (
+            ROOT
+            / "src"
+            / "buddyswitch"
+            / "foundation"
+            / "runtime_broker"
+            / "dispatcher.py"
+        ).read_text(encoding="utf-8")
         self.assertNotIn("import env_store", dispatcher_source)
         self.assertNotIn("from env_store import", dispatcher_source)
 

@@ -427,7 +427,7 @@ class ResourceLedger:
 
                 result = daemon_core.stop_daemon(Path(str(args["instance_json"])))
             elif strategy == "runtime_broker_stop":
-                from buddyswitch.runtime_kernel import lifecycle
+                from buddyswitch.foundation.runtime_broker import lifecycle
 
                 result = lifecycle.stop_broker(
                     lifecycle.BrokerPaths(

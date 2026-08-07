@@ -38,6 +38,15 @@ REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/state/runtime.py",
     "buddyswitch/foundation/state/actor_private.py",
     "buddyswitch/foundation/process_runtime/process_identity.py",
+    "buddyswitch/foundation/process_runtime/json_framing.py",
+    "buddyswitch/foundation/runtime_broker/__init__.py",
+    "buddyswitch/foundation/runtime_broker/broker.py",
+    "buddyswitch/foundation/runtime_broker/client.py",
+    "buddyswitch/foundation/runtime_broker/coordinator.py",
+    "buddyswitch/foundation/runtime_broker/dispatcher.py",
+    "buddyswitch/foundation/runtime_broker/lifecycle.py",
+    "buddyswitch/foundation/runtime_broker/protocol.py",
+    "buddyswitch/foundation/runtime_broker/server.py",
 }
 
 
@@ -55,7 +64,7 @@ def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path
     assert "buddyswitch/application/entrypoints/runtime_activation.py" in names
     assert REQUIRED_FOUNDATION_MODULE_FILES <= set(names)
     assert not any(name.startswith("buddyswitch/env/") for name in names)
-    assert "buddyswitch/runtime_kernel/process_identity.py" not in names
+    assert not any(name.startswith("buddyswitch/runtime_kernel/") for name in names)
     assert "buddyswitch/modules/demand/skills/demand-triage/SKILL.md" in names
     assert "buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md" in names
     assert not [
@@ -88,6 +97,10 @@ current_modules = (
     "buddyswitch.foundation.state.runtime",
     "buddyswitch.foundation.state.actor_private",
     "buddyswitch.foundation.process_runtime.process_identity",
+    "buddyswitch.foundation.process_runtime.json_framing",
+    "buddyswitch.foundation.runtime_broker.protocol",
+    "buddyswitch.foundation.runtime_broker.client",
+    "buddyswitch.foundation.runtime_broker.lifecycle",
 )
 module_files = {
     name: str(Path(importlib.import_module(name).__file__).resolve())
@@ -105,9 +118,7 @@ print(json.dumps({
     "module_files": module_files,
     "retired_specs": {
         "buddyswitch.env": importlib.util.find_spec("buddyswitch.env") is not None,
-        "buddyswitch.runtime_kernel.process_identity": importlib.util.find_spec(
-            "buddyswitch.runtime_kernel.process_identity"
-        ) is not None,
+        "buddyswitch.runtime_kernel": importlib.util.find_spec("buddyswitch.runtime_kernel") is not None,
     },
 }, sort_keys=True))
 """
@@ -139,7 +150,7 @@ print(json.dumps({
     assert str(REPO_ROOT) not in payload["sys_path"]
     assert payload["retired_specs"] == {
         "buddyswitch.env": False,
-        "buddyswitch.runtime_kernel.process_identity": False,
+        "buddyswitch.runtime_kernel": False,
     }
     assert set(payload["module_files"]) == {
         "buddyswitch.foundation.identity.model",
@@ -147,6 +158,10 @@ print(json.dumps({
         "buddyswitch.foundation.state.runtime",
         "buddyswitch.foundation.state.actor_private",
         "buddyswitch.foundation.process_runtime.process_identity",
+        "buddyswitch.foundation.process_runtime.json_framing",
+        "buddyswitch.foundation.runtime_broker.protocol",
+        "buddyswitch.foundation.runtime_broker.client",
+        "buddyswitch.foundation.runtime_broker.lifecycle",
     }
     assert all(
         Path(module_file).is_relative_to(installed.runtime_dir / "venv")

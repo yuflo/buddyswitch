@@ -7,7 +7,7 @@ import json
 import sys
 from typing import Any
 
-from buddyswitch.runtime_kernel.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
+from buddyswitch.foundation.runtime_broker.client import RuntimeBrokerError, broker_unavailable_feedback, request_runtime_broker
 
 
 def _runtime_error(code: str, message: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:

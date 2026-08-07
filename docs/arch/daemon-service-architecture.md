@@ -11,6 +11,9 @@ daemon hosts product handlers; handlers own product meaning
 It owns process lifecycle, Actor registration, mailbox transport, generic
 triggers and schedules, handler dispatch, bounded polling, and host telemetry.
 It does not own Demand, Task, Goal, IM, Track, Browser, or Web semantics.
+Its socket transports import the shared Content-Length JSON framing primitive
+from `src/buddyswitch/foundation/process_runtime/json_framing.py` directly and
+do not depend on Runtime Broker protocol or lifecycle.
 
 ## Generic capabilities
 

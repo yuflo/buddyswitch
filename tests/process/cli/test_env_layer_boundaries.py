@@ -17,7 +17,7 @@ from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
 
-import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
+import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 

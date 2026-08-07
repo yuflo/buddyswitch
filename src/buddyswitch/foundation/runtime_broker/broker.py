@@ -1,4 +1,4 @@
-"""Runtime broker CLI and v2 request dispatcher."""
+"""Runtime Broker CLI and v2 request dispatcher."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 from typing import Any
 
 
-from buddyswitch.runtime_kernel import coordinator, dispatcher, lifecycle, protocol, server
+from buddyswitch.foundation.runtime_broker import coordinator, dispatcher, lifecycle, protocol, server
 
 
 def _session_context(

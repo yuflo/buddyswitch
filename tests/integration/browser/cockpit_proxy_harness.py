@@ -34,7 +34,8 @@ ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
 from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.runtime_kernel import protocol  # noqa: E402
+from buddyswitch.foundation.runtime_broker import protocol  # noqa: E402
+import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 
 PROXY = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "cockpit_proxy.py"
 DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
@@ -381,7 +382,7 @@ for raw_line in sys.stdin:
                         break
                     with conn:
                         try:
-                            request = protocol.read_message(conn)
+                            request = json_framing.read_message(conn)
                         except Exception:
                             continue
                         if not isinstance(request, dict):
@@ -416,7 +417,7 @@ for raw_line in sys.stdin:
                                 "state_changed": False,
                                 "durability": "none",
                             }
-                        protocol.write_message(conn, response)
+                        json_framing.write_message(conn, response)
 
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()

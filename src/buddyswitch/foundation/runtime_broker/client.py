@@ -1,9 +1,7 @@
-"""Runtime broker v2 client for product-mode env.tool and health methods."""
+"""Runtime Broker v2 client for product-mode Tool, Browser, and health methods."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import errno
 from dataclasses import dataclass
@@ -12,9 +10,10 @@ import socket
 from typing import Any
 import uuid
 
+import buddyswitch.foundation.process_runtime.json_framing as json_framing
 from buddyswitch.foundation.tool_runtime import registry as tool_registry
 
-from buddyswitch.runtime_kernel import protocol
+from buddyswitch.foundation.runtime_broker import protocol
 
 PROTOCOL = protocol.PROTOCOL
 
@@ -44,12 +43,6 @@ class RuntimeBrokerTimeouts:
     response_margin_ms: int = 1000
 
 
-@dataclass(frozen=True)
-class BrokerRetryDecision:
-    should_retry: bool
-    reason: str
-
-
 def broker_unavailable_feedback(*, socket_path: Path | None = None) -> dict[str, Any]:
     raw_actor_id = os.environ.get("BUDDYSWITCH_ACTOR_ID")
     actor_id = raw_actor_id.strip() if isinstance(raw_actor_id, str) and raw_actor_id.strip() else "<actor-id>"
@@ -77,13 +70,6 @@ def runtime_broker_socket_from_env() -> Path:
             details=broker_unavailable_feedback(),
         )
     return Path(raw.strip())
-
-
-def canonical_result_hash(result: dict[str, Any]) -> str:
-    if not isinstance(result, dict):
-        raise ValueError("result must be an object to compute canonical_result_hash")
-    body = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(body).hexdigest()
 
 
 def _response_timeout_seconds(request_deadline_ms: int, response_margin_ms: int) -> float:
@@ -125,9 +111,7 @@ def _retry_decision(
     error: RuntimeBrokerError,
     method: str,
     params: dict[str, Any],
-    idempotency_key: str | None,
-) -> BrokerRetryDecision:
-    del idempotency_key
+) -> bool:
     code = error.code
     retriable = bool(error.details.get("retriable", False))
 
@@ -139,15 +123,15 @@ def _retry_decision(
         "E_RUNTIME_BROKER_CLIENT_DISCONNECTED",
     }
     if code not in retriable_codes and not retriable:
-        return BrokerRetryDecision(False, "non-retriable error")
+        return False
 
     if method in {"ping", "status"}:
-        return BrokerRetryDecision(True, "read health request")
+        return True
 
     if _is_read_only_env_tool(method, params):
-        return BrokerRetryDecision(True, "read-only env.tool request")
+        return True
 
-    return BrokerRetryDecision(False, "write operation does not auto-retry")
+    return False
 
 
 def _request_once(
@@ -163,8 +147,8 @@ def _request_once(
             sock.settimeout(connect_timeout_seconds)
             sock.connect(str(socket_path))
             sock.settimeout(response_timeout_seconds)
-            protocol.write_message(sock, request)
-            response = protocol.read_message(sock)
+            json_framing.write_message(sock, request)
+            response = json_framing.read_message(sock)
     except socket.timeout as exc:
         raise RuntimeBrokerError(
             "E_RUNTIME_BROKER_DEADLINE_EXCEEDED",
@@ -175,11 +159,11 @@ def _request_once(
                 "retriable": True,
             },
         ) from exc
-    except protocol.BrokerProtocolError as exc:
+    except json_framing.JsonFramingError as exc:
         code = "E_RUNTIME_BROKER_CLIENT_DISCONNECTED"
         message = exc.message
         retriable = True
-        if "invalid JSON" in exc.message or "header exceeds limit" in exc.message or "invalid broker header line" in exc.message:
+        if "invalid JSON" in exc.message or "header exceeds limit" in exc.message or "invalid framed JSON header line" in exc.message:
             code = "E_RUNTIME_BROKER_PROTOCOL"
             retriable = False
         raise RuntimeBrokerError(
@@ -268,11 +252,9 @@ def request_runtime_broker(
     params: dict[str, Any],
     *,
     idempotency_key: str | None = None,
-    result_hash: str | None = None,
     socket_path: Path | None = None,
     timeouts: RuntimeBrokerTimeouts = RuntimeBrokerTimeouts(),
 ) -> dict[str, Any]:
-    del result_hash
     if not isinstance(method, str) or not method.strip():
         raise ValueError("method must be a non-empty string")
     if not isinstance(params, dict):
@@ -307,8 +289,8 @@ def request_runtime_broker(
             )
         except RuntimeBrokerError as exc:
             last_error = exc
-            decision = _retry_decision(error=exc, method=method_name, params=params, idempotency_key=idempotency_key)
-            if attempts >= 2 or not decision.should_retry:
+            should_retry = _retry_decision(error=exc, method=method_name, params=params)
+            if attempts >= 2 or not should_retry:
                 raise
     if last_error is not None:
         raise last_error

@@ -3,7 +3,8 @@
 BuddySwitch is a launcher-managed control layer for role-configured actor instances.
 
 The runtime model is runless:
-- runtime broker methods are `env.tool`, `ping`, `status`;
+- runtime broker methods are `env.tool`, `ping`, `status`, `browser.acquire`,
+  `browser.status`, and `browser.release`;
 - turns are disposable by default;
 - durable state is written explicitly via product tools.
 
@@ -103,8 +104,9 @@ package/build declaration.
 - `src/buddyswitch/modules/evidence/` for the Evidence Tool implementation and its stable Runtime Broker command entrypoint.
 - `src/buddyswitch/modules/context/` for the read-only Context Tool and its application projection over accepted component Public reads.
 - `src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}` for a component-owned Tool entrypoint and private implementation.
-- `src/buddyswitch/runtime_kernel/protocol.py` for the runtime broker protocol envelope.
-- `src/buddyswitch/runtime_kernel/dispatcher.py` for supported broker methods: `env.tool`, `ping`, `status`.
+- `src/buddyswitch/foundation/runtime_broker/protocol.py` for the runtime broker protocol envelope.
+- `src/buddyswitch/foundation/runtime_broker/dispatcher.py` for `env.tool`, health, and Browser broker dispatch.
+- `src/buddyswitch/foundation/process_runtime/json_framing.py` for shared Runtime Broker and Daemon socket framing.
 - `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.
 - `src/buddyswitch/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
 - `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md` for Role bootstrap guidance.

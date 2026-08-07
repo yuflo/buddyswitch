@@ -25,8 +25,9 @@ from tests.support.processes import ResourceLedger, run_process
 
 ROOT = REPO_ROOT
 
-import buddyswitch.runtime_kernel.broker as runtime_broker  # noqa: E402
-import buddyswitch.runtime_kernel.client as runtime_client  # noqa: E402
+import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
+import buddyswitch.foundation.runtime_broker.client as runtime_client  # noqa: E402
+import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
@@ -55,7 +56,7 @@ def _require_module(name: str):
 
 class RuntimeBrokerLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.lifecycle = _require_module("buddyswitch.runtime_kernel.lifecycle")
+        self.lifecycle = _require_module("buddyswitch.foundation.runtime_broker.lifecycle")
 
     def _paths(self, root: Path):
         return self.lifecycle.BrokerPaths(
@@ -266,7 +267,7 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 )
 
     def test_live_broker_rejects_removed_message_action_without_parent_submit(self) -> None:
-        protocol = _require_module("buddyswitch.runtime_kernel.protocol")
+        protocol = _require_module("buddyswitch.foundation.runtime_broker.protocol")
         with tempfile.TemporaryDirectory() as temp:
             workspace_dir = Path(temp) / "workspace"
             workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -334,8 +335,8 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                     sock.settimeout(5.0)
                     sock.connect(str(paths.socket_path))
-                    protocol.write_message(sock, request)
-                    response = protocol.read_message(sock)
+                    json_framing.write_message(sock, request)
+                    response = json_framing.read_message(sock)
 
                 self.assertFalse(response.get("ok"), msg=response)
                 self.assertEqual((response.get("error") or {}).get("code"), "E_ENV_TOOL")

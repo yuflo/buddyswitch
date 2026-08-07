@@ -121,8 +121,8 @@ print(json.dumps({
     "repos": [name for name in loaded if name.startswith("buddyswitch.env.repos.")],
     "runtime_services": [
         name for name in loaded
-        if name.startswith("buddyswitch.runtime_kernel.server")
-        or name.startswith("buddyswitch.runtime_kernel.broker")
+        if name.startswith("buddyswitch.foundation.runtime_broker.server")
+        or name.startswith("buddyswitch.foundation.runtime_broker.broker")
         or name.startswith("tools.launcher")
     ],
 }, ensure_ascii=True))

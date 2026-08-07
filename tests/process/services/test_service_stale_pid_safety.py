@@ -11,7 +11,7 @@ from buddyswitch.launcher import app_server
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 from buddyswitch.launcher import daemon_core
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
-from buddyswitch.runtime_kernel import lifecycle
+from buddyswitch.foundation.runtime_broker import lifecycle
 from tests.support.processes import ResourceLedger
 
 
