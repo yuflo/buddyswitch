@@ -126,6 +126,7 @@ src/buddyswitch/
     process_runtime/
     app_server/
     daemon/
+    runtime_broker/
     tool_runtime/
     browser_runtime/
     web_runtime/
@@ -260,6 +261,7 @@ Foundation owns product-neutral contracts and execution only:
 | Process runtime | process identity, sockets, PIDs, logs, temp and cleanup facts |
 | App Server | Codex RPC/process supervision |
 | DaemonHost | trigger, mailbox, schedule, dispatch, host telemetry |
+| Runtime Broker | local request protocol, coordination, dispatch, client/server and lifecycle |
 | ToolHost | schema, authority, catalog and invoke |
 | Browser runtime | Actor-scoped CDP/proxy lifecycle |
 | WebHost/CliHost | transport, parsing, route/command invocation and error mapping |

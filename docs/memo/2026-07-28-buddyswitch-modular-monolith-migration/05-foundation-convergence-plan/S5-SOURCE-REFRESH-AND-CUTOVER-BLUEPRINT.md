@@ -53,6 +53,7 @@ src/buddyswitch/
 │   ├── process_runtime/         # activation, invocation and process ownership
 │   ├── app_server/              # app-server lifecycle
 │   ├── daemon/                  # product-neutral Daemon transport/host
+│   ├── runtime_broker/          # local Broker protocol/dispatch/lifecycle
 │   ├── tool_runtime/            # explicit ToolHost protocol and dispatch
 │   ├── browser_runtime/         # one Actor-scoped Browser lifecycle owner
 │   ├── web_runtime/             # generic route/worker/console host
@@ -110,9 +111,19 @@ order, not arbitrary file counts.
 - preserve canonical state roots and one write path;
 - converge process activation/invocation/lifecycle without product imports.
 
-### C5 — Runtime Broker and Daemon
+### C5A — Runtime Broker
 
-- converge Broker dispatch/transport and Daemon host;
+- converge Broker protocol, dispatch, coordination, client/server and lifecycle
+  into one earned `foundation/runtime_broker/**` owner;
+- extract the already-shared Content-Length JSON socket framing into one direct
+  process-runtime primitive used by Broker and Daemon;
+- delete the retired `runtime_kernel/**` root after every live consumer moves;
+- preserve Broker envelopes, locking, retries, identity checks, service
+  lifecycle and Tool/Browser dispatch exactly.
+
+### C5B — Daemon
+
+- converge central and instance Daemon transport/host ownership;
 - Daemon remains subscription/strategy plus registered handler execution;
 - no central product handler switch or content interpretation enters the host.
 
@@ -120,7 +131,7 @@ order, not arbitrary file counts.
 
 - converge remaining host and packaged asset ownership;
 - keep interface ownership separate from product semantics;
-- delete retired `env/**`, `launcher/**` and `runtime_kernel/**` roots only when
+- delete retired `env/**` and `launcher/**` roots only when
   every live consumer has moved.
 
 ### C7 — S5 acceptance

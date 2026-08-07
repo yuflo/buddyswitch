@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C4 ACCEPTED — C5 PREPARATION ONLY
-> Runtime authorization: none; C5 implementation awaits READY review
+> Current state: S0–S4 ACCEPTED; S5 C1–C4 ACCEPTED — C5A READY
+> Runtime authorization: C5A Runtime Broker only after its preparation commit is pushed
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C4 ACCEPTED — C5 PREPARATION ONLY |
+| S5 | `05-foundation-convergence.md` | C1–C4 ACCEPTED — C5A READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -198,8 +198,12 @@ line. R1 then completed the direct-owner cutover, removed the retired
 `env/**` and old process-identity path, passed exact/affected proof and frozen
 FINAL `e306abb4f43d42ce8b9517f08e3a5450`, and is accepted in
 `05-foundation-convergence-plan/identity-state-process/S5-C4-ACCEPTANCE.md`.
-The packet is consumed. C5 source refresh and READY preparation are unlocked;
-C5 implementation, C6–C7 and S6 remain unauthorized.
+The packet is consumed. C5 source refresh found two independent service owners,
+so D-063 refines the former combined unit into C5A Runtime Broker followed by
+C5B Daemon. Broker baseline `fed0d4f4...`, independent Daemon baseline
+`35589e1b...` and topology `S5C5AP-20260807-02` passed. C5A packet
+`BS-MM-S5-RUNTIME-BROKER-R1-20260807-01` is READY after its preparation commit
+is pushed; C5B, C6–C7 and S6 remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,
