@@ -136,9 +136,19 @@ order, not arbitrary file counts.
 - delete the two retired Launcher App Server files only after every import,
   shell path and package projection has moved.
 
-### C6 remaining — Actor, Web and CLI hosts
+### C6B — Actor Session and side runtime
 
-- refresh each remaining independently runnable owner after C6A acceptance;
+- move capability state, Codex runtime descriptors, parent Actor Session and
+  side-thread start/lifecycle/registry into one direct
+  `foundation/actor_runtime/**` owner;
+- preserve every capability, instance-record, thread/turn/input/attach,
+  lease/registry and cleanup effect;
+- leave Role-bound Host Control, Actor workspace build, Web and CLI as current
+  consumers or later owners.
+
+### C6 remaining — Host Control, Actor build, Web and CLI hosts
+
+- refresh each remaining independently runnable owner after C6B acceptance;
 - converge remaining host and packaged asset ownership without inheriting C6A
   execution authority;
 - keep interface ownership separate from product semantics;

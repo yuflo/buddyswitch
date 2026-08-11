@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6A ACCEPTED — remaining C6 PREPARATION ONLY
-> Runtime authorization: none; next C6 owner requires a fresh source-bound READY packet
+> Current state: S0–S4 ACCEPTED; S5 C1–C6A ACCEPTED — C6B READY
+> Runtime authorization: `BS-MM-S5-ACTOR-RUNTIME-R1-20260811-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6A ACCEPTED — remaining C6 PREPARATION ONLY |
+| S5 | `05-foundation-convergence.md` | C1–C6A ACCEPTED — C6B READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -228,6 +228,15 @@ consumer/package cutover and retired Launcher deletion. Focused runs
 `05-foundation-convergence-plan/app-server/S5-C6A-ACCEPTANCE.md`; its packet is
 consumed. Only remaining C6 source refresh and READY preparation are unlocked;
 C7 and S6 remain unauthorized.
+
+C6B source refresh then isolated the product-neutral Actor parent-session and
+side-thread runtime from Role-bound Host Control and workspace construction.
+Direct baseline `d38fa5b...`, affected baseline `2f61b0e...` and topology
+`S5C6BP-20260811-01` passed. D-066 selects one direct
+`foundation/actor_runtime/**` owner for capability state, Codex runtime
+descriptors, parent Session and side lifecycle/registry. Only packet
+`BS-MM-S5-ACTOR-RUNTIME-R1-20260811-01` is authorized; later C6, C7 and S6
+remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

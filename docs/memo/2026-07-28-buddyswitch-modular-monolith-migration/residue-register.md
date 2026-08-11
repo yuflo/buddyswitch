@@ -64,6 +64,7 @@ Statuses:
 | R-FND-013 | CLOSED — Runtime Broker has one `foundation/runtime_broker/**` owner; shared service-neutral framing has one process-runtime owner; `runtime_kernel/**` and installed residue are absent | S5 C5A | `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; exact/affected/frozen FINAL and replacement proof |
 | R-FND-014 | CLOSED — central and instance Daemon have one direct Foundation owner; application supplies App/Actor capability plus module/Browser registrations; the shared event log has one Process Runtime owner; retired Launcher owners and reverse dependencies are absent | S5 C5B | `05-foundation-convergence-plan/daemon/S5-C5B-ACCEPTANCE.md`; exact/affected/frozen FINAL, installed correspondence and replacement proof |
 | R-FND-015 | CLOSED — App Server Python runtime and shell projection have one direct `foundation/app_server/**` owner; all consumers and package assets use it, and the retired Launcher Python/shell/import/path surfaces are absent | S5 C6A | `05-foundation-convergence-plan/app-server/S5-C6A-ACCEPTANCE.md`; exact/affected/frozen FINAL, installed correspondence and replacement proof |
+| R-FND-016 | CONFIRMED — Actor capability, Codex runtime descriptor, parent Session and side-thread lifecycle/registry remain as six Launcher modules with application/Demand/Host/CLI consumers | S5 C6B | `05-foundation-convergence-plan/actor-runtime/S5-C6B-GOAL-PACKET.md`; close only with one direct Foundation Actor Runtime owner, complete consumer cutover and six-path absence |
 
 ## Role residue
 
