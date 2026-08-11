@@ -19,7 +19,7 @@ import zstandard
 
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import CleanupReport, ResourceLedger
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.launcher import codex_runtime
 
 

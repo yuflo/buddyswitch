@@ -5,7 +5,7 @@ HOST_CONTROL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_CONTROL_SELF="${HOST_CONTROL_DIR}/host_control.sh"
 ENV_HELPER="${HOST_CONTROL_DIR}/env.sh"
 BROWSER_HELPER="${HOST_CONTROL_DIR}/browser_cockpit.sh"
-APP_SERVER_HELPER="${HOST_CONTROL_DIR}/app_server.sh"
+APP_SERVER_HELPER="${HOST_CONTROL_DIR}/../../foundation/app_server/shell/app_server.sh"
 DAEMON_HELPER="${HOST_CONTROL_DIR}/daemon.sh"
 RUNTIME_BROKER_HELPER="${HOST_CONTROL_DIR}/runtime_broker.sh"
 

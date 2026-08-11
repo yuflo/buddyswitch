@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.runtime_broker import lifecycle
 
 from tests.support.paths import REPO_ROOT
@@ -71,7 +71,11 @@ def test_long_path_fallback_sockets_are_root_unique_and_match_shell_resolvers(
     assert first_app != second_app
     assert first_broker != second_broker
     assert first_app == _shell_socket(
-        Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"]) / "launcher" / "shell" / "app_server.sh",
+        Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"])
+        / "foundation"
+        / "app_server"
+        / "shell"
+        / "app_server.sh",
         "_buddyswitch_app_server_effective_socket",
         instance_root=first_root,
         actor_id=actor_id,

@@ -58,7 +58,7 @@ COMPOSED_HOST_IMPLEMENTATIONS = (
     Path("src/buddyswitch/runtime_support/env_cleanup.py"),
     Path("src/buddyswitch/foundation/tool_runtime/client.py"),
     Path("src/buddyswitch/runtime_support/turn_runtime.py"),
-    Path("src/buddyswitch/launcher/app_server.py"),
+    Path("src/buddyswitch/foundation/app_server/runtime.py"),
     Path("src/buddyswitch/launcher/web_management.py"),
     Path("src/buddyswitch/launcher/codex_config.py"),
 )

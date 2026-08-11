@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 
 from tests.system.goal_mode.support import (
     RealCodexGoalHarness,

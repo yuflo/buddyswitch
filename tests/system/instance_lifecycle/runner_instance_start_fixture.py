@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import time
 
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.daemon import central_service
 from buddyswitch.foundation.daemon import instance
 from buddyswitch.foundation.daemon import mailbox

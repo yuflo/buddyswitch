@@ -1,7 +1,7 @@
 # S5 C6A App Server Cutover
 
-> State: `READY`
-> Execution authority: `BS-MM-S5-APP-SERVER-R1-20260811-01` only
+> State: `ACCEPTED`
+> Execution authority: consumed; no packet may resume
 > Executable base: `af75566665248fc56c91eab45b64e95c088be41c`
 
 C6 was intentionally broad in the stage blueprint. Current-source refresh
@@ -15,8 +15,10 @@ Read in order:
 2. `S5-C6A-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
 3. `S5-C6A-IMPLEMENTATION-PLAN.md`;
 4. `S5-C6A-READY-REVIEW.md`;
-5. `S5-C6A-GOAL-PACKET.md`.
+5. `S5-C6A-GOAL-PACKET.md`;
+6. `S5-C6A-ACCEPTANCE.md`.
 
-Only C6A is executable. Later C6 labels are navigation for future
-source-refresh work, not inherited authority. C6A must leave the current
-Actor, Web and CLI hosts runnable and must not begin RoleHost work.
+C6A is closed and its packet is historical execution context. Later C6 labels
+remain navigation for fresh source-refresh work, not inherited authority.
+Actor, Web and CLI hosts remain runnable; no remaining C6 implementation or
+RoleHost work is authorized yet.

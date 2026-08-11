@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import time
 
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 import pytest
 import buddyswitch.foundation.process_runtime.process_identity as process_identity

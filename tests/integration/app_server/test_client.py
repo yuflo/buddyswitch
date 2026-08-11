@@ -20,9 +20,17 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-APP_SERVER_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "app_server.py"
-APP_SERVER_SHELL_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "app_server.sh"
-APP_SERVER = importlib.import_module("buddyswitch.launcher.app_server")
+APP_SERVER_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "app_server" / "runtime.py"
+APP_SERVER_SHELL_PATH = (
+    ROOT
+    / "src"
+    / "buddyswitch"
+    / "foundation"
+    / "app_server"
+    / "shell"
+    / "app_server.sh"
+)
+APP_SERVER = importlib.import_module("buddyswitch.foundation.app_server.runtime")
 
 
 class FakeUnixWebSocketServer:

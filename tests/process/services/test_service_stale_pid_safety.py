@@ -7,7 +7,7 @@ import signal
 import subprocess
 import sys
 
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
 from buddyswitch.foundation.daemon import instance
 from buddyswitch.application.daemon_host import AppActorDaemonHost

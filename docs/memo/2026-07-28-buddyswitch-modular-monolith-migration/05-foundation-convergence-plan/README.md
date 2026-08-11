@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C5B ACCEPTED — C6A READY`
-> Current execution authority: `BS-MM-S5-APP-SERVER-R1-20260811-01` only
+> Stage state: `C1–C6A ACCEPTED — remaining C6 PREPARATION ONLY`
+> Current execution authority: none; next C6 owner requires a fresh source-bound READY packet
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -25,10 +25,10 @@ are consumed. C4 is accepted in
 `identity-state-process/S5-C4-ACCEPTANCE.md`; its R1 packet is consumed. C5A
 is accepted in `runtime-broker/S5-C5A-ACCEPTANCE.md`; its R1 packet is
 consumed. C5B is accepted in `daemon/S5-C5B-ACCEPTANCE.md`; its R1 packet is
-also consumed. Current-source refresh split C6 at the independently runnable
-App Server owner under D-065. C6A is READY at `app-server/README.md`; remaining
-Actor/Web/CLI host convergence, RoleHost and final S5 acceptance remain
-unauthorized.
+also consumed. C6A is accepted in
+`app-server/S5-C6A-ACCEPTANCE.md`; its R1 packet is consumed. Remaining
+Actor/Web/CLI host convergence is preparation-only; RoleHost and final S5
+acceptance remain unauthorized.
 
 ## Remaining checkpoints
 
@@ -40,7 +40,7 @@ unauthorized.
 | C4 | Identity, state and process primitives | ACCEPTED |
 | C5A | Runtime Broker and shared JSON socket framing | ACCEPTED |
 | C5B | central and instance Daemon host | ACCEPTED |
-| C6A | App Server Python owner plus live shell projection | READY |
+| C6A | App Server Python owner plus live shell projection | ACCEPTED |
 | C6 remaining | Actor, Web and CLI host physical convergence | PREPARATION ONLY |
 | C7 | final guidance, residue proof and frozen S5 acceptance | BLOCKED |
 

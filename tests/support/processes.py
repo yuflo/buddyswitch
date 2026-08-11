@@ -443,7 +443,7 @@ class ResourceLedger:
                     )
                 )
             elif strategy == "app_server_stop":
-                from buddyswitch.launcher import app_server
+                import buddyswitch.foundation.app_server.runtime as app_server
 
                 result = app_server.stop_app_server(
                     Path(str(args["socket_path"])),

@@ -118,6 +118,7 @@ def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -
         "buddyswitch.catalog",
         "buddyswitch.config",
         "buddyswitch.contracts",
+        "buddyswitch.foundation.app_server",
         "buddyswitch.foundation.browser_runtime",
         "buddyswitch.launcher",
         "buddyswitch.modules.artifact",

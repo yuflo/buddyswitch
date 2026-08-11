@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-from buddyswitch.launcher import app_server  # noqa: E402
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.daemon import contracts  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.task.private.adapters.goal import protocol  # noqa: E402

@@ -8,9 +8,9 @@ import sys
 from typing import Any, Mapping
 
 
+import buddyswitch.foundation.app_server.runtime as app_server
 
 from buddyswitch.launcher import actor_side_thread  # noqa: E402
-from buddyswitch.launcher import app_server  # noqa: E402
 from buddyswitch.foundation.daemon import contracts  # noqa: E402
 from buddyswitch.launcher import side_thread_registry  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402

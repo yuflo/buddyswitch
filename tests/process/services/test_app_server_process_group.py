@@ -12,7 +12,7 @@ import buddyswitch.foundation.process_runtime.process_identity as process_identi
 from tests.support.processes import ResourceLedger
 
 
-APP_SERVER = importlib.import_module("buddyswitch.launcher.app_server")
+APP_SERVER = importlib.import_module("buddyswitch.foundation.app_server.runtime")
 
 
 def test_stop_app_server_terminates_launch_group() -> None:

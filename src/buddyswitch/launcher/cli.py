@@ -14,6 +14,7 @@ from typing import Sequence
 HELPER_DIR = Path(__file__).resolve().parent
 SHELL_ROOT = HELPER_DIR / "shell"
 PACKAGE_ROOT = HELPER_DIR.parent
+APP_SERVER_SHELL = PACKAGE_ROOT / "foundation" / "app_server" / "shell" / "app_server.sh"
 
 
 def _shared_root_from_env() -> Path:
@@ -683,7 +684,7 @@ def _source_helpers_script(
     if include_browser:
         sources.append(f'source "{SHELL_ROOT / "browser_cockpit.sh"}"')
     if include_app_server:
-        sources.append(f'source "{SHELL_ROOT / "app_server.sh"}"')
+        sources.append(f'source "{APP_SERVER_SHELL}"')
     if include_cleanup:
         sources.append(f'source "{SHELL_ROOT / "cleanup.sh"}"')
     return "\n".join(

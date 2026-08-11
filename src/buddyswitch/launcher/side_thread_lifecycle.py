@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any, Mapping
 
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.launcher import side_thread_registry
 
 

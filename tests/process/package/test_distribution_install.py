@@ -16,6 +16,7 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/modules/artifact/assets/artifact-selection-v1.json",
     "buddyswitch/modules/artifact/assets/artifact-selection-v2.json",
     "buddyswitch/contracts/schemas/dev/dev-result.json",
+    "buddyswitch/foundation/app_server/shell/app_server.sh",
     "buddyswitch/foundation/browser_runtime/assets/chrome-devtools-mcp-1.1.1-tools.json",
     "buddyswitch/launcher/assets/roles/dev/AGENTS.md",
     "buddyswitch/launcher/assets/web-management/index.html",
@@ -31,6 +32,8 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/skills/dev/implement-scoped-change/SKILL.md",
 }
 REQUIRED_FOUNDATION_MODULE_FILES = {
+    "buddyswitch/foundation/app_server/__init__.py",
+    "buddyswitch/foundation/app_server/runtime.py",
     "buddyswitch/foundation/identity/__init__.py",
     "buddyswitch/foundation/identity/model.py",
     "buddyswitch/foundation/identity/profiles.py",
@@ -92,6 +95,7 @@ import sys
 import buddyswitch
 
 current_modules = (
+    "buddyswitch.foundation.app_server.runtime",
     "buddyswitch.foundation.identity.model",
     "buddyswitch.foundation.identity.profiles",
     "buddyswitch.foundation.state.runtime",
@@ -153,6 +157,7 @@ print(json.dumps({
         "buddyswitch.runtime_kernel": False,
     }
     assert set(payload["module_files"]) == {
+        "buddyswitch.foundation.app_server.runtime",
         "buddyswitch.foundation.identity.model",
         "buddyswitch.foundation.identity.profiles",
         "buddyswitch.foundation.state.runtime",

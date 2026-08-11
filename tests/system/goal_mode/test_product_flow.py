@@ -29,7 +29,7 @@ from tests.system.goal_mode.support import (
     response_completed,
     response_created,
 )
-from buddyswitch.launcher import app_server
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.daemon import central_process
 from buddyswitch.foundation.daemon import central_service
 from buddyswitch.launcher import codex_runtime

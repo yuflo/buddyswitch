@@ -9,12 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
 
 HELPER_DIR = Path(__file__).resolve().parent
 
 from buddyswitch.launcher import actor_capability  # noqa: E402
-from buddyswitch.launcher import app_server  # noqa: E402
 from buddyswitch.launcher import codex_runtime  # noqa: E402
 
 

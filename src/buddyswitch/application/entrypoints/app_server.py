@@ -1,8 +1,8 @@
 """Verified App Server entrypoint."""
 
 from buddyswitch.application.build import activate_application
+import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.process_runtime.invocation import run_verified
-from buddyswitch.launcher import app_server
 
 
 def main() -> int:
