@@ -9,7 +9,7 @@ import sys
 from typing import Any, Mapping
 
 import buddyswitch.foundation.app_server.runtime as app_server
-from buddyswitch.launcher import side_thread_registry
+from buddyswitch.foundation.actor_runtime import side_thread_registry
 
 
 class SideThreadLifecycleError(RuntimeError):

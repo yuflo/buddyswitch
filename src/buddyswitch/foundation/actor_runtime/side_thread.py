@@ -6,11 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-
-HELPER_DIR = Path(__file__).resolve().parent
-
-from buddyswitch.launcher import actor_capability  # noqa: E402
-from buddyswitch.launcher import side_thread_lifecycle  # noqa: E402
+from buddyswitch.foundation.actor_runtime import capability as actor_capability
+from buddyswitch.foundation.actor_runtime import side_thread_lifecycle
 
 
 class ActorSideThreadError(RuntimeError):

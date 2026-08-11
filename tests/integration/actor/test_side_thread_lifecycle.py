@@ -16,15 +16,15 @@ from typing import Any, Callable
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-LAUNCHER_ROOT = ROOT / "src" / "buddyswitch" / "launcher"
-LIFECYCLE_PATH = LAUNCHER_ROOT / "side_thread_lifecycle.py"
-REGISTRY_PATH = LAUNCHER_ROOT / "side_thread_registry.py"
+ACTOR_RUNTIME_ROOT = ROOT / "src" / "buddyswitch" / "foundation" / "actor_runtime"
+LIFECYCLE_PATH = ACTOR_RUNTIME_ROOT / "side_thread_lifecycle.py"
+REGISTRY_PATH = ACTOR_RUNTIME_ROOT / "side_thread_registry.py"
 MODULE_COUNTER = count()
 
 
 def _load_module(path: Path, module_name: str) -> Any:
     del module_name
-    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
+    return importlib.reload(importlib.import_module(f"buddyswitch.foundation.actor_runtime.{path.stem}"))
 
 
 def load_registry() -> Any:

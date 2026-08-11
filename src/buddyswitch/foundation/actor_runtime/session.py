@@ -10,12 +10,9 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import buddyswitch.foundation.app_server.runtime as app_server
+from buddyswitch.foundation.actor_runtime import capability as actor_capability
+from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
-
-HELPER_DIR = Path(__file__).resolve().parent
-
-from buddyswitch.launcher import actor_capability  # noqa: E402
-from buddyswitch.launcher import codex_runtime  # noqa: E402
 
 
 VALID_ACTOR_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")

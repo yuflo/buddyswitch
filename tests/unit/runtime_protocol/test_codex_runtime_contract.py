@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from buddyswitch.launcher import codex_runtime
+from buddyswitch.foundation.actor_runtime import codex_runtime
 
 
 class CodexRuntimeTests(unittest.TestCase):

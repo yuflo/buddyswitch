@@ -140,7 +140,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         self.assertIn("build_attach_cli_command", source)
 
     def test_actor_session_has_no_task_runtime_or_standalone_cli_entrypoint(self) -> None:
-        source = _source("src/buddyswitch/launcher/actor_session.py")
+        source = _source("src/buddyswitch/foundation/actor_runtime/session.py")
         forbidden = (
             "task_" + "sys",
             "task_" + "id",
@@ -485,7 +485,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         required = (
             "Web and the public CLI are peer adapters",
             "private Host Control",
-            "Actor Session owns direct parent-thread input and attach resolution.",
+            "`src/buddyswitch/foundation/actor_runtime/session.py` owns direct parent-thread",
             "Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session",
             "`/api/im/*` is the single browser-facing Message contract.",
             "Demand, Task, and Track reads to their Public external-safe projections",

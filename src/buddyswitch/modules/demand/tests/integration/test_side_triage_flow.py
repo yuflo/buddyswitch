@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from buddyswitch.launcher import side_thread_registry
+from buddyswitch.foundation.actor_runtime import side_thread_registry
 from buddyswitch.modules.communication import public as communication_public
 from buddyswitch.foundation.daemon import state as daemon_state
 from buddyswitch.modules.demand.private.adapters.daemon import (

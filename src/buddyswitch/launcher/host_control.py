@@ -12,19 +12,14 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+from buddyswitch.foundation.actor_runtime import capability as actor_capability
+from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
+from buddyswitch.launcher import runtime_lock
 from buddyswitch.runtime_support import env_manifest
 
 HELPER_DIR = Path(__file__).resolve().parent
 SHELL_ROOT = HELPER_DIR / "shell"
-
-try:  # pragma: no cover - import mode depends on caller
-    from . import actor_capability, codex_runtime, runtime_lock
-except ImportError:  # pragma: no cover
-    from buddyswitch.launcher import actor_capability  # type: ignore[no-redef]
-    from buddyswitch.launcher import codex_runtime  # type: ignore[no-redef]
-    from buddyswitch.launcher import runtime_lock  # type: ignore[no-redef]
-
 
 VALID_ACTOR_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
 VALID_ROLE_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")

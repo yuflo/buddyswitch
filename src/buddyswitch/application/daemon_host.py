@@ -8,8 +8,8 @@ import sys
 from typing import Any
 
 import buddyswitch.foundation.app_server.runtime as app_server
+from buddyswitch.foundation.actor_runtime import session as actor_session
 from buddyswitch.foundation.daemon import contracts
-from buddyswitch.launcher import actor_session
 
 
 class AppNotificationClient:

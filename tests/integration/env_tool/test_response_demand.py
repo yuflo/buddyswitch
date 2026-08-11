@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.launcher import side_thread_registry
+from buddyswitch.foundation.actor_runtime import side_thread_registry
 from tests.support import task_fixtures
 from buddyswitch.modules.communication.private.domain import messages as message_service
 from buddyswitch.modules.demand.private.adapters.daemon import (

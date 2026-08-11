@@ -32,7 +32,7 @@ from tests.system.goal_mode.support import (
 import buddyswitch.foundation.app_server.runtime as app_server
 from buddyswitch.foundation.daemon import central_process
 from buddyswitch.foundation.daemon import central_service
-from buddyswitch.launcher import codex_runtime
+from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.daemon import instance
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
 

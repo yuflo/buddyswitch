@@ -6,7 +6,9 @@ import io
 import json
 import unittest
 
-from buddyswitch.launcher import actor_session, cli, cli_contract, codex_runtime, host_control
+from buddyswitch.foundation.actor_runtime import codex_runtime
+from buddyswitch.foundation.actor_runtime import session as actor_session
+from buddyswitch.launcher import cli, cli_contract, host_control
 
 
 class CliContractTests(unittest.TestCase):

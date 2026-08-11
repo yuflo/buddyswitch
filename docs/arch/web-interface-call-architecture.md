@@ -10,7 +10,7 @@ Web and the public CLI are peer adapters; neither is the other's internal API.
 The public CLI delegates:
 
 - instance lifecycle and capabilities to private Host Control;
-- instance input and attach to Actor Session;
+- instance input and attach to the direct Foundation Actor Session owner;
 - Demand, Task, and Track reads to their Public external-safe projections;
 - Web startup to the Web process launcher.
 
@@ -72,7 +72,8 @@ and daemon/App Server coordination. It returns host facts, not product state.
 
 ### Actor Session
 
-Actor Session owns direct parent-thread input and attach resolution. Direct
+`src/buddyswitch/foundation/actor_runtime/session.py` owns direct parent-thread
+input and attach resolution. Direct
 input is distinct from the Demand ingress pipeline and does not mutate Demand
 or Task state.
 
@@ -119,7 +120,7 @@ Browser -> generic Web host -> contributed Track read route -> Track Public
 Browser -> generic Web host -> contributed Communication route
 
 Public CLI -> private Host Control
-Public CLI -> Actor Session
+Public CLI -> Foundation Actor Session
 Public CLI -> typed product command registrations
 
 Actor tools -> product owners

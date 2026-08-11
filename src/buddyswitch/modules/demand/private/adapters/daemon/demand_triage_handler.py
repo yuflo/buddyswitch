@@ -10,9 +10,9 @@ from typing import Any, Mapping
 
 import buddyswitch.foundation.app_server.runtime as app_server
 
-from buddyswitch.launcher import actor_side_thread  # noqa: E402
+from buddyswitch.foundation.actor_runtime import side_thread as actor_side_thread  # noqa: E402
+from buddyswitch.foundation.actor_runtime import side_thread_registry  # noqa: E402
 from buddyswitch.foundation.daemon import contracts  # noqa: E402
-from buddyswitch.launcher import side_thread_registry  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.demand.private.adapters.daemon import (  # noqa: E402
     demand_sys_daemon_adapter,

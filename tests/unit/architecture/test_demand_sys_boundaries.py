@@ -473,7 +473,9 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
     )
     track_imports = _imports(track_handler)
     track_source = (REPO_ROOT / track_handler).read_text(encoding="utf-8")
-    actor_session = (REPO_ROOT / "src/buddyswitch/launcher/actor_session.py").read_text(encoding="utf-8")
+    actor_session = (
+        REPO_ROOT / "src/buddyswitch/foundation/actor_runtime/session.py"
+    ).read_text(encoding="utf-8")
     assert "buddyswitch.modules.demand.public" in track_imports
     assert not any("task_sys" in name for name in track_imports)
     assert "enqueue_inbound(" in track_source

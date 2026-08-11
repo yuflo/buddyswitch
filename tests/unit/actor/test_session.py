@@ -19,11 +19,11 @@ from tests.support.paths import REPO_ROOT
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
-HELPER_DIR = ROOT / "src" / "buddyswitch" / "launcher"
-ACTOR_SESSION_PATH = HELPER_DIR / "actor_session.py"
+HELPER_DIR = ROOT / "src" / "buddyswitch" / "foundation" / "actor_runtime"
+ACTOR_SESSION_PATH = HELPER_DIR / "session.py"
 
 from tests.support import task_fixtures  # noqa: E402
-from buddyswitch.launcher import actor_capability  # noqa: E402
+from buddyswitch.foundation.actor_runtime import capability as actor_capability  # noqa: E402
 
 MODULE_COUNTER = count()
 
@@ -32,7 +32,7 @@ def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
     return importlib.reload(
-        importlib.import_module(f"buddyswitch.launcher.{path.stem}")
+        importlib.import_module(f"buddyswitch.foundation.actor_runtime.{path.stem}")
     )
 
 

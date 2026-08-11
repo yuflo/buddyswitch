@@ -12,8 +12,8 @@ from pathlib import Path
 from unittest import mock
 
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
-from buddyswitch.launcher import actor_capability
-from buddyswitch.launcher import codex_runtime
+from buddyswitch.foundation.actor_runtime import capability as actor_capability
+from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.launcher import host_control as HOST_CONTROL
 from buddyswitch.runtime_support import env_manifest
 

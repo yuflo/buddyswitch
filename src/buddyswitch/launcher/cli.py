@@ -52,10 +52,10 @@ _SHARED_ROOT = _shared_root_from_env()
 os.environ.setdefault("BUDDYSWITCH_SHARED_ROOT", str(_SHARED_ROOT))
 os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_SHARED_ROOT / "state"))
 
+from buddyswitch.foundation.actor_runtime import codex_runtime  # noqa: E402
+from buddyswitch.foundation.actor_runtime import session as actor_session  # noqa: E402
 from buddyswitch.launcher import (  # noqa: E402
-    actor_session,
     cli_contract,
-    codex_runtime,
     host_control,
     runtime_lock,
 )

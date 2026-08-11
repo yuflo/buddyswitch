@@ -86,7 +86,7 @@ host_control_seed_actor_capabilities() {
 from pathlib import Path
 import sys
 
-from buddyswitch.launcher import actor_capability
+from buddyswitch.foundation.actor_runtime import capability as actor_capability
 
 actor_capability.seed_actor_capabilities(Path(sys.argv[1]))
 PY
@@ -732,7 +732,7 @@ import json
 import sys
 from pathlib import Path
 
-from buddyswitch.launcher import codex_runtime
+from buddyswitch.foundation.actor_runtime import codex_runtime
 
 try:
     payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))

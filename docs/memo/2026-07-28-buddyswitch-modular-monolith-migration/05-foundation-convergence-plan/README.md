@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C6A ACCEPTED — C6B READY`
-> Current execution authority: `BS-MM-S5-ACTOR-RUNTIME-R1-20260811-01` only
+> Stage state: `C1–C6B ACCEPTED — remaining C6 PREPARATION ONLY`
+> Current execution authority: none; next C6 owner requires a fresh source-bound READY packet
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -27,7 +27,8 @@ is accepted in `runtime-broker/S5-C5A-ACCEPTANCE.md`; its R1 packet is
 consumed. C5B is accepted in `daemon/S5-C5B-ACCEPTANCE.md`; its R1 packet is
 also consumed. C6A is accepted in
 `app-server/S5-C6A-ACCEPTANCE.md`; its R1 packet is consumed. Remaining
-C6B Actor Session/side runtime is READY at `actor-runtime/README.md`. Remaining
+C6B Actor Session/side runtime is accepted at
+`actor-runtime/S5-C6B-ACCEPTANCE.md`; its R1 packet is consumed. Remaining
 Host Control/Actor-build/Web/CLI convergence, RoleHost and final S5 acceptance
 remain unauthorized.
 
@@ -42,7 +43,7 @@ remain unauthorized.
 | C5A | Runtime Broker and shared JSON socket framing | ACCEPTED |
 | C5B | central and instance Daemon host | ACCEPTED |
 | C6A | App Server Python owner plus live shell projection | ACCEPTED |
-| C6B | Actor Session and side-thread runtime | READY |
+| C6B | Actor Session and side-thread runtime | ACCEPTED |
 | C6 remaining | Host Control, Actor build, Web and CLI physical convergence | PREPARATION ONLY |
 | C7 | final guidance, residue proof and frozen S5 acceptance | BLOCKED |
 

@@ -34,7 +34,7 @@ from buddyswitch.modules.communication.private.domain import messages as message
 from buddyswitch.modules.communication.private.adapters.web import registration as communication_web  # noqa: E402
 from buddyswitch.application.build import build_application  # noqa: E402
 import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
-from buddyswitch.launcher import actor_capability  # noqa: E402
+from buddyswitch.foundation.actor_runtime import capability as actor_capability  # noqa: E402
 
 
 APPLICATION = build_application()

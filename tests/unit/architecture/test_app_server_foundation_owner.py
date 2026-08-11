@@ -18,8 +18,8 @@ RETIRED_SHELL = PACKAGE_ROOT / "launcher" / "shell" / "app_server.sh"
 DIRECT_CONSUMERS = (
     PACKAGE_ROOT / "application" / "daemon_host.py",
     PACKAGE_ROOT / "application" / "entrypoints" / "app_server.py",
-    PACKAGE_ROOT / "launcher" / "actor_session.py",
-    PACKAGE_ROOT / "launcher" / "side_thread_lifecycle.py",
+    PACKAGE_ROOT / "foundation" / "actor_runtime" / "session.py",
+    PACKAGE_ROOT / "foundation" / "actor_runtime" / "side_thread_lifecycle.py",
     PACKAGE_ROOT
     / "modules"
     / "demand"

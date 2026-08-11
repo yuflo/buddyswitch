@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 
 
-from buddyswitch.launcher import side_thread_registry  # noqa: E402
+from buddyswitch.foundation.actor_runtime import side_thread_registry  # noqa: E402
 from buddyswitch.modules.communication import public as communication_public  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
 

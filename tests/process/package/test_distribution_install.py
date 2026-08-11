@@ -32,6 +32,13 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/skills/dev/implement-scoped-change/SKILL.md",
 }
 REQUIRED_FOUNDATION_MODULE_FILES = {
+    "buddyswitch/foundation/actor_runtime/__init__.py",
+    "buddyswitch/foundation/actor_runtime/capability.py",
+    "buddyswitch/foundation/actor_runtime/codex_runtime.py",
+    "buddyswitch/foundation/actor_runtime/session.py",
+    "buddyswitch/foundation/actor_runtime/side_thread.py",
+    "buddyswitch/foundation/actor_runtime/side_thread_lifecycle.py",
+    "buddyswitch/foundation/actor_runtime/side_thread_registry.py",
     "buddyswitch/foundation/app_server/__init__.py",
     "buddyswitch/foundation/app_server/runtime.py",
     "buddyswitch/foundation/identity/__init__.py",
@@ -95,6 +102,13 @@ import sys
 import buddyswitch
 
 current_modules = (
+    "buddyswitch.foundation.actor_runtime",
+    "buddyswitch.foundation.actor_runtime.capability",
+    "buddyswitch.foundation.actor_runtime.codex_runtime",
+    "buddyswitch.foundation.actor_runtime.session",
+    "buddyswitch.foundation.actor_runtime.side_thread",
+    "buddyswitch.foundation.actor_runtime.side_thread_lifecycle",
+    "buddyswitch.foundation.actor_runtime.side_thread_registry",
     "buddyswitch.foundation.app_server.runtime",
     "buddyswitch.foundation.identity.model",
     "buddyswitch.foundation.identity.profiles",
@@ -123,6 +137,12 @@ print(json.dumps({
     "retired_specs": {
         "buddyswitch.env": importlib.util.find_spec("buddyswitch.env") is not None,
         "buddyswitch.runtime_kernel": importlib.util.find_spec("buddyswitch.runtime_kernel") is not None,
+        "buddyswitch.launcher.actor_capability": importlib.util.find_spec("buddyswitch.launcher.actor_capability") is not None,
+        "buddyswitch.launcher.codex_runtime": importlib.util.find_spec("buddyswitch.launcher.codex_runtime") is not None,
+        "buddyswitch.launcher.actor_session": importlib.util.find_spec("buddyswitch.launcher.actor_session") is not None,
+        "buddyswitch.launcher.actor_side_thread": importlib.util.find_spec("buddyswitch.launcher.actor_side_thread") is not None,
+        "buddyswitch.launcher.side_thread_lifecycle": importlib.util.find_spec("buddyswitch.launcher.side_thread_lifecycle") is not None,
+        "buddyswitch.launcher.side_thread_registry": importlib.util.find_spec("buddyswitch.launcher.side_thread_registry") is not None,
     },
 }, sort_keys=True))
 """
@@ -155,8 +175,21 @@ print(json.dumps({
     assert payload["retired_specs"] == {
         "buddyswitch.env": False,
         "buddyswitch.runtime_kernel": False,
+        "buddyswitch.launcher.actor_capability": False,
+        "buddyswitch.launcher.codex_runtime": False,
+        "buddyswitch.launcher.actor_session": False,
+        "buddyswitch.launcher.actor_side_thread": False,
+        "buddyswitch.launcher.side_thread_lifecycle": False,
+        "buddyswitch.launcher.side_thread_registry": False,
     }
     assert set(payload["module_files"]) == {
+        "buddyswitch.foundation.actor_runtime",
+        "buddyswitch.foundation.actor_runtime.capability",
+        "buddyswitch.foundation.actor_runtime.codex_runtime",
+        "buddyswitch.foundation.actor_runtime.session",
+        "buddyswitch.foundation.actor_runtime.side_thread",
+        "buddyswitch.foundation.actor_runtime.side_thread_lifecycle",
+        "buddyswitch.foundation.actor_runtime.side_thread_registry",
         "buddyswitch.foundation.app_server.runtime",
         "buddyswitch.foundation.identity.model",
         "buddyswitch.foundation.identity.profiles",

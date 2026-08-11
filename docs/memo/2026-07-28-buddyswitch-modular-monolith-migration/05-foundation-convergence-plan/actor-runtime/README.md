@@ -1,7 +1,7 @@
 # S5 C6B Actor Session and Side Runtime Cutover
 
-> State: `READY`
-> Execution authority: `BS-MM-S5-ACTOR-RUNTIME-R1-20260811-01` only
+> State: `ACCEPTED`
+> Execution authority: none; R1 is consumed
 > Executable base: `f441440d478d336a55599e49fdc554669d428da3`
 
 C6B is the next independently runnable owner admitted by current-source
@@ -17,4 +17,6 @@ Read in order:
 4. `S5-C6B-READY-REVIEW.md`;
 5. `S5-C6B-GOAL-PACKET.md`.
 
-Only C6B is executable. All later C6 work, C7 and S6 remain unauthorized.
+C6B is accepted in `S5-C6B-ACCEPTANCE.md`. R1 must not resume. Only remaining
+C6 source refresh and READY preparation are unlocked; C7 and S6 remain
+unauthorized.

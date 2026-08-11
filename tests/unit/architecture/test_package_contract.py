@@ -56,6 +56,16 @@ FOUNDATION_PRIMITIVE_FILES = (
 )
 FOUNDATION_PRIMITIVE_DOC = "docs/arch/foundation-primitives-architecture.md"
 RUNTIME_BROKER_DOC = "docs/arch/runtime-broker-architecture.md"
+ACTOR_RUNTIME_DOC = "docs/arch/actor-runtime-architecture.md"
+ACTOR_RUNTIME_FILES = (
+    "foundation/actor_runtime/__init__.py",
+    "foundation/actor_runtime/capability.py",
+    "foundation/actor_runtime/codex_runtime.py",
+    "foundation/actor_runtime/session.py",
+    "foundation/actor_runtime/side_thread.py",
+    "foundation/actor_runtime/side_thread_lifecycle.py",
+    "foundation/actor_runtime/side_thread_registry.py",
+)
 RETIRED_FOUNDATION_PATHS = (
     "src/buddyswitch/env",
     "src/buddyswitch/runtime_kernel",
@@ -148,7 +158,9 @@ def test_minimal_package_and_activation_entrypoint_exist_under_src_only() -> Non
         PACKAGE_ROOT / "foundation" / "__init__.py",
         PACKAGE_ROOT / "foundation" / "process_runtime" / "__init__.py",
         PACKAGE_ROOT / "foundation" / "process_runtime" / "activation.py",
+        *(PACKAGE_ROOT / relative for relative in ACTOR_RUNTIME_FILES),
         *(PACKAGE_ROOT / relative for relative in FOUNDATION_PRIMITIVE_FILES),
+        REPO_ROOT / ACTOR_RUNTIME_DOC,
         REPO_ROOT / FOUNDATION_PRIMITIVE_DOC,
     )
     assert [path.relative_to(REPO_ROOT).as_posix() for path in expected if not path.is_file()] == []
@@ -319,6 +331,15 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/runtime_broker/server.py",
             "src/buddyswitch/foundation/runtime_broker/lifecycle.py",
             "src/buddyswitch/foundation/process_runtime/json_framing.py",
+        ),
+        REPO_ROOT / ACTOR_RUNTIME_DOC: (
+            "src/buddyswitch/foundation/actor_runtime/",
+            "src/buddyswitch/foundation/actor_runtime/capability.py",
+            "src/buddyswitch/foundation/actor_runtime/codex_runtime.py",
+            "src/buddyswitch/foundation/actor_runtime/session.py",
+            "src/buddyswitch/foundation/actor_runtime/side_thread.py",
+            "src/buddyswitch/foundation/actor_runtime/side_thread_lifecycle.py",
+            "src/buddyswitch/foundation/actor_runtime/side_thread_registry.py",
         ),
     }
     missing_required_paths = sorted(
