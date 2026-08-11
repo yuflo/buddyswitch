@@ -13,13 +13,14 @@
 | S5 C4 acceptance | `05-foundation-convergence-plan/identity-state-process/S5-C4-ACCEPTANCE.md`; patch `6ff8fcd6…`; FINAL `e306abb4f43d42ce8b9517f08e3a5450` |
 | S5 C5A acceptance | `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; patch `6eabfe2b…`; FINAL `0edb068adf19462a863ce3445e8aab0c` |
 | S5 C5B acceptance | `05-foundation-convergence-plan/daemon/S5-C5B-ACCEPTANCE.md`; patch `9e7da89c…`; FINAL `e91948e42eb0498bbc473714cd48e09d` |
+| S5 C6A handoff | `05-foundation-convergence-plan/app-server/S5-C6A-READY-REVIEW.md`; direct `c81992a7…`; host/package `97b26774…`; topology `S5C6AP-20260811-01` |
 | Active stage | S5 — Foundation Convergence |
-| State | C1–C5B ACCEPTED — C6 PREPARATION ONLY |
-| Runtime migration authorized | none; C6 implementation awaits source-bound READY review |
+| State | C1–C5B ACCEPTED — C6A READY |
+| Runtime migration authorized | `BS-MM-S5-APP-SERVER-R1-20260811-01` only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | checkpoint C5B, then refresh C6 Actor/App/Web/CLI host source, consumers and preservation proof |
+| Next gate | execute and review C6A App Server only; remaining C6 awaits later refresh |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State, Process, Runtime Broker and Daemon owners |
 
 ## Stage ledger
@@ -31,7 +32,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C5B ACCEPTED — C6 PREPARATION ONLY | S4 | coordinating hub | refresh and READY-review C6; C6–C7 implementation blocked |
+| S5 Foundation | C1–C5B ACCEPTED — C6A READY | S4 | coordinating hub | execute/review C6A only; remaining C6/C7 blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -373,6 +374,14 @@ accepted exact/affected proof and frozen FINAL
 `daemon/S5-C5B-ACCEPTANCE.md`. The packet is consumed; only C6 source refresh
 and READY preparation are unblocked.
 
+C6 current-source refresh found App Server to be an independently runnable
+owner: 1,235 lines of Python and a 227-line live shell projection, with 27
+current import/literal/package/test/doc representations. Two focused groups
+passed as `c81992a7...` and `97b26774...`; the C5B FINAL `e91948e...` remains
+source-equivalent. Topology preflight `S5C6AP-20260811-01` proved a direct
+Foundation owner depends only on Process Runtime and adds no SCC. D-065 and
+`app-server/S5-C6A-GOAL-PACKET.md` authorize C6A only.
+
 ## Transition record
 
 | Date | Stage | From | To | Authority | Reason |
@@ -480,6 +489,7 @@ and READY preparation are unblocked.
 | 2026-08-07 | S5 C5A Runtime Broker acceptance | ACCEPTED | `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; patch `6eabfe2b…`; hub RED `db81260a…`; exact/affected `a0f40b51…`; FINAL `0edb068adf19462a863ce3445e8aab0c` | commit/push C5A checkpoint, then refresh C5B from the clean committed owner; never resume C5A R1 |
 | 2026-08-07 | S5 C5B Daemon handoff | READY | `05-foundation-convergence-plan/daemon/S5-C5B-READY-REVIEW.md`; focused `433a2e27…`; source-equivalent FINAL `7643bdc8…`; topology `S5C5BP-20260807-01`; packet `BS-MM-S5-DAEMON-R1-20260807-01`; D-064 | execute C5B only from exact clean preparation commit; C6–C7 remain blocked |
 | 2026-08-11 | S5 C5B Daemon acceptance | ACCEPTED | `05-foundation-convergence-plan/daemon/S5-C5B-ACCEPTANCE.md`; patch `9e7da89c…`; exact repair `8c70159a…`; FINAL `e91948e42eb0498bbc473714cd48e09d` | commit/push C5B checkpoint, then refresh C6 from committed source; never resume C5B R1 |
+| 2026-08-11 | S5 C6A App Server handoff | READY | `05-foundation-convergence-plan/app-server/S5-C6A-READY-REVIEW.md`; direct `c81992a7…`; host/package `97b26774…`; source-equivalent FINAL `e91948e…`; topology `S5C6AP-20260811-01`; packet `BS-MM-S5-APP-SERVER-R1-20260811-01`; D-065 | execute C6A only from exact clean preparation commit; remaining C6/C7 blocked |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -501,11 +511,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / C6 source refresh and READY preparation
-Master state: C1–C5B ACCEPTED — C6 PREPARATION ONLY
-Goal Packet: none
+Stage: S5 / Foundation / C6A App Server READY
+Master state: C1–C5B ACCEPTED — C6A READY
+Goal Packet: BS-MM-S5-APP-SERVER-R1-20260811-01
 Execution session: none
 Last hub checkpoint: C5B acceptance; patch `9e7da89c...`, FINAL `e91948e42eb0498bbc473714cd48e09d`
-Next action: commit/push C5B, then refresh C6 source/consumers/contracts and READY-review its packet
+Next action: commit/push C6A preparation, then hand exact clean HEAD to one independent execution session
 No-polling state: not entered
 ```

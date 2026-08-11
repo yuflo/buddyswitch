@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C5B ACCEPTED — C6 PREPARATION ONLY
-> Runtime authorization: none; C6 implementation awaits source-bound READY review
+> Current state: S0–S4 ACCEPTED; S5 C1–C5B ACCEPTED — C6A READY
+> Runtime authorization: `BS-MM-S5-APP-SERVER-R1-20260811-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C5B ACCEPTED — C6 PREPARATION ONLY |
+| S5 | `05-foundation-convergence.md` | C1–C5B ACCEPTED — C6A READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -217,8 +217,13 @@ source-equivalent full `7643bdc832c648729ab87c0eef6e0c39` and topology
 focused repair evidence and frozen FINAL
 `e91948e42eb0498bbc473714cd48e09d` passed. C5B is accepted in
 `05-foundation-convergence-plan/daemon/S5-C5B-ACCEPTANCE.md`; its packet is
-consumed. C6 source refresh and READY preparation are unblocked, while C6–C7
-implementation and S6 remain unauthorized.
+consumed. C6 source refresh then proved App Server is an independently runnable
+owner with its live shell adapter, while Actor/Web/CLI can remain current.
+D-065 admits this shortest C6A cutover; direct baselines `c81992a7...` and
+`97b26774...`, source-equivalent FINAL `e91948e...` and topology
+`S5C6AP-20260811-01` passed. Only packet
+`BS-MM-S5-APP-SERVER-R1-20260811-01` is authorized. Remaining C6, C7 and S6
+remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

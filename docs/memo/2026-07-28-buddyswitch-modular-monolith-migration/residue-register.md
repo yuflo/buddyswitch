@@ -63,6 +63,7 @@ Statuses:
 | R-FND-012 | C1 TOOLHOST PORTION CLOSED — old Tool runtime/package/client/MCP paths and the zero-consumer Broker facade are absent; later technical roots retain their checkpoint owners | owning stage/S5 | `05-foundation-convergence-plan/tool-host/S5-TOOL-HOST-ACCEPTANCE.md`; S5 final foundation absence proof |
 | R-FND-013 | CLOSED — Runtime Broker has one `foundation/runtime_broker/**` owner; shared service-neutral framing has one process-runtime owner; `runtime_kernel/**` and installed residue are absent | S5 C5A | `05-foundation-convergence-plan/runtime-broker/S5-C5A-ACCEPTANCE.md`; exact/affected/frozen FINAL and replacement proof |
 | R-FND-014 | CLOSED — central and instance Daemon have one direct Foundation owner; application supplies App/Actor capability plus module/Browser registrations; the shared event log has one Process Runtime owner; retired Launcher owners and reverse dependencies are absent | S5 C5B | `05-foundation-convergence-plan/daemon/S5-C5B-ACCEPTANCE.md`; exact/affected/frozen FINAL, installed correspondence and replacement proof |
+| R-FND-015 | CONFIRMED — App Server Python runtime and its installed shell projection remain under Launcher, with live application/module/Actor/CLI/host/package consumers | S5 C6A | `05-foundation-convergence-plan/app-server/S5-C6A-GOAL-PACKET.md`; close only with direct Foundation owner, complete consumer cutover and old Python/shell/package absence |
 
 ## Role residue
 

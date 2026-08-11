@@ -127,12 +127,23 @@ order, not arbitrary file counts.
 - Daemon remains subscription/strategy plus registered handler execution;
 - no central product handler switch or content interpretation enters the host.
 
-### C6 — Actor, App, Web and CLI hosts
+### C6A — App Server
 
-- converge remaining host and packaged asset ownership;
+- move the complete App Server Python owner and live shell projection into one
+  direct Foundation package;
+- preserve the stable application process entrypoint and every protocol,
+  lifecycle and cleanup effect;
+- delete the two retired Launcher App Server files only after every import,
+  shell path and package projection has moved.
+
+### C6 remaining — Actor, Web and CLI hosts
+
+- refresh each remaining independently runnable owner after C6A acceptance;
+- converge remaining host and packaged asset ownership without inheriting C6A
+  execution authority;
 - keep interface ownership separate from product semantics;
-- delete retired `env/**` and `launcher/**` roots only when
-  every live consumer has moved.
+- delete the retired `launcher/**` root only when every live consumer has
+  moved. The already retired `env/**` root remains absent.
 
 ### C7 — S5 acceptance
 

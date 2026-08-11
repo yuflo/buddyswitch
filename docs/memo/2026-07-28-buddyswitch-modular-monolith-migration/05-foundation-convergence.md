@@ -1,8 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Current state: C1–C5B ACCEPTED — C6 PREPARATION ONLY
+> Current state: C1–C5B ACCEPTED — C6A READY
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: none; C6 implementation awaits source-bound READY review
+> Execution authority: `BS-MM-S5-APP-SERVER-R1-20260811-01` only
 > Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
 
 The executable blueprint and current handoff live at
