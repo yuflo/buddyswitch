@@ -9,7 +9,7 @@ from typing import Any
 
 
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
 from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime  # noqa: E402
 from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
@@ -88,9 +88,9 @@ def _has_real_user_page(browser_url: str) -> bool:
     return False
 
 
-def _skip(reason: str) -> daemon_contracts.HandlerResult:
+def _skip(reason: str) -> contracts.HandlerResult:
     print(f"Browser cockpit release skipped: {reason}", file=sys.stderr)
-    return daemon_contracts.HandlerResult.handled()
+    return contracts.HandlerResult.handled()
 
 
 class BrowserReleaseHandler:
@@ -105,10 +105,10 @@ class BrowserReleaseHandler:
         state: Any,
         runtime: Any,
         trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         del state
         if getattr(trigger, "type", None) != BROWSER_COCKPIT_RELEASE_EVENT_TYPE:
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         try:
             local_route = _context_identity_route(context)
             target_route = {
@@ -141,10 +141,10 @@ class BrowserReleaseHandler:
                 error = result.get("error")
                 message = error.get("message") if isinstance(error, dict) else result.get("message")
                 detail = message if isinstance(message, str) and message.strip() else "browser runtime manager release failed"
-                return daemon_contracts.HandlerResult.failed(detail)
-            return daemon_contracts.HandlerResult.handled()
+                return contracts.HandlerResult.failed(detail)
+            return contracts.HandlerResult.handled()
         except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
+            return contracts.HandlerResult.failed(str(exc))
 
 
 if __name__ == "__main__":

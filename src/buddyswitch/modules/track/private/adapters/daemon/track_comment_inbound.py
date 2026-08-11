@@ -7,7 +7,7 @@ import sys
 
 
 
-from buddyswitch.launcher import notification_center  # noqa: E402
+from buddyswitch.foundation.daemon import inbound  # noqa: E402
 from buddyswitch.modules.track.private.adapters.daemon import (
     track_comment_added_handler,
 )
@@ -18,8 +18,8 @@ TRACK_COMMENT_ADDED_PAYLOAD_CONTRACT = {"required_fields": ("track_id", "comment
 OWNER_MODULE = "track_comment_inbound"
 
 
-def track_comment_added_registration() -> notification_center.InboundSourceRegistration:
-    return notification_center.InboundSourceRegistration(
+def track_comment_added_registration() -> inbound.InboundSourceRegistration:
+    return inbound.InboundSourceRegistration(
         event_type=TRACK_COMMENT_ADDED_EVENT_TYPE,
         payload_contract=TRACK_COMMENT_ADDED_PAYLOAD_CONTRACT,
         handler_factory=track_comment_added_handler.TrackCommentAddedHandler,
@@ -27,7 +27,7 @@ def track_comment_added_registration() -> notification_center.InboundSourceRegis
     )
 
 
-def inbound_registrations() -> list[notification_center.InboundSourceRegistration]:
+def inbound_registrations() -> list[inbound.InboundSourceRegistration]:
     return [track_comment_added_registration()]
 
 

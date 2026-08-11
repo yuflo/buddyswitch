@@ -14,7 +14,7 @@ Browser preserves one current consumer flow:
 public shell/application entrypoint -> Browser owner -> JSON/exit/resource effect
 MCP client -> cockpit proxy -> Broker + Browser lifecycle/target -> page result
 Runtime Broker -> Browser runtime operation -> protocol result
-Instance Daemon -> Browser inbound registration -> cleanup/schedule effect
+application-composed Daemon -> Browser inbound registration -> cleanup/schedule effect
 ```
 
 ## Owned operations
@@ -46,15 +46,15 @@ commands call those entrypoints and do not import Browser implementation.
 request parsing, identity validation, and error/result translation for Browser
 acquire, status, and release. Browser consumers call
 `src/buddyswitch/foundation/runtime_broker/client.py` directly.
-`src/buddyswitch/launcher/instance_daemon.py`
-retains generic handler ordering, duplicate validation, and execution. It
-combines the exact registrations from
-`src/buddyswitch/foundation/browser_runtime/inbound.py` without defining
-Browser event meaning.
+`src/buddyswitch/application/daemon.py` owns the explicit composition point. It
+places the exact registrations from
+`src/buddyswitch/foundation/browser_runtime/inbound.py` after module inbound
+registrations and before contributed component handlers. Foundation Daemon
+only receives the completed ordered handler sequence.
 
 Browser may consume the current generic Daemon, notification, process-identity,
 Broker-client, and state-cancellation contracts. Those hosts and primitives do
-not import Browser semantics except at the explicit Broker and Instance Daemon
+not import Browser semantics except at the explicit Broker and application Daemon
 composition points above.
 
 ## State, process, and cleanup contracts
@@ -77,7 +77,7 @@ Allowed:
 ```text
 application Browser entrypoint -> Browser Foundation submodule
 Runtime Broker dispatcher -> Browser runtime operations
-Instance Daemon -> Browser inbound registrations
+application Daemon composition -> Browser inbound registrations
 Browser owner -> generic Daemon/process/Broker/notification contracts
 ```
 

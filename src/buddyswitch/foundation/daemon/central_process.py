@@ -1,4 +1,4 @@
-"""Central daemon process entrypoint."""
+"""Central daemon process lifecycle and command handling."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from typing import Any
 
 HELPER_DIR = Path(__file__).resolve().parent
 
-from buddyswitch.launcher import central_daemon_core  # noqa: E402
+from buddyswitch.foundation.daemon import central_service  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
@@ -53,7 +53,7 @@ def terminate_record(record: process_identity.RecordedProcess) -> bool:
     return not process_identity.is_running(record)
 
 
-def cleanup_runtime_files(paths: central_daemon_core.CentralDaemonPaths) -> None:
+def cleanup_runtime_files(paths: central_service.CentralDaemonPaths) -> None:
     for path in (paths.pid_file, paths.pid_identity_file, paths.socket_path):
         try:
             path.unlink()
@@ -76,7 +76,7 @@ def ping_central_daemon(*, socket_path: Path) -> dict[str, Any]:
     return ping
 
 
-def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any]:
+def start_central_daemon(paths: central_service.CentralDaemonPaths) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
     recorded = process_identity.read_record(paths.pid_file)
     identity_matches = recorded is not None and process_identity.matches(recorded)
@@ -145,7 +145,7 @@ def start_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[
     }
 
 
-def status_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any]:
+def status_central_daemon(paths: central_service.CentralDaemonPaths) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
     recorded = process_identity.read_record(paths.pid_file)
     identity_matches = recorded is not None and process_identity.matches(recorded)
@@ -171,7 +171,7 @@ def status_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict
     }
 
 
-def stop_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any]:
+def stop_central_daemon(paths: central_service.CentralDaemonPaths) -> dict[str, Any]:
     pid = read_pid(paths.pid_file)
     recorded = process_identity.read_record(paths.pid_file)
     identity_matches = recorded is not None and process_identity.matches(recorded)
@@ -189,7 +189,7 @@ def stop_central_daemon(paths: central_daemon_core.CentralDaemonPaths) -> dict[s
     }
 
 
-def stop_if_idle(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any]:
+def stop_if_idle(paths: central_service.CentralDaemonPaths) -> dict[str, Any]:
     try:
         registry = daemon_client.request_central_daemon("daemon.registry", {}, socket_path=paths.socket_path)
     except Exception:
@@ -209,9 +209,9 @@ def stop_if_idle(paths: central_daemon_core.CentralDaemonPaths) -> dict[str, Any
     return stopped
 
 
-def serve(paths: central_daemon_core.CentralDaemonPaths) -> int:
-    service = central_daemon_core.CentralDaemonService(paths=paths)
-    server = central_daemon_core.CentralDaemonSocketServer(service=service)
+def serve(paths: central_service.CentralDaemonPaths) -> int:
+    service = central_service.CentralDaemonService(paths=paths)
+    server = central_service.CentralDaemonSocketServer(service=service)
     previous_sigint = signal.signal(signal.SIGINT, lambda _signum, _frame: server.close())
     previous_sigterm = signal.signal(signal.SIGTERM, lambda _signum, _frame: server.close())
     try:
@@ -237,7 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    paths = central_daemon_core.central_daemon_paths(args.shared_root)
+    paths = central_service.central_daemon_paths(args.shared_root)
     try:
         if args.command == "serve":
             return serve(paths)

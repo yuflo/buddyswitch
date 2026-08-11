@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from buddyswitch.launcher import central_daemon_core
+from buddyswitch.foundation.daemon import central_service
 from tests.system.support.launcher import SystemLauncherHarness
 from tests.support.paths import REPO_ROOT
 
@@ -25,7 +25,7 @@ class TestWebCommandLifecycle(SystemLauncherHarness, unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = source_home
             env.pop("CODEX_HOME", None)
-            central_paths = central_daemon_core.central_daemon_paths(shared_root)
+            central_paths = central_service.central_daemon_paths(shared_root)
             self._ledger.register_process_descriptor(
                 pid_file=central_paths.pid_file,
                 cleanup_strategy="central_daemon_stop",

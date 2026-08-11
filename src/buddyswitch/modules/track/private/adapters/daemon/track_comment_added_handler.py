@@ -7,7 +7,7 @@ import sys
 from typing import Any
 
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.demand import public as demand_public  # noqa: E402
 from buddyswitch.modules.track.private.domain import (
@@ -40,7 +40,7 @@ class TrackCommentAddedHandler:
         trigger: Any,
     ) -> Any:
         if getattr(trigger, "type", None) != "track.comment.added":
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         return self._handle_track_comment_added(context, state, trigger)
 
     def _payload(self, trigger: Any) -> dict[str, str]:
@@ -103,7 +103,7 @@ class TrackCommentAddedHandler:
         context: Any,
         state: Any,
         trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         try:
             target_identity = self._ensure_target_identity(context, trigger)
             source_identity = self._source_identity_route(trigger)
@@ -142,9 +142,9 @@ class TrackCommentAddedHandler:
                     },
                 }],
             )
-            return daemon_contracts.HandlerResult.handled()
+            return contracts.HandlerResult.handled()
         except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
+            return contracts.HandlerResult.failed(str(exc))
 
 
 if __name__ == "__main__":

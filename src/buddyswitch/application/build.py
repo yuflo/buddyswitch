@@ -15,9 +15,9 @@ from buddyswitch.foundation.tool_runtime.definition import (
 )
 from buddyswitch.foundation.composition import ModuleAssembly
 from buddyswitch.launcher.cli_contract import CliCommandRegistration
-from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
-from buddyswitch.launcher import notification_center
-from buddyswitch.launcher.notification_center import InboundSourceRegistration
+from buddyswitch.foundation.daemon.contracts import DaemonHandlerRegistration
+from buddyswitch.foundation.daemon import inbound
+from buddyswitch.foundation.daemon.inbound import InboundSourceRegistration
 from buddyswitch.launcher.web_contracts import (
     ActorConsoleSectionRegistration,
     WebRouteRegistration,
@@ -167,7 +167,7 @@ def build_application(
                     "inbound source contribution must be "
                     "InboundSourceRegistration"
                 )
-            normalized = notification_center.normalized_registrations(
+            normalized = inbound.normalized_registrations(
                 (registration,)
             )[0]
             _unique(

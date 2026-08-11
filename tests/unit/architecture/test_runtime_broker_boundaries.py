@@ -23,8 +23,8 @@ BROKER_MODULES = {
 }
 DAEMON_FRAMING_CONSUMERS = (
     PACKAGE_ROOT / "foundation" / "daemon" / "client.py",
-    PACKAGE_ROOT / "launcher" / "central_daemon_core.py",
-    PACKAGE_ROOT / "launcher" / "daemon_mailbox.py",
+    PACKAGE_ROOT / "foundation" / "daemon" / "central_service.py",
+    PACKAGE_ROOT / "foundation" / "daemon" / "mailbox.py",
 )
 BROKER_CLIENT_CONSUMERS = (
     PACKAGE_ROOT / "foundation" / "browser_runtime" / "cockpit_proxy.py",

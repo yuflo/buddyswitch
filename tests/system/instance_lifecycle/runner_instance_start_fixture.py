@@ -7,9 +7,9 @@ import subprocess
 import time
 
 from buddyswitch.launcher import app_server
-from buddyswitch.launcher import central_daemon_core
-from buddyswitch.launcher import daemon_core
-from buddyswitch.launcher import daemon_mailbox
+from buddyswitch.foundation.daemon import central_service
+from buddyswitch.foundation.daemon import instance
+from buddyswitch.foundation.daemon import mailbox
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from buddyswitch.foundation.runtime_broker import lifecycle
 from tests.support.paths import REPO_ROOT
@@ -85,7 +85,7 @@ def _register_instance_resources(
         },
     )
 
-    daemon_pid = daemon_core.daemon_pid_file(instance_root)
+    daemon_pid = instance.daemon_pid_file(instance_root)
     ledger.register_process_descriptor(
         pid_file=daemon_pid,
         cleanup_strategy="instance_daemon_stop",
@@ -94,7 +94,7 @@ def _register_instance_resources(
         owned_paths={
             "pid": daemon_pid,
             "pid_identity": process_identity.identity_file(daemon_pid),
-            "socket": daemon_mailbox.mailbox_socket_path(instance_root),
+            "socket": mailbox.mailbox_socket_path(instance_root),
         },
     )
 
@@ -130,7 +130,7 @@ def test_public_instance_start_resources_survive_until_runner_signal() -> None:
     _write_fake_executables(fake_bin)
     _debug(run_root, "fake-executables-ready")
 
-    central_paths = central_daemon_core.central_daemon_paths(shared_root)
+    central_paths = central_service.central_daemon_paths(shared_root)
     ledger.register_process_descriptor(
         pid_file=central_paths.pid_file,
         cleanup_strategy="central_daemon_stop",
@@ -206,7 +206,7 @@ def test_public_instance_start_resources_survive_until_runner_signal() -> None:
         "central": central_paths.pid_file,
         "app_server": app_server.pid_file(instance_root),
         "runtime_broker": instance_root / "runtime" / "runtime-broker.pid",
-        "instance_daemon": daemon_core.daemon_pid_file(instance_root),
+        "instance_process": instance.daemon_pid_file(instance_root),
     }
     captured: dict[str, int] = {}
     while time.monotonic() < deadline:

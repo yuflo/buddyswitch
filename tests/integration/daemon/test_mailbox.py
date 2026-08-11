@@ -18,23 +18,19 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 
-MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
-CENTRAL_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py"
+MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "mailbox.py"
+CENTRAL_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "central_service.py"
 DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    module_name = (
-        "buddyswitch.foundation.daemon.client"
-        if path == DAEMON_CLIENT_PATH
-        else f"buddyswitch.launcher.{path.stem}"
-    )
+    module_name = f"buddyswitch.foundation.daemon.{path.stem}"
     return importlib.reload(importlib.import_module(module_name))
 
 

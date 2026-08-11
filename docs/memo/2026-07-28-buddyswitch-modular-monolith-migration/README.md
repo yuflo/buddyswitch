@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C5A ACCEPTED — C5B READY
-> Runtime authorization: packet `BS-MM-S5-DAEMON-R1-20260807-01` authorizes C5B only
+> Current state: S0–S4 ACCEPTED; S5 C1–C5B ACCEPTED — C6 PREPARATION ONLY
+> Runtime authorization: none; C6 implementation awaits source-bound READY review
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C5A ACCEPTED — C5B READY |
+| S5 | `05-foundation-convergence.md` | C1–C5B ACCEPTED — C6 PREPARATION ONLY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -213,9 +213,12 @@ must cross one narrow application-supplied capability, Browser registrations
 must enter through application composition, and the shared runtime-event log
 belongs to Process Runtime. Focused baseline `433a2e2766d34929b10b6aa2e4111213`,
 source-equivalent full `7643bdc832c648729ab87c0eef6e0c39` and topology
-`S5C5BP-20260807-01` passed. C5B is READY at
-`05-foundation-convergence-plan/daemon/README.md`; C6–C7 and S6 remain
-unauthorized.
+`S5C5BP-20260807-01` passed. C5B R1 then completed the one-owner cutover;
+focused repair evidence and frozen FINAL
+`e91948e42eb0498bbc473714cd48e09d` passed. C5B is accepted in
+`05-foundation-convergence-plan/daemon/S5-C5B-ACCEPTANCE.md`; its packet is
+consumed. C6 source refresh and READY preparation are unblocked, while C6–C7
+implementation and S6 remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

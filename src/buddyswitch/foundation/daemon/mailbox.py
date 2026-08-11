@@ -14,7 +14,7 @@ from typing import Any, Mapping
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
-from buddyswitch.launcher import daemon_triggers  # noqa: E402
+from buddyswitch.foundation.daemon import triggers  # noqa: E402
 import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 
 
@@ -256,7 +256,7 @@ class DaemonMailboxServer:
             return self._response(request_id, code="invalid_signal", message=str(exc))
         if signal["target_identity_id"] != self.local_identity_id:
             return self._response(request_id, code="wrong_target_actor", message="signal target does not match local actor")
-        trigger = daemon_triggers.normalize_cross_actor_signal(signal)
+        trigger = triggers.normalize_cross_actor_signal(signal)
         return self._dispatch_trigger(request_id, trigger)
 
     def _dispatch_application_command(
@@ -278,7 +278,7 @@ class DaemonMailboxServer:
             )
         return self._response(request_id, dict(result))
 
-    def _dispatch_trigger(self, request_id: str | None, trigger: daemon_triggers.DaemonTrigger) -> dict[str, Any]:
+    def _dispatch_trigger(self, request_id: str | None, trigger: triggers.DaemonTrigger) -> dict[str, Any]:
         if callable(self.trigger_dispatcher):
             result = self.trigger_dispatcher(trigger)
             if not isinstance(result, dict):
@@ -298,7 +298,7 @@ class DaemonMailboxServer:
         payload.setdefault("trigger", trigger.to_payload())
         return self._response(request_id, payload)
 
-    def _normalize_local_trigger_request(self, params: dict[str, Any]) -> daemon_triggers.DaemonTrigger:
+    def _normalize_local_trigger_request(self, params: dict[str, Any]) -> triggers.DaemonTrigger:
         identity_id = _actor_identity_id(params.get("identity_id"), "identity_id")
         role_id = _role_id(params.get("role_id"), "role_id")
         if identity_id != self.local_identity_id:
@@ -310,7 +310,7 @@ class DaemonMailboxServer:
         source_context = params.get("source_context", {})
         if not isinstance(source_context, dict):
             raise ValueError("source_context must be an object")
-        return daemon_triggers.normalize_local_trigger(
+        return triggers.normalize_local_trigger(
             trigger_type=trigger_type,
             target_identity_id=identity_id,
             target_role_id=role_id,

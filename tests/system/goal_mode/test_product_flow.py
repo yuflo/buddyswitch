@@ -30,10 +30,10 @@ from tests.system.goal_mode.support import (
     response_created,
 )
 from buddyswitch.launcher import app_server
-from buddyswitch.launcher import central_daemon
-from buddyswitch.launcher import central_daemon_core
+from buddyswitch.foundation.daemon import central_process
+from buddyswitch.foundation.daemon import central_service
 from buddyswitch.launcher import codex_runtime
-from buddyswitch.launcher import daemon_core
+from buddyswitch.foundation.daemon import instance
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
 
@@ -1135,9 +1135,9 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
                 f"env reset failed: stdout={reset.stdout!r} stderr={reset.stderr!r}"
             )
 
-        central_paths = central_daemon_core.central_daemon_paths(self.shared_root)
+        central_paths = central_service.central_daemon_paths(self.shared_root)
         try:
-            central_result = central_daemon.stop_central_daemon(central_paths)
+            central_result = central_process.stop_central_daemon(central_paths)
         except Exception as exc:
             report.residuals.append(f"central daemon cleanup failed: {exc}")
         else:
@@ -1397,7 +1397,7 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
         )
         side_rows = self._instance().get("side_threads")
         self.assertEqual(side_rows, [])
-        daemon_log = daemon_core.daemon_log_file(instance_root).read_text(
+        daemon_log = instance.daemon_log_file(instance_root).read_text(
             encoding="utf-8",
             errors="replace",
         )
@@ -1419,8 +1419,8 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
     def test_failed_env_reset_still_stops_central_daemon_and_removes_owned_paths(
         self,
     ) -> None:
-        paths = central_daemon_core.central_daemon_paths(self.shared_root)
-        central_daemon.start_central_daemon(paths)
+        paths = central_service.central_daemon_paths(self.shared_root)
+        central_process.start_central_daemon(paths)
         record = process_identity.read_record(paths.pid_file)
         self.assertIsNotNone(record)
         assert record is not None
@@ -1449,8 +1449,8 @@ class NativeGoalProductFlowSystemTests(unittest.TestCase):
             self.assertFalse(self.root.exists())
         finally:
             if process_identity.is_running(record):
-                central_daemon.terminate_record(record)
-            central_daemon.cleanup_runtime_files(paths)
+                central_process.terminate_record(record)
+            central_process.cleanup_runtime_files(paths)
             if self.root.exists():
                 shutil.rmtree(self.root)
 

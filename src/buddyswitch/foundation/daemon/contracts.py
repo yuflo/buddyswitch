@@ -2,10 +2,11 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
 if TYPE_CHECKING:
-    from buddyswitch.launcher.daemon_triggers import DaemonTrigger
+    from buddyswitch.foundation.daemon.triggers import DaemonTrigger
 
 
 class HandlerResult:
@@ -53,6 +54,44 @@ class DaemonContext:
         self.project_workspace_dir = project_workspace_dir
         self.socket_path = socket_path
         self.permissions = permissions
+
+
+class DaemonHostError(RuntimeError):
+    """The application host could not complete a daemon operation."""
+
+
+class DaemonHostTimeout(DaemonHostError):
+    """The application notification stream reached its poll timeout."""
+
+
+class DaemonNotificationClient(Protocol):
+    def bind(self, context: DaemonContext) -> None:
+        """Bind the client's notification stream to the actor's main thread."""
+
+    def read_notification(self) -> dict[str, Any]:
+        """Read one application notification or raise DaemonHostTimeout."""
+
+
+class DaemonHost(Protocol):
+    maintenance_interval_seconds: float
+
+    def resolve_socket_path(self, *, actor_id: str, instance_root: Path) -> Path:
+        """Resolve the concrete application socket for an actor instance."""
+
+    def instance_daemon_command(self, instance_json: Path) -> list[str]:
+        """Return the explicit application command for the child daemon."""
+
+    def notification_client(
+        self,
+        context: DaemonContext,
+    ) -> AbstractContextManager[DaemonNotificationClient]:
+        """Open the bound application notification transport."""
+
+    def parent_activity(self, context: DaemonContext) -> dict[str, Any]:
+        """Project the parent thread's current activity."""
+
+    def input_actor(self, context: DaemonContext, text: str) -> dict[str, Any]:
+        """Submit input to the actor through the application host."""
 
 
 ApplicationCommand = Callable[[Mapping[str, object]], Mapping[str, object]]

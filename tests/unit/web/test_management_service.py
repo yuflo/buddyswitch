@@ -237,10 +237,10 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         end = source.index("\ndef _actor_session(", start)
         block = source[start:end]
 
-        ensure_index = block.index("central_daemon.start_central_daemon")
+        ensure_index = block.index("central_process.start_central_daemon")
         run_index = block.index("subprocess.run")
         helper_index = block.index("buddyswitch.application.entrypoints.web")
-        stop_index = block.index("central_daemon.stop_if_idle")
+        stop_index = block.index("central_process.stop_if_idle")
         self.assertLess(ensure_index, run_index)
         self.assertLess(helper_index, run_index)
         self.assertLess(run_index, stop_index)

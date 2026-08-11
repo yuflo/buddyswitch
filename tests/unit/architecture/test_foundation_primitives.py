@@ -335,7 +335,7 @@ def test_foundation_state_exposes_only_live_primitive_surfaces() -> None:
 
 def test_retired_pid_liveness_helpers_are_absent_from_lifecycle_owners() -> None:
     for path in (
-        PACKAGE_ROOT / "launcher" / "central_daemon.py",
+        PACKAGE_ROOT / "foundation" / "daemon" / "central_process.py",
         PACKAGE_ROOT / "foundation" / "runtime_broker" / "lifecycle.py",
     ):
         assert "pid_is_live" not in _top_level_bound_names(path), path.relative_to(

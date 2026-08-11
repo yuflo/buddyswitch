@@ -32,7 +32,7 @@ GENERIC_HOSTS = (
     Path("src/buddyswitch/foundation/tool_runtime/context.py"),
     Path("src/buddyswitch/foundation/tool_runtime/registry.py"),
     Path("src/buddyswitch/launcher/cli.py"),
-    Path("src/buddyswitch/launcher/instance_daemon.py"),
+    Path("src/buddyswitch/foundation/daemon/instance_process.py"),
     Path("src/buddyswitch/launcher/web_management.py"),
 )
 RETIRED_OWNER_PATHS = (
@@ -178,7 +178,7 @@ def test_task_contributions_are_typed_and_generic_hosts_have_no_task_private_sta
     assert "task_goal_runtime" not in context_fields
     assert "task_sys" not in context_fields
 
-    daemon_source = _source(Path("src/buddyswitch/launcher/instance_daemon.py"))
+    daemon_source = _source(Path("src/buddyswitch/foundation/daemon/instance_process.py"))
     assert "TaskGoalHandler" not in daemon_source
     assert "task_goal.reconcile_task" not in daemon_source
 

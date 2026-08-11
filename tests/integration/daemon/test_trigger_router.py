@@ -13,22 +13,25 @@ from typing import Any
 
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
-TRIGGERS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_triggers.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
+TRIGGERS_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "triggers.py"
 MODULE_COUNTER = count()
 
 
 def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
+    return importlib.reload(
+        importlib.import_module(f"buddyswitch.foundation.daemon.{path.stem}")
+    )
 
 
 class RecordingHandler:
@@ -42,7 +45,7 @@ class RecordingHandler:
 
     def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
         self.handled.append(trigger)
-        return daemon_contracts.HandlerResult.handled()
+        return contracts.HandlerResult.handled()
 
 
 class FailingHandler:
@@ -52,7 +55,7 @@ class FailingHandler:
         return trigger.type == "example.ready"
 
     def handle(self, _context: object, _state: object, _runtime: object, _trigger: Any) -> object:
-        return daemon_contracts.HandlerResult.failed("handler failed intentionally")
+        return contracts.HandlerResult.failed("handler failed intentionally")
 
 
 class InvalidReturnHandler:
@@ -78,7 +81,7 @@ class IgnoringHandler:
 class DaemonTriggerRouterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.triggers = load_module(TRIGGERS_PATH)
-        self.daemon_core = load_module(DAEMON_CORE_PATH)
+        self.instance = load_module(DAEMON_CORE_PATH)
 
     def _instance(self, temp_root: str) -> dict[str, Any]:
         instance_root = Path(temp_root) / "instances" / "act-dev-daemon"
@@ -95,7 +98,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
         }
         instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
-        context = self.daemon_core.load_daemon_context(instance_json)
+        context = self.instance.load_daemon_context(instance_json, host=AppActorDaemonHost())
         state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id="act-dev-daemon",
@@ -222,7 +225,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             instance = self._instance(temp_root)
             handler = RecordingHandler()
 
-            result = self.daemon_core.dispatch_trigger(
+            result = self.instance.dispatch_trigger(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
@@ -241,7 +244,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
 
-            result = self.daemon_core.dispatch_trigger(
+            result = self.instance.dispatch_trigger(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
@@ -261,7 +264,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
     def test_trigger_router_source_has_no_legacy_entry_method_calls(self) -> None:
         import inspect
 
-        source = inspect.getsource(self.daemon_core.dispatch_trigger)
+        source = inspect.getsource(self.instance.dispatch_trigger)
 
         self.assertNotIn("handle_notification", source)
         self.assertNotIn("handle_signal", source)
@@ -370,7 +373,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                 now="2026-06-24T00:00:00Z",
             )
             handled: list[Any] = []
-            core = self.daemon_core
+            core = self.instance
 
             class BrowserExpiryHandler:
                 name = "browser_page_expired"
@@ -380,16 +383,16 @@ class DaemonTriggerRouterTests(unittest.TestCase):
 
                 def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
                     handled.append(trigger)
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
-            first = self.daemon_core.sweep_due_scheduled_triggers(
+            first = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
                 handlers=[BrowserExpiryHandler()],
                 now="2026-06-24T00:00:01Z",
             )
-            second = self.daemon_core.sweep_due_scheduled_triggers(
+            second = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
@@ -428,7 +431,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                 now="2026-06-24T00:00:00Z",
             )
             handled: list[Any] = []
-            core = self.daemon_core
+            core = self.instance
 
             class RefreshingBrowserExpiryHandler:
                 name = "browser_page_expired"
@@ -446,16 +449,16 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                         schedule_key="browser.page.idle:target-ttl-1",
                         now="2026-06-24T00:00:01Z",
                     )
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
-            first = self.daemon_core.sweep_due_scheduled_triggers(
+            first = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
                 handlers=[RefreshingBrowserExpiryHandler()],
                 now="2026-06-24T00:00:01Z",
             )
-            second = self.daemon_core.sweep_due_scheduled_triggers(
+            second = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
@@ -485,14 +488,14 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                 now="2026-06-24T00:00:00Z",
             )
 
-            first = self.daemon_core.sweep_due_scheduled_triggers(
+            first = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
                 handlers=[],
                 now="2026-06-24T00:00:01Z",
             )
-            second = self.daemon_core.sweep_due_scheduled_triggers(
+            second = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
@@ -518,7 +521,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                 payload={"target_id": "target-ttl-1"},
                 now="2026-06-24T00:00:00Z",
             )
-            core = self.daemon_core
+            core = self.instance
 
             class FailingBrowserExpiryHandler:
                 name = "browser_page_expired"
@@ -527,16 +530,16 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                     return trigger.type == "browser.page.expired"
 
                 def handle(self, *_args: object) -> object:
-                    return daemon_contracts.HandlerResult.failed("close failed")
+                    return contracts.HandlerResult.failed("close failed")
 
-            first = self.daemon_core.sweep_due_scheduled_triggers(
+            first = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
                 handlers=[FailingBrowserExpiryHandler()],
                 now="2026-06-24T00:00:01Z",
             )
-            second = self.daemon_core.sweep_due_scheduled_triggers(
+            second = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),
@@ -575,7 +578,7 @@ class DaemonTriggerRouterTests(unittest.TestCase):
                     calls.append("called")
                     raise AssertionError("canceled schedule must not dispatch")
 
-            result = self.daemon_core.sweep_due_scheduled_triggers(
+            result = self.instance.sweep_due_scheduled_triggers(
                 instance["context"],
                 instance["state"],
                 runtime=object(),

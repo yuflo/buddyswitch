@@ -8,7 +8,7 @@ class TestCockpitProxyLifecycle(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [
@@ -90,7 +90,7 @@ class TestCockpitProxyLifecycle(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("list_pages", {})],

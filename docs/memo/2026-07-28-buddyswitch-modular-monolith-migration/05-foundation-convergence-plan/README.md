@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C5A ACCEPTED — C5B READY`
-> Current execution authority: packet `BS-MM-S5-DAEMON-R1-20260807-01` authorizes C5B only
+> Stage state: `C1–C5B ACCEPTED — C6 PREPARATION ONLY`
+> Current execution authority: none; C6 implementation awaits source-bound READY review
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -24,10 +24,10 @@ C3 is accepted in `browser-runtime/S5-C3-ACCEPTANCE.md`; both Browser packets
 are consumed. C4 is accepted in
 `identity-state-process/S5-C4-ACCEPTANCE.md`; its R1 packet is consumed. C5A
 is accepted in `runtime-broker/S5-C5A-ACCEPTANCE.md`; its R1 packet is
-consumed. C5B source refresh, boundary design, preservation evidence and READY
-review are complete at `daemon/README.md`. Its R1 packet is the only current
-execution authority. Actor, App, physical Web/CLI host movement, RoleHost and
-final S5 implementation remain unauthorized.
+consumed. C5B is accepted in `daemon/S5-C5B-ACCEPTANCE.md`; its R1 packet is
+also consumed. C6 Actor/App/Web/CLI source refresh and READY preparation are
+unblocked. C6 implementation, RoleHost and final S5 acceptance remain
+unauthorized.
 
 ## Remaining checkpoints
 
@@ -38,8 +38,8 @@ final S5 implementation remain unauthorized.
 | C3 | Browser runtime and public lifecycle operations | ACCEPTED |
 | C4 | Identity, state and process primitives | ACCEPTED |
 | C5A | Runtime Broker and shared JSON socket framing | ACCEPTED |
-| C5B | central and instance Daemon host | READY |
-| C6 | Actor, App, Web and CLI host physical convergence | BLOCKED |
+| C5B | central and instance Daemon host | ACCEPTED |
+| C6 | Actor, App, Web and CLI host physical convergence | PREPARATION ONLY |
 | C7 | final guidance, residue proof and frozen S5 acceptance | BLOCKED |
 
 Checkpoint labels are program navigation. A checkpoint is handed off only

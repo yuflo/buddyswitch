@@ -1,4 +1,4 @@
-"""Shared-root central daemon service."""
+"""Shared-root central daemon protocol service."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import threading
 from typing import Any
 
 
-from buddyswitch.launcher import daemon_mailbox  # noqa: E402
+from buddyswitch.foundation.daemon import mailbox  # noqa: E402
 from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
@@ -298,7 +298,7 @@ class CentralDaemonService:
         if candidate is None:
             candidate = params.get("event")
         try:
-            signal = daemon_mailbox.validate_daemon_signal(candidate)
+            signal = mailbox.validate_daemon_signal(candidate)
         except Exception as exc:
             return {
                 "delivery_status": "invalid_signal",

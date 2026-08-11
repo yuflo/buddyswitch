@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
 from buddyswitch.foundation.composition import ModuleAssembly
-from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
+from buddyswitch.foundation.daemon.contracts import DaemonHandlerRegistration
 from buddyswitch.modules.demand.private.adapters.cleanup import CONTRIBUTION
 from buddyswitch.modules.demand.private.adapters.cli import REGISTRATION
 from buddyswitch.modules.demand.private.adapters.daemon.demand_orchestration_handler import (

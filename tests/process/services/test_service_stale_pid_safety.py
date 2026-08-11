@@ -9,7 +9,8 @@ import sys
 
 from buddyswitch.launcher import app_server
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime_manager
-from buddyswitch.launcher import daemon_core
+from buddyswitch.foundation.daemon import instance
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from buddyswitch.foundation.runtime_broker import lifecycle
 from tests.support.processes import ResourceLedger
@@ -149,7 +150,7 @@ def test_instance_daemon_stop_refuses_stale_pid_identity(
         ),
         encoding="utf-8",
     )
-    pid_path = daemon_core.daemon_pid_file(instance_root)
+    pid_path = instance.daemon_pid_file(instance_root)
     _write_stale_record(pid_path, unrelated.pid)
     real_kill = os.kill
     attempted_signals: list[int] = []
@@ -160,9 +161,9 @@ def test_instance_daemon_stop_refuses_stale_pid_identity(
             return
         attempted_signals.append(signum)
 
-    monkeypatch.setattr(daemon_core.os, "kill", guarded_kill)
+    monkeypatch.setattr(instance.os, "kill", guarded_kill)
     try:
-        result = daemon_core.stop_daemon(instance_json)
+        result = instance.stop_daemon(instance_json, host=AppActorDaemonHost())
         monkeypatch.undo()
 
         assert attempted_signals == []

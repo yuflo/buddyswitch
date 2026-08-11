@@ -15,8 +15,8 @@ from unittest import mock
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-DAEMON_STATE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_state.py"
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_STATE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "state.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
 EXPECTED_CURRENT_STATE_KEYS = frozenset(
     {
         "actor_id",
@@ -33,7 +33,7 @@ EXPECTED_CURRENT_STATE_KEYS = frozenset(
 def _load_state_module() -> Any:
     if not DAEMON_STATE_PATH.exists():
         raise AssertionError(f"expected module to exist: {DAEMON_STATE_PATH}")
-    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_state"))
+    return importlib.reload(importlib.import_module("buddyswitch.foundation.daemon.state"))
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -300,7 +300,7 @@ class DaemonStateTests(unittest.TestCase):
     def test_state_module_has_no_core_or_product_imports(self) -> None:
         self.assertTrue(DAEMON_STATE_PATH.exists(), DAEMON_STATE_PATH)
         imports = _imported_modules(DAEMON_STATE_PATH)
-        forbidden = ("daemon_core", "task_sys", "im_", "track_", "browser_", "web_management", "buddyswitch.env.repos")
+        forbidden = ("instance", "task_sys", "im_", "track_", "browser_", "web_management", "buddyswitch.env.repos")
         self.assertFalse([name for name in imports if any(token in name for token in forbidden)], imports)
 
     def test_core_does_not_define_or_reexport_state(self) -> None:

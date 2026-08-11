@@ -25,7 +25,7 @@ from tests.support.processes import ResourceLedger
 ROOT = REPO_ROOT
 
 from buddyswitch.foundation.browser_runtime import runtime as manager  # noqa: E402
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 
 
 def port_accepts(port: int) -> bool:

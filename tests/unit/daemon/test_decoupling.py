@@ -16,19 +16,20 @@ from typing import Any
 
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 
 ROOT = REPO_ROOT
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
-DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_contracts.py"
-DAEMON_STATE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_state.py"
-INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
-CENTRAL_DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
+DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "contracts.py"
+DAEMON_STATE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "state.py"
+INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance_process.py"
+CENTRAL_DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "central_service.py"
 IM_WAKE_HANDLER_PATH = ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py"
-DAEMON_MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
-DAEMON_RUNTIME_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_runtime.py"
+DAEMON_MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "mailbox.py"
+DAEMON_RUNTIME_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "runtime.py"
 BROWSER_RUNTIME_MANAGER_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "runtime.py"
 DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
-NOTIFICATION_CENTER_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py"
+NOTIFICATION_CENTER_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "inbound.py"
 MODULE_COUNTER = count()
 TASK_DOMAIN_IMPORTS = {"buddyswitch.env.domain.task_management", "buddyswitch.env.domain.task_tui"}
 TASK_DOMAIN_SYMBOLS = {"task_management", "task_tui"}
@@ -46,7 +47,9 @@ RUNTIME_ENV_KEYS = (
 def _load_module(path: Path, *, block_task_imports: bool = False) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
-    module = importlib.import_module(f"buddyswitch.launcher.{path.stem}")
+    module = importlib.import_module(
+        f"buddyswitch.foundation.daemon.{path.stem}"
+    )
     if not block_task_imports:
         return importlib.reload(module)
 
@@ -113,6 +116,9 @@ class FakeRunDaemonClient:
             return {"thread": {"id": thread_id}}
         raise AssertionError(f"unexpected request method: {method}")
 
+    def bind(self, context: object) -> None:
+        self.requests.append({"method": "bind", "context": context})
+
     def read_notification(self) -> dict[str, object]:
         if not self.notifications:
             raise StopDaemonLoop("stop")
@@ -126,6 +132,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
     def setUp(self) -> None:
         saved_runtime_env = {key: os.environ.get(key) for key in RUNTIME_ENV_KEYS}
         self.addCleanup(self._restore_runtime_env, saved_runtime_env)
+        self.host = AppActorDaemonHost()
 
     def _restore_runtime_env(self, values: dict[str, str | None]) -> None:
         for key, value in values.items():
@@ -159,7 +166,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
 
     def test_instance_daemon_is_generic_and_application_owns_task_goal_composition(self) -> None:
         instance_imports = _imported_modules(INSTANCE_DAEMON_PATH)
-        self.assertIn("buddyswitch.launcher.daemon_core", instance_imports)
+        self.assertIn("buddyswitch.foundation.daemon.instance", instance_imports)
         self.assertFalse(
             [
                 name
@@ -179,15 +186,15 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         core_tree = ast.parse(DAEMON_CORE_PATH.read_text(encoding="utf-8"), filename=str(DAEMON_CORE_PATH))
         core_classes = {node.name for node in ast.walk(core_tree) if isinstance(node, ast.ClassDef)}
         self.assertNotIn("DaemonState", core_classes)
-        self.assertIn("buddyswitch.launcher.daemon_state", _imported_modules(DAEMON_CORE_PATH))
-        self.assertNotIn("buddyswitch.launcher.daemon_core", _imported_modules(DAEMON_STATE_PATH))
+        self.assertIn("buddyswitch.foundation.daemon.state", _imported_modules(DAEMON_CORE_PATH))
+        self.assertNotIn("buddyswitch.foundation.daemon.instance", _imported_modules(DAEMON_STATE_PATH))
 
     def test_browser_runtime_manager_uses_only_public_daemon_state_api(self) -> None:
         source = BROWSER_RUNTIME_MANAGER_PATH.read_text(encoding="utf-8")
         imports = _imported_modules(BROWSER_RUNTIME_MANAGER_PATH)
 
-        self.assertIn("buddyswitch.launcher.daemon_state", imports)
-        self.assertNotIn("buddyswitch.launcher.daemon_core", imports)
+        self.assertIn("buddyswitch.foundation.daemon.state", imports)
+        self.assertNotIn("buddyswitch.foundation.daemon.instance", imports)
         for token in (
             "DaemonState",
             "daemon_state_file",
@@ -206,7 +213,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         self.assertFalse({"HandlerResult", "DaemonContext", "DaemonHandler"}.intersection(core_classes))
 
         contract_imports = _imported_modules(DAEMON_CONTRACTS_PATH)
-        self.assertNotIn("buddyswitch.launcher.daemon_core", contract_imports)
+        self.assertNotIn("buddyswitch.foundation.daemon.instance", contract_imports)
         self.assertFalse(
             {
                 "task_sys",
@@ -257,37 +264,31 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
             },
         }
 
-    def _patch_app_server_client(self, daemon_core: Any, fake_client: FakeRunDaemonClient) -> None:
-        original_client = daemon_core.app_server.AppServerClient
+    def _patch_app_server_client(self, fake_client: FakeRunDaemonClient) -> None:
+        self.host.notification_client = lambda _context: fake_client
 
-        def fake_factory(*_args: object, **_kwargs: object) -> FakeRunDaemonClient:
-            return fake_client
-
-        self.addCleanup(setattr, daemon_core.app_server, "AppServerClient", original_client)
-        daemon_core.app_server.AppServerClient = fake_factory
-
-    def _patch_daemon_communication(self, daemon_core: Any) -> None:
-        original_start_mailbox = daemon_core.start_daemon_mailbox
-        original_register = daemon_core.register_daemon_actor
-        original_heartbeat = daemon_core.heartbeat_daemon_actor
-        original_unregister = daemon_core.unregister_daemon_actor
+    def _patch_daemon_communication(self, instance: Any) -> None:
+        original_start_mailbox = instance.start_daemon_mailbox
+        original_register = instance.register_daemon_actor
+        original_heartbeat = instance.heartbeat_daemon_actor
+        original_unregister = instance.unregister_daemon_actor
 
         class FakeMailbox:
             def close(self) -> None:
                 return None
 
-        self.addCleanup(setattr, daemon_core, "start_daemon_mailbox", original_start_mailbox)
-        self.addCleanup(setattr, daemon_core, "register_daemon_actor", original_register)
-        self.addCleanup(setattr, daemon_core, "heartbeat_daemon_actor", original_heartbeat)
-        self.addCleanup(setattr, daemon_core, "unregister_daemon_actor", original_unregister)
-        daemon_core.start_daemon_mailbox = lambda **_kwargs: FakeMailbox()
-        daemon_core.register_daemon_actor = lambda _context, identity_route: {
+        self.addCleanup(setattr, instance, "start_daemon_mailbox", original_start_mailbox)
+        self.addCleanup(setattr, instance, "register_daemon_actor", original_register)
+        self.addCleanup(setattr, instance, "heartbeat_daemon_actor", original_heartbeat)
+        self.addCleanup(setattr, instance, "unregister_daemon_actor", original_unregister)
+        instance.start_daemon_mailbox = lambda **_kwargs: FakeMailbox()
+        instance.register_daemon_actor = lambda _context, identity_route: {
             "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
         }
-        daemon_core.heartbeat_daemon_actor = lambda _context, identity_route: {
+        instance.heartbeat_daemon_actor = lambda _context, identity_route: {
             "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
         }
-        daemon_core.unregister_daemon_actor = lambda _context, identity_route: {
+        instance.unregister_daemon_actor = lambda _context, identity_route: {
             "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
         }
 
@@ -301,11 +302,11 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
 
         self.assertFalse(
             TASK_DOMAIN_IMPORTS.intersection(daemon_core_imports),
-            "daemon_core.py must not import task domain modules",
+            "instance.py must not import task domain modules",
         )
         self.assertFalse(
             TASK_DOMAIN_IMPORTS.intersection(instance_daemon_imports),
-            "instance_daemon.py must not import task domain modules directly",
+            "instance_process.py must not import task domain modules directly",
         )
         for path in (DAEMON_CORE_PATH, INSTANCE_DAEMON_PATH):
             source = path.read_text(encoding="utf-8")
@@ -333,12 +334,14 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
 
     def test_daemon_core_registers_notify_subscriptions_in_mailbox_endpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
-            daemon_core = _load_module(DAEMON_CORE_PATH)
+            daemon_module = _load_module(DAEMON_CORE_PATH)
             instance = self._instance(temp_root)
-            context = daemon_core.load_daemon_context(instance["instance_json"])
-            identity_route = daemon_core.identity_route_for_context(context)
+            context = daemon_module.load_daemon_context(
+                instance["instance_json"], host=self.host
+            )
+            identity_route = daemon_module.identity_route_for_context(context)
             recorded: dict[str, object] = {}
-            original_register_actor = daemon_core.daemon_client.register_actor
+            original_register_actor = daemon_module.daemon_client.register_actor
 
             def fake_register_actor(
                 *,
@@ -355,10 +358,10 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                 recorded["socket_path"] = socket_path
                 return {"record": {"identity_id": identity_id, "role_id": role_id, "endpoint": endpoint}}
 
-            self.addCleanup(setattr, daemon_core.daemon_client, "register_actor", original_register_actor)
-            daemon_core.daemon_client.register_actor = fake_register_actor
+            self.addCleanup(setattr, daemon_module.daemon_client, "register_actor", original_register_actor)
+            daemon_module.daemon_client.register_actor = fake_register_actor
 
-            result = daemon_core.register_daemon_actor(
+            result = daemon_module.register_daemon_actor(
                 context,
                 identity_route,
                 notify_subscriptions=["example.ready", "example.ready", " "],
@@ -372,11 +375,12 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
 
     def test_daemon_status_reports_notify_subscriptions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
-            daemon_core = _load_module(DAEMON_CORE_PATH)
+            daemon_module = _load_module(DAEMON_CORE_PATH)
             instance = self._instance(temp_root)
 
-            status = daemon_core.daemon_status(
+            status = daemon_module.daemon_status(
                 instance["instance_json"],
+                host=self.host,
                 handlers=[],
                 notify_subscriptions=["example.ready", "example.ready"],
             )
@@ -387,7 +391,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
         imports = _imported_modules(CENTRAL_DAEMON_CORE_PATH)
         source = CENTRAL_DAEMON_CORE_PATH.read_text(encoding="utf-8")
         self.assertNotIn("app_server", imports)
-        self.assertNotIn("buddyswitch.launcher.daemon_core", imports)
+        self.assertNotIn("buddyswitch.foundation.daemon.instance", imports)
         self.assertNotIn("message" + "_available" + "_handler", imports)
         self.assertNotIn("thread_read", source)
         self.assertNotIn("active_turn_id", source)
@@ -423,7 +427,7 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
 
     def test_daemon_core_can_dispatch_to_noop_handler(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
-            daemon_core = _load_module(DAEMON_CORE_PATH)
+            daemon_module = _load_module(DAEMON_CORE_PATH)
             instance = self._instance(temp_root)
             notification = self._completed()
             fake_client = FakeRunDaemonClient(
@@ -432,8 +436,8 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                     StopDaemonLoop("stop"),
                 ]
             )
-            self._patch_app_server_client(daemon_core, fake_client)
-            self._patch_daemon_communication(daemon_core)
+            self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication(daemon_module)
             handled: list[object] = []
 
             class NoopHandler:
@@ -451,20 +455,22 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                 ) -> object:
                     del context, state, runtime
                     handled.append(trigger)
-                    from buddyswitch.launcher import daemon_contracts
+                    from buddyswitch.foundation.daemon import contracts
 
-                    return daemon_contracts.HandlerResult.ignored()
+                    return contracts.HandlerResult.ignored()
 
             with self.assertRaises(StopDaemonLoop):
-                daemon_core.run_daemon(instance["instance_json"], handlers=[NoopHandler()])
+                daemon_module.run_daemon(
+                    instance["instance_json"], host=self.host, handlers=[NoopHandler()]
+                )
 
             self.assertEqual([trigger.type for trigger in handled], ["app_server.turn_completed"])
             self.assertEqual([trigger.origin_id for trigger in handled], ["turn-user-1"])
-            self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume"])
+            self.assertEqual([request["method"] for request in fake_client.requests], ["bind"])
 
     def test_no_task_handler_means_no_checkout_turn_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
-            daemon_core = _load_module(DAEMON_CORE_PATH)
+            daemon_module = _load_module(DAEMON_CORE_PATH)
             instance = self._instance(temp_root)
             fake_client = FakeRunDaemonClient(
                 notifications=[
@@ -472,10 +478,12 @@ class DaemonCoreDecouplingTests(unittest.TestCase):
                     StopDaemonLoop("stop"),
                 ]
             )
-            self._patch_app_server_client(daemon_core, fake_client)
-            self._patch_daemon_communication(daemon_core)
+            self._patch_app_server_client(fake_client)
+            self._patch_daemon_communication(daemon_module)
 
             with self.assertRaises(StopDaemonLoop):
-                daemon_core.run_daemon(instance["instance_json"], handlers=[])
+                daemon_module.run_daemon(
+                    instance["instance_json"], host=self.host, handlers=[]
+                )
 
-            self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume"])
+            self.assertEqual([request["method"] for request in fake_client.requests], ["bind"])

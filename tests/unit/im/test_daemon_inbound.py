@@ -15,7 +15,7 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-NC_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py"
+NC_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "inbound.py"
 MESSAGE_INBOUND_PATH = (
     ROOT
     / "src/buddyswitch/modules/communication/private/adapters/daemon/message_inbound.py"
@@ -31,7 +31,7 @@ TRACK_COMMENT_INBOUND_PATH = (
     / "daemon"
     / "track_comment_inbound.py"
 )
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
 MODULE_COUNTER = count()
 
 
@@ -190,7 +190,7 @@ class NotificationCenterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "handler"):
             nc.handlers_from_registrations([registration])
 
-    def test_notification_center_has_no_source_specific_message_semantics(self) -> None:
+    def test_daemon_inbound_has_no_source_specific_message_semantics(self) -> None:
         source = NC_PATH.read_text(encoding="utf-8")
         forbidden_tokens = [
             "MessageAvailableHandler",
@@ -231,7 +231,7 @@ class NotificationCenterTests(unittest.TestCase):
     def test_message_inbound_registers_im_message_created_as_source_owned_handler(self) -> None:
         nc = load_module(NC_PATH)
         message_inbound = load_module(MESSAGE_INBOUND_PATH)
-        daemon_core = load_module(DAEMON_CORE_PATH)
+        instance = load_module(DAEMON_CORE_PATH)
 
         registrations = message_inbound.inbound_registrations(
             lambda *_args, **_kwargs: None
@@ -252,7 +252,7 @@ class NotificationCenterTests(unittest.TestCase):
         self.assertEqual(getattr(handler, "name", None), "im_message_created")
 
         handlers = nc.handlers_from_registrations(registrations)
-        trigger = daemon_core.daemon_triggers.DaemonTrigger(
+        trigger = instance.triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal",
             type="im.message.created",
             target_identity_id="act-dev-nc",
@@ -269,7 +269,7 @@ class NotificationCenterTests(unittest.TestCase):
     def test_track_comment_inbound_registers_track_comment_added_as_source_owned_handler(self) -> None:
         nc = load_module(NC_PATH)
         track_comment_inbound = load_module(TRACK_COMMENT_INBOUND_PATH)
-        daemon_core = load_module(DAEMON_CORE_PATH)
+        instance = load_module(DAEMON_CORE_PATH)
 
         registrations = track_comment_inbound.inbound_registrations()
 
@@ -291,7 +291,7 @@ class NotificationCenterTests(unittest.TestCase):
         self.assertEqual(getattr(handler, "name", None), "track_comment_added")
 
         handlers = nc.handlers_from_registrations(registrations)
-        trigger = daemon_core.daemon_triggers.DaemonTrigger(
+        trigger = instance.triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal",
             type="track.comment.added",
             target_identity_id="act-dev-track-nc",

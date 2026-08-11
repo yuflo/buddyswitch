@@ -13,8 +13,8 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_contracts.py"
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "contracts.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
 HANDLER_PATHS = (
     ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py",
@@ -26,7 +26,7 @@ HANDLER_PATHS = (
 def _load_contracts() -> Any:
     if not DAEMON_CONTRACTS_PATH.exists():
         raise AssertionError(f"expected module to exist: {DAEMON_CONTRACTS_PATH}")
-    return importlib.import_module("buddyswitch.launcher.daemon_contracts")
+    return importlib.import_module("buddyswitch.foundation.daemon.contracts")
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -110,7 +110,7 @@ class DaemonContractsTests(unittest.TestCase):
         self.assertTrue(DAEMON_CONTRACTS_PATH.exists(), DAEMON_CONTRACTS_PATH)
         imports = _imported_modules(DAEMON_CONTRACTS_PATH)
         forbidden_tokens = (
-            "buddyswitch.launcher.daemon_core",
+            "buddyswitch.foundation.daemon.instance",
             "task_sys",
             "im_",
             "track_",
@@ -145,5 +145,5 @@ class DaemonContractsTests(unittest.TestCase):
         for path in HANDLER_PATHS:
             imports = _imported_modules(path)
             with self.subTest(path=path.name):
-                self.assertIn("buddyswitch.launcher.daemon_contracts", imports)
-                self.assertNotIn("buddyswitch.launcher.daemon_core", imports)
+                self.assertIn("buddyswitch.foundation.daemon.contracts", imports)
+                self.assertNotIn("buddyswitch.foundation.daemon.instance", imports)

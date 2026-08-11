@@ -28,11 +28,11 @@ ARCH_ROOT = Path("docs/arch")
 SKILLS_ROOT = Path("src/buddyswitch/skills")
 ROLE_ROOT = Path("src/buddyswitch/launcher/assets/roles")
 GENERIC_DAEMON_PATHS = (
-    Path("src/buddyswitch/launcher/daemon_contracts.py"),
-    Path("src/buddyswitch/launcher/daemon_state.py"),
-    Path("src/buddyswitch/launcher/daemon_runtime.py"),
-    Path("src/buddyswitch/launcher/daemon_core.py"),
-    Path("src/buddyswitch/launcher/daemon_mailbox.py"),
+    Path("src/buddyswitch/foundation/daemon/contracts.py"),
+    Path("src/buddyswitch/foundation/daemon/state.py"),
+    Path("src/buddyswitch/foundation/daemon/runtime.py"),
+    Path("src/buddyswitch/foundation/daemon/instance.py"),
+    Path("src/buddyswitch/foundation/daemon/mailbox.py"),
     Path("src/buddyswitch/foundation/daemon/client.py"),
 )
 DEMAND_ROOT = Path("src/buddyswitch/modules/demand")
@@ -50,7 +50,7 @@ MODULE_ASSEMBLY = Path("src/buddyswitch/foundation/composition/__init__.py")
 DEMAND_PUBLIC = Path("src/buddyswitch/modules/demand/public/operations.py")
 COMPOSED_HOST_IMPLEMENTATIONS = (
     Path("src/buddyswitch/launcher/cli.py"),
-    Path("src/buddyswitch/launcher/instance_daemon.py"),
+    Path("src/buddyswitch/foundation/daemon/instance_process.py"),
     Path("src/buddyswitch/foundation/tool_runtime/mcp_server.py"),
     Path("src/buddyswitch/foundation/runtime_broker/broker.py"),
     Path("src/buddyswitch/launcher/actor_environment.py"),
@@ -217,7 +217,7 @@ def test_hosts_receive_typed_contributions_and_consumers_use_demand_public() -> 
         Path("src/buddyswitch/foundation/tool_runtime/native_mcp.py"),
         Path("src/buddyswitch/foundation/tool_runtime/registry.py"),
         Path("src/buddyswitch/foundation/runtime_broker/dispatcher.py"),
-        Path("src/buddyswitch/launcher/instance_daemon.py"),
+        Path("src/buddyswitch/foundation/daemon/instance_process.py"),
         Path("src/buddyswitch/launcher/cli.py"),
         Path("src/buddyswitch/foundation/tool_runtime/mcp_server.py"),
         Path("src/buddyswitch/launcher/codex_config.py"),
@@ -448,7 +448,7 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
     triage_imports = _imports(FINAL_DAEMON_ROOT / "demand_triage_handler.py")
     assert "buddyswitch.modules.demand.private.domain.demand_sys" in triage_imports
     assert "buddyswitch.env.domain.task_sys" not in triage_imports
-    assert "buddyswitch.launcher.daemon_contracts" in triage_imports
+    assert "buddyswitch.foundation.daemon.contracts" in triage_imports
 
     orchestration_imports = _imports(FINAL_DAEMON_ROOT / "demand_orchestration_handler.py")
     assert "buddyswitch.modules.demand.private.domain.demand_sys" in orchestration_imports
@@ -457,11 +457,15 @@ def test_demand_attention_is_registered_product_code_and_generic_daemon_stays_ne
         name.startswith("buddyswitch.modules.task.private")
         for name in orchestration_imports
     )
-    assert "buddyswitch.launcher.daemon_contracts" in orchestration_imports
-    instance_daemon_source = (REPO_ROOT / "src/buddyswitch/launcher/instance_daemon.py").read_text(encoding="utf-8")
+    assert "buddyswitch.foundation.daemon.contracts" in orchestration_imports
+    instance_daemon_source = (REPO_ROOT / "src/buddyswitch/foundation/daemon/instance_process.py").read_text(encoding="utf-8")
     assert "DemandTriageHandler" not in instance_daemon_source
     assert "DemandOrchestrationHandler" not in instance_daemon_source
-    assert "DaemonHandlerRegistration" in instance_daemon_source
+    assert "DaemonHandlerRegistration" not in instance_daemon_source
+    application_daemon_source = (
+        REPO_ROOT / "src/buddyswitch/application/daemon.py"
+    ).read_text(encoding="utf-8")
+    assert "DaemonHandlerRegistration" in application_daemon_source
 
     track_handler = Path(
         "src/buddyswitch/modules/track/private/adapters/daemon/"

@@ -19,7 +19,7 @@ from buddyswitch.foundation.tool_runtime import context as runtime_context  # no
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_actor_delivery  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
-from buddyswitch.launcher import central_daemon_core  # noqa: E402
+from buddyswitch.foundation.daemon import central_service  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 
@@ -47,8 +47,8 @@ class _NoActorsCapabilities:
 
 class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestCase):
     def test_daemon_registry_uses_identity_ids(self) -> None:
-        paths = central_daemon_core.central_daemon_paths(self.runtime_root)
-        service = central_daemon_core.CentralDaemonService(paths=paths, now=lambda: "2026-07-04T00:00:00Z")
+        paths = central_service.central_daemon_paths(self.runtime_root)
+        service = central_service.CentralDaemonService(paths=paths, now=lambda: "2026-07-04T00:00:00Z")
 
         registered = service.handle(
             "daemon.register",

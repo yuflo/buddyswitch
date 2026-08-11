@@ -7,7 +7,7 @@ import sys
 from typing import Any, Mapping
 
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
 import buddyswitch.modules.task.public as task_public  # noqa: E402
@@ -86,7 +86,7 @@ class DemandOrchestrationHandler:
         context: Any,
         state: Any,
         runtime: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         actor_target = _actor_target(context)
         pool = demand_sys.pool_snapshot(actor_target)
         task_attention = task_public.demand_attention(actor_target)
@@ -129,9 +129,9 @@ class DemandOrchestrationHandler:
                 },
             )
             return (
-                daemon_contracts.HandlerResult.handled()
+                contracts.HandlerResult.handled()
                 if changed
-                else daemon_contracts.HandlerResult.ignored()
+                else contracts.HandlerResult.ignored()
             )
 
         if pool["live_demand_count"] == 0:
@@ -148,9 +148,9 @@ class DemandOrchestrationHandler:
                 },
             )
             return (
-                daemon_contracts.HandlerResult.handled()
+                contracts.HandlerResult.handled()
                 if changed
-                else daemon_contracts.HandlerResult.ignored()
+                else contracts.HandlerResult.ignored()
             )
 
         activity = runtime.parent_activity()
@@ -168,9 +168,9 @@ class DemandOrchestrationHandler:
                 },
             )
             return (
-                daemon_contracts.HandlerResult.handled()
+                contracts.HandlerResult.handled()
                 if changed
-                else daemon_contracts.HandlerResult.ignored()
+                else contracts.HandlerResult.ignored()
             )
 
         submitted = runtime.input_actor(
@@ -199,7 +199,7 @@ class DemandOrchestrationHandler:
                 "observed_demand_pool_revision": pool["demand_pool_revision"],
             },
         )
-        return daemon_contracts.HandlerResult.handled()
+        return contracts.HandlerResult.handled()
 
     def handle(
         self,
@@ -207,10 +207,10 @@ class DemandOrchestrationHandler:
         state: Any,
         runtime: Any,
         trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         if not self.handles(trigger):
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         try:
             return self.reconcile(context, state, runtime)
         except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
+            return contracts.HandlerResult.failed(str(exc))

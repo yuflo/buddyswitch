@@ -10,14 +10,14 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 DAEMON_OWNED_FILES = [
-    ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance_process.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "inbound.py",
     ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/message_inbound.py",
     ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_inbound.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon_core.py",
-    ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "central_process.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "central_service.py",
+    ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "mailbox.py",
     ROOT / "src/buddyswitch/modules/communication/private/adapters/daemon/im_wake_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py",
     ROOT / "src" / "buddyswitch" / "modules" / "demand" / "private" / "adapters" / "daemon" / "demand_triage_handler.py",
@@ -26,7 +26,7 @@ DAEMON_OWNED_FILES = [
     ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py",
     ROOT / "src" / "buddyswitch" / "foundation" / "tool_runtime" / "context.py",
 ]
-DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_contracts.py"
+DAEMON_CONTRACTS_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "contracts.py"
 CONTEXT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "tool_runtime" / "context.py"
 DAEMON_CLIENT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
 IM_ACTOR_DELIVERY_PATH = ROOT / "src/buddyswitch/modules/communication/private/adapters/actor/im_actor_delivery.py"
@@ -116,8 +116,8 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         for path in PRODUCT_HANDLER_PATHS:
             imports = _imported_modules(path)
             with self.subTest(path=path.name):
-                self.assertIn("buddyswitch.launcher.daemon_contracts", imports)
-                self.assertNotIn("buddyswitch.launcher.daemon_core", imports)
+                self.assertIn("buddyswitch.foundation.daemon.contracts", imports)
+                self.assertNotIn("buddyswitch.foundation.daemon.instance", imports)
 
     def test_daemon_uses_central_client_not_daemon_presence_helper(self) -> None:
         imports_by_file = {path: _imported_modules(path) for path in _existing_sources()}
@@ -131,7 +131,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         delivery_files = [
             path
             for path in _existing_sources()
-            if path.name not in {"central_daemon.py"}
+            if path.name not in {"central_process.py"}
         ]
         source = "\n".join(path.read_text(encoding="utf-8") for path in delivery_files)
 
@@ -172,7 +172,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         ]
         chunks = []
         for path in base_files:
-            if path.name == "daemon_mailbox.py":
+            if path.name == "mailbox.py":
                 chunks.append(_source_without_functions(path, {"_validate_local_trigger_request"}))
             else:
                 chunks.append(path.read_text(encoding="utf-8"))
@@ -215,7 +215,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         )
         handler_source = handler_path.read_text(encoding="utf-8")
         handler_imports = _imported_modules(handler_path)
-        nc_source = (ROOT / "src" / "buddyswitch" / "launcher" / "notification_center.py").read_text(encoding="utf-8")
+        nc_source = (ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "inbound.py").read_text(encoding="utf-8")
 
         self.assertIn("track.comment.added", handler_source)
         self.assertIn("track_id", handler_source)
@@ -232,7 +232,7 @@ class DaemonCommunicationBoundaryTests(unittest.TestCase):
         )
 
     def test_mailbox_exposes_local_trigger_not_business_specific_parent_required_method(self) -> None:
-        mailbox_source = (ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py").read_text(encoding="utf-8")
+        mailbox_source = (ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "mailbox.py").read_text(encoding="utf-8")
 
         self.assertIn("mailbox.local_trigger", mailbox_source)
         self.assertNotIn("mailbox.parent_required", mailbox_source)

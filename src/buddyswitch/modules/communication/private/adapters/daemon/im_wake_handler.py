@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.communication.private.domain import (
     messages as message_service,
@@ -64,7 +64,7 @@ class ImMessageCreatedHandler:
         trigger: Any,
     ) -> Any:
         if not self.handles(trigger):
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         try:
             local_route = _context_identity_route(context)
             target_route = {
@@ -127,6 +127,6 @@ class ImMessageCreatedHandler:
                     },
                 }],
             )
-            return daemon_contracts.HandlerResult.handled()
+            return contracts.HandlerResult.handled()
         except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
+            return contracts.HandlerResult.failed(str(exc))

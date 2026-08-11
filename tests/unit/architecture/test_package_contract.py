@@ -254,7 +254,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
         ),
         REPO_ROOT / "docs" / "arch" / "daemon-service-architecture.md": (
-            "src/buddyswitch/launcher/instance_daemon.py",
+            "src/buddyswitch/application/daemon.py",
+            "src/buddyswitch/application/daemon_host.py",
             "src/buddyswitch/foundation/browser_runtime/inbound.py",
             "src/buddyswitch/foundation/process_runtime/json_framing.py",
         ),
@@ -263,7 +264,7 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/application/entrypoints/browser_runtime.py",
             "src/buddyswitch/application/entrypoints/browser_cockpit_proxy.py",
             "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
-            "src/buddyswitch/launcher/instance_daemon.py",
+            "src/buddyswitch/application/daemon.py",
         ),
         REPO_ROOT / "docs" / "arch" / "demand-sys-architecture.md": (
             "src/buddyswitch/modules/demand/private/domain/demand_sys.py",

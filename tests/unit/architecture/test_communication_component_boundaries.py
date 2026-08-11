@@ -175,7 +175,7 @@ def test_dependency_direction_uses_public_edges_and_generic_hosts() -> None:
 
     for relative in (
         Path("src/buddyswitch/launcher/web_management.py"),
-        Path("src/buddyswitch/launcher/instance_daemon.py"),
+        Path("src/buddyswitch/foundation/daemon/instance_process.py"),
     ):
         source = (REPO_ROOT / relative).read_text(encoding="utf-8")
         imports = _imports(REPO_ROOT / relative)

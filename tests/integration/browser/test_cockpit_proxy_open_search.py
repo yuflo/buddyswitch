@@ -57,7 +57,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
@@ -97,7 +97,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("search_page", {"query": "BuddySwitch open current projection", "engine": "google"})],
@@ -207,7 +207,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/new"})],
@@ -257,7 +257,7 @@ class TestCockpitProxyOpenSearch(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("new_page", {"url": "https://example.com/failed-open", "forceError": True})],

@@ -31,7 +31,7 @@ ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 BROWSER_RUNTIME = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime"
 
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.foundation.runtime_broker import protocol  # noqa: E402
@@ -40,12 +40,12 @@ import buddyswitch.foundation.process_runtime.json_framing as json_framing  # no
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROXY = BROWSER_RUNTIME / "cockpit_proxy.py"
-DAEMON_CORE = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
-DAEMON_MAILBOX = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
+DAEMON_CORE = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
+DAEMON_MAILBOX = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "mailbox.py"
 PAGE_EXPIRED_HANDLER = BROWSER_RUNTIME / "page_handlers.py"
 RELEASE_HANDLER = BROWSER_RUNTIME / "release_handler.py"
 BROWSER_RUNTIME_MANAGER = BROWSER_RUNTIME / "runtime.py"
-TRIGGERS = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_triggers.py"
+TRIGGERS = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "triggers.py"
 MODULE_COUNTER = count()
 
 
@@ -939,16 +939,16 @@ with calls_path.open("a", encoding="utf-8") as handle:
         return context
 
     def _start_mailbox(self, *, instance_root: Path, actor_id: str, role: str) -> tuple[Any, Any, threading.Thread]:
-        daemon_core = load_module(DAEMON_CORE)
-        daemon_mailbox = load_module(DAEMON_MAILBOX)
+        instance = load_module(DAEMON_CORE)
+        mailbox = load_module(DAEMON_MAILBOX)
         instance_root.mkdir(parents=True, exist_ok=True)
         state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id=actor_id,
             main_thread_id="thr-main",
         )
-        server = daemon_mailbox.DaemonMailboxServer(
-            socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
+        server = mailbox.DaemonMailboxServer(
+            socket_path=mailbox.mailbox_socket_path(instance_root),
             local_identity_id=actor_id,
             local_role_id=role,
             handlers=[],
@@ -958,7 +958,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(server.close)
-        return daemon_core, server, thread
+        return instance, server, thread
 
     def _manager_release(self, *, instance_root: Path, actor_id: str) -> dict[str, object]:
         manager = load_module(BROWSER_RUNTIME_MANAGER)
@@ -1245,7 +1245,7 @@ with calls_path.open("a", encoding="utf-8") as handle:
                 )
                 self.addCleanup(broker_stop)
                 proxy = self._start_proxy(instance_root=instance_root, upstream=fake_upstream, env=base_env)
-                daemon_core, mailbox_server, mailbox_thread = self._start_mailbox(
+                instance, mailbox_server, mailbox_thread = self._start_mailbox(
                     instance_root=instance_root,
                     actor_id=actor_id,
                     role=role,

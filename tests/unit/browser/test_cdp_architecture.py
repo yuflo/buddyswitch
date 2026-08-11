@@ -16,7 +16,7 @@ HOST_PATHS = (
     PACKAGE_ROOT / "application" / "entrypoints" / "browser_runtime.py",
     PACKAGE_ROOT / "application" / "entrypoints" / "browser_cockpit_proxy.py",
     PACKAGE_ROOT / "foundation" / "runtime_broker" / "dispatcher.py",
-    PACKAGE_ROOT / "launcher" / "instance_daemon.py",
+    PACKAGE_ROOT / "application" / "daemon.py",
 )
 RETIRED_PATHS = (
     PACKAGE_ROOT / "env" / "browser_ttl_config.py",

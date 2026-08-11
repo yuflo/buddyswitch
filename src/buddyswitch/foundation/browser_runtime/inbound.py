@@ -9,7 +9,7 @@ import sys
 
 from buddyswitch.foundation.browser_runtime import page_handlers  # noqa: E402
 from buddyswitch.foundation.browser_runtime import release_handler  # noqa: E402
-from buddyswitch.launcher import notification_center  # noqa: E402
+from buddyswitch.foundation.daemon import inbound  # noqa: E402
 
 
 BROWSER_PAGE_EXPIRED_EVENT_TYPE = "browser.page.expired"
@@ -27,8 +27,8 @@ BROWSER_FAILED_OPEN_PAGE_CLEANUP_PAYLOAD_CONTRACT = {
 OWNER_MODULE = "browser_inbound"
 
 
-def browser_page_expired_registration() -> notification_center.InboundSourceRegistration:
-    return notification_center.InboundSourceRegistration(
+def browser_page_expired_registration() -> inbound.InboundSourceRegistration:
+    return inbound.InboundSourceRegistration(
         event_type=BROWSER_PAGE_EXPIRED_EVENT_TYPE,
         payload_contract=BROWSER_PAGE_EXPIRED_PAYLOAD_CONTRACT,
         handler_factory=page_handlers.BrowserPageExpiredHandler,
@@ -36,8 +36,8 @@ def browser_page_expired_registration() -> notification_center.InboundSourceRegi
     )
 
 
-def browser_cockpit_release_registration() -> notification_center.InboundSourceRegistration:
-    return notification_center.InboundSourceRegistration(
+def browser_cockpit_release_registration() -> inbound.InboundSourceRegistration:
+    return inbound.InboundSourceRegistration(
         event_type=BROWSER_COCKPIT_RELEASE_EVENT_TYPE,
         payload_contract=BROWSER_COCKPIT_RELEASE_PAYLOAD_CONTRACT,
         handler_factory=release_handler.BrowserReleaseHandler,
@@ -45,8 +45,8 @@ def browser_cockpit_release_registration() -> notification_center.InboundSourceR
     )
 
 
-def browser_failed_open_page_cleanup_registration() -> notification_center.InboundSourceRegistration:
-    return notification_center.InboundSourceRegistration(
+def browser_failed_open_page_cleanup_registration() -> inbound.InboundSourceRegistration:
+    return inbound.InboundSourceRegistration(
         event_type=BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE,
         payload_contract=BROWSER_FAILED_OPEN_PAGE_CLEANUP_PAYLOAD_CONTRACT,
         handler_factory=page_handlers.BrowserFailedOpenPageCleanupHandler,
@@ -54,7 +54,7 @@ def browser_failed_open_page_cleanup_registration() -> notification_center.Inbou
     )
 
 
-def inbound_registrations() -> list[notification_center.InboundSourceRegistration]:
+def inbound_registrations() -> list[inbound.InboundSourceRegistration]:
     return [
         browser_page_expired_registration(),
         browser_cockpit_release_registration(),

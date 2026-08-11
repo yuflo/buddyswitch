@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import importlib
 import json
 import sys
 import tempfile
@@ -14,20 +13,21 @@ from typing import Any
 
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import daemon_runtime  # noqa: E402
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
+from buddyswitch.foundation.daemon import runtime  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
 MODULE_COUNTER = count()
 
 
 def load_daemon_core() -> Any:
-    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_core"))
+    return importlib.reload(importlib.import_module("buddyswitch.foundation.daemon.instance"))
 
 
 class FakeRuntimeClient:
@@ -104,9 +104,9 @@ class DaemonServiceContractTests(unittest.TestCase):
         }
 
     def test_handler_result_has_explicit_statuses(self) -> None:
-        ignored = daemon_contracts.HandlerResult.ignored()
-        handled = daemon_contracts.HandlerResult.handled()
-        failed = daemon_contracts.HandlerResult.failed("boom")
+        ignored = contracts.HandlerResult.ignored()
+        handled = contracts.HandlerResult.handled()
+        failed = contracts.HandlerResult.failed("boom")
 
         self.assertEqual(ignored.status, "ignored")
         self.assertIsNone(ignored.message)
@@ -147,7 +147,7 @@ class DaemonServiceContractTests(unittest.TestCase):
             state.mark_schedule_failed(failed["schedule_id"], message="close failed", now="2026-06-24T00:00:02Z")
             state.cancel_schedule(canceled["schedule_id"], now="2026-06-24T00:00:03Z")
 
-            status = self.core.daemon_status(instance["instance_json"])
+            status = self.core.daemon_status(instance["instance_json"], host=AppActorDaemonHost())
 
             self.assertEqual(status["schedules"]["ids"], ["schedule-1", "schedule-2", "schedule-3", "schedule-4"])
             self.assertEqual(
@@ -242,7 +242,7 @@ class DaemonServiceContractTests(unittest.TestCase):
     def test_daemon_status_excludes_task_sys_product_projection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            status = self.core.daemon_status(instance["instance_json"])
+            status = self.core.daemon_status(instance["instance_json"], host=AppActorDaemonHost())
 
             self.assertNotIn("task_sys", status)
 
@@ -255,9 +255,9 @@ class DaemonServiceContractTests(unittest.TestCase):
                 name = "im_message_created"
 
             state.register_handlers(["im_message_created"])
-            state.record_handler_result("im_message_created", daemon_contracts.HandlerResult.handled(), origin_turn_id="msg-1")
+            state.record_handler_result("im_message_created", contracts.HandlerResult.handled(), origin_turn_id="msg-1")
 
-            status = self.core.daemon_status(instance["instance_json"], handlers=[MessageHandler()])
+            status = self.core.daemon_status(instance["instance_json"], host=AppActorDaemonHost(), handlers=[MessageHandler()])
 
             item = status["handlers"]["items"]["im_message_created"]
             self.assertEqual(item["last_result"], "handled")
@@ -266,16 +266,16 @@ class DaemonServiceContractTests(unittest.TestCase):
             self.assertNotIn("phone_delivery", item)
 
     def test_daemon_runtime_replaces_action_gateway_without_alias(self) -> None:
-        self.assertTrue(hasattr(daemon_runtime, "DaemonRuntime"))
+        self.assertTrue(hasattr(runtime, "DaemonRuntime"))
         self.assertFalse(hasattr(self.core, "DaemonRuntime"))
-        self.assertTrue(hasattr(daemon_contracts, "DaemonHandler"))
+        self.assertTrue(hasattr(contracts, "DaemonHandler"))
         self.assertFalse(hasattr(self.core, "DaemonHandler"))
         self.assertFalse(hasattr(self.core, "Action" + "Gateway"))
 
     def test_dispatch_passes_context_state_runtime_and_trigger(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
             state = self._state(instance["instance_root"])
             client = FakeRuntimeClient()
             notification = self._completed()
@@ -303,16 +303,16 @@ class DaemonServiceContractTests(unittest.TestCase):
                         "runtime": runtime_arg,
                         "trigger": trigger_arg,
                     }
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
             handler = RecordingHandler()
 
-            handled = self.core.dispatch_notification(context, state, client, notification, [handler])
+            handled = self.core.dispatch_notification(context, state, client, notification, [handler], host=AppActorDaemonHost())
 
             self.assertTrue(handled)
             self.assertIs(handler.received["context"], context)
             self.assertIs(handler.received["state"], state)
-            self.assertIsInstance(handler.received["runtime"], daemon_runtime.DaemonRuntime)
+            self.assertIsInstance(handler.received["runtime"], runtime.DaemonRuntime)
             trigger = handler.received["trigger"]
             self.assertEqual(getattr(trigger, "type"), "app_server.turn_completed")
             self.assertEqual(getattr(trigger, "origin_id"), "turn-user-1")
@@ -320,7 +320,7 @@ class DaemonServiceContractTests(unittest.TestCase):
     def test_dispatch_records_declared_failure_under_handler_state_and_continues(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
             state = self._state(instance["instance_root"])
             client = FakeRuntimeClient()
             notification = self._completed()
@@ -335,7 +335,7 @@ class DaemonServiceContractTests(unittest.TestCase):
 
                 def handle(self, *_args: object) -> object:
                     calls.append(self.name)
-                    return daemon_contracts.HandlerResult.failed("declared failure")
+                    return contracts.HandlerResult.failed("declared failure")
 
             class LaterHandler:
                 name = "second"
@@ -345,9 +345,9 @@ class DaemonServiceContractTests(unittest.TestCase):
 
                 def handle(self, *_args: object) -> object:
                     calls.append(self.name)
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
-            handled = self.core.dispatch_notification(context, state, client, notification, [FailingHandler(), LaterHandler()])
+            handled = self.core.dispatch_notification(context, state, client, notification, [FailingHandler(), LaterHandler()], host=AppActorDaemonHost())
 
             self.assertTrue(handled)
             self.assertEqual(calls, ["first", "second"])
@@ -362,7 +362,7 @@ class DaemonServiceContractTests(unittest.TestCase):
     def test_dispatch_records_exception_under_handler_state_and_continues(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
             state = self._state(instance["instance_root"])
             client = FakeRuntimeClient()
             notification = self._completed()
@@ -387,9 +387,9 @@ class DaemonServiceContractTests(unittest.TestCase):
 
                 def handle(self, *_args: object) -> object:
                     calls.append(self.name)
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
-            handled = self.core.dispatch_notification(context, state, client, notification, [ExplodingHandler(), LaterHandler()])
+            handled = self.core.dispatch_notification(context, state, client, notification, [ExplodingHandler(), LaterHandler()], host=AppActorDaemonHost())
 
             self.assertTrue(handled)
             self.assertEqual(calls, ["exploder", "second"])
@@ -402,7 +402,7 @@ class DaemonServiceContractTests(unittest.TestCase):
     def test_dispatch_writes_handler_result_breadcrumb_without_message_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
             state = self._state(instance["instance_root"])
             client = FakeRuntimeClient()
             notification = self._completed()
@@ -416,11 +416,11 @@ class DaemonServiceContractTests(unittest.TestCase):
                     return getattr(trigger, "type", None) == "app_server.turn_completed"
 
                 def handle(self, *_args: object) -> object:
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
             self_core = self.core
 
-            handled = self.core.dispatch_notification(context, state, client, notification, [RecordingHandler()])
+            handled = self.core.dispatch_notification(context, state, client, notification, [RecordingHandler()], host=AppActorDaemonHost())
 
             self.assertTrue(handled)
             log_path = self.core.daemon_log_file(instance["instance_root"])
@@ -440,21 +440,15 @@ class DaemonServiceContractTests(unittest.TestCase):
     def test_daemon_runtime_input_actor_delegates_exact_context_to_actor_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
             calls: list[dict[str, Any]] = []
-            original = daemon_runtime.actor_session.input_actor_turn
-            self.addCleanup(
-                setattr,
-                daemon_runtime.actor_session,
-                "input_actor_turn",
-                original,
-            )
-            daemon_runtime.actor_session.input_actor_turn = lambda **kwargs: (
-                calls.append(dict(kwargs))
+            host = AppActorDaemonHost()
+            host.input_actor = lambda daemon_context, text: (
+                calls.append({"context": daemon_context, "text": text})
                 or {"action": "steer", "turn_id": "turn-demand-check"}
             )
 
-            result = daemon_runtime.DaemonRuntime(context=context).input_actor(
+            result = runtime.DaemonRuntime(context=context, host=host).input_actor(
                 "Demand check"
             )
 
@@ -464,19 +458,13 @@ class DaemonServiceContractTests(unittest.TestCase):
             )
             self.assertEqual(
                 calls,
-                [{
-                    "socket_path": context.socket_path,
-                    "instance_json": context.instance_json,
-                    "thread_id": context.main_thread_id,
-                    "text": "Demand check",
-                    "permissions": context.permissions,
-                }],
+                [{"context": context, "text": "Demand check"}],
             )
 
     def test_daemon_runtime_handler_facing_surface_is_exactly_clean_runtime_methods(self) -> None:
         public_methods = {
             name
-            for name, value in vars(daemon_runtime.DaemonRuntime).items()
+            for name, value in vars(runtime.DaemonRuntime).items()
             if callable(value) and not name.startswith("_")
         }
         self.assertEqual(
@@ -495,4 +483,4 @@ class DaemonServiceContractTests(unittest.TestCase):
             "close_" + "side_triage",
             "submit_" + "side_triage_prompt",
         ):
-            self.assertFalse(hasattr(daemon_runtime.DaemonRuntime, old_name), old_name)
+            self.assertFalse(hasattr(runtime.DaemonRuntime, old_name), old_name)

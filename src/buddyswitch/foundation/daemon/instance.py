@@ -1,4 +1,4 @@
-"""BuddySwitch daemon core."""
+"""Actor instance daemon state, dispatch, recovery, and lifecycle."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from types import MappingProxyType
 from datetime import datetime, timedelta, timezone
@@ -16,13 +15,12 @@ from typing import Any, Mapping
 
 HELPER_DIR = Path(__file__).resolve().parent
 
-from buddyswitch.launcher import app_server  # noqa: E402
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import daemon_mailbox  # noqa: E402
-from buddyswitch.launcher import daemon_runtime  # noqa: E402
-from buddyswitch.launcher import daemon_state  # noqa: E402
-from buddyswitch.launcher import daemon_triggers  # noqa: E402
-from buddyswitch.launcher import runtime_event_log  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
+from buddyswitch.foundation.daemon import mailbox  # noqa: E402
+from buddyswitch.foundation.daemon import runtime as daemon_runtime  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import triggers  # noqa: E402
+from buddyswitch.foundation.process_runtime import event_log  # noqa: E402
 from buddyswitch.foundation.identity.model import ACTOR_ID_PATTERN, ROLE_ID_PATTERN  # noqa: E402
 import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
@@ -30,14 +28,12 @@ from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 
-DAEMON_CLIENT_NAME = "buddyswitch_daemon"
-DAEMON_CLIENT_TITLE = "BuddySwitch Daemon"
-DAEMON_PERMISSIONS = "buddyswitch-runtime"
 DAEMON_STOP_GRACE_SECONDS = 2.0
 DAEMON_POLL_SECONDS = 0.05
 DAEMON_READY_TIMEOUT_SECONDS = 5.0
 DAEMON_READY_POLL_SECONDS = 0.05
-DAEMON_MAINTENANCE_INTERVAL_SECONDS = app_server.DEFAULT_RPC_TIMEOUT_SECONDS
+
+
 def daemon_runtime_dir(instance_root: Path) -> Path:
     return instance_root / "runtime" / "daemon"
 
@@ -54,8 +50,8 @@ def daemon_log_file(instance_root: Path) -> Path:
     return daemon_runtime_dir(instance_root) / "daemon.log"
 
 
-def _append_daemon_event(context: "daemon_contracts.DaemonContext", event: str, **fields: Any) -> None:
-    runtime_event_log.append_event(
+def _append_daemon_event(context: "contracts.DaemonContext", event: str, **fields: Any) -> None:
+    event_log.append_event(
         daemon_log_file(context.instance_root),
         service="daemon",
         event=event,
@@ -212,7 +208,11 @@ def _notify_subscriptions_payload(notify_subscriptions: list[str] | tuple[str, .
     return names
 
 
-def load_daemon_context(instance_json: Path) -> daemon_contracts.DaemonContext:
+def load_daemon_context(
+    instance_json: Path,
+    *,
+    host: contracts.DaemonHost,
+) -> contracts.DaemonContext:
     payload = json.loads(instance_json.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"instance JSON must contain an object: {instance_json}")
@@ -230,9 +230,9 @@ def load_daemon_context(instance_json: Path) -> daemon_contracts.DaemonContext:
     socket_path = (
         Path(socket_text)
         if socket_text
-        else app_server.effective_socket_path(actor_id, instance_root, app_server.marker_file(instance_root))
+        else host.resolve_socket_path(actor_id=actor_id, instance_root=instance_root)
     )
-    return daemon_contracts.DaemonContext(
+    return contracts.DaemonContext(
         instance_json=instance_json,
         instance_payload=payload,
         actor_id=actor_id,
@@ -245,7 +245,7 @@ def load_daemon_context(instance_json: Path) -> daemon_contracts.DaemonContext:
     )
 
 
-def derive_daemon_runtime_env(context: daemon_contracts.DaemonContext) -> dict[str, str]:
+def derive_daemon_runtime_env(context: contracts.DaemonContext) -> dict[str, str]:
     shared_root = context.instance_root.parent.parent
     return {
         "BUDDYSWITCH_SHARED_ROOT": str(shared_root),
@@ -273,14 +273,14 @@ def identity_route_payload(value: Any, field: str) -> dict[str, str]:
     return {"identity_id": identity_id.strip(), "role_id": role_id.strip()}
 
 
-def identity_route_for_context(context: daemon_contracts.DaemonContext) -> dict[str, str]:
+def identity_route_for_context(context: contracts.DaemonContext) -> dict[str, str]:
     return identity_route_payload(
         {"identity_id": context.actor_id, "role_id": context.role},
         "context.identity_route",
     )
 
 
-def ensure_actor_identity_profile(context: daemon_contracts.DaemonContext, identity_route: dict[str, str]) -> dict[str, Any]:
+def ensure_actor_identity_profile(context: contracts.DaemonContext, identity_route: dict[str, str]) -> dict[str, Any]:
     existing = identity_profiles.get_actor_identity_profile(identity_route["identity_id"])
     if isinstance(existing, dict):
         if existing.get("role_id") != identity_route["role_id"]:
@@ -298,7 +298,7 @@ def ensure_actor_identity_profile(context: daemon_contracts.DaemonContext, ident
     )
 
 
-def central_daemon_socket_path(context: daemon_contracts.DaemonContext) -> Path:
+def central_daemon_socket_path(context: contracts.DaemonContext) -> Path:
     raw_socket = os.environ.get("BUDDYSWITCH_CENTRAL_DAEMON_SOCKET")
     if isinstance(raw_socket, str) and raw_socket.strip():
         return Path(raw_socket.strip()).expanduser().resolve(strict=False)
@@ -311,14 +311,14 @@ def central_daemon_socket_path(context: daemon_contracts.DaemonContext) -> Path:
 
 
 def register_daemon_actor(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     identity_route: dict[str, str],
     *,
     notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     endpoint: dict[str, Any] = {
         "kind": "daemon_mailbox_socket",
-        "socket_path": str(daemon_mailbox.mailbox_socket_path(context.instance_root)),
+        "socket_path": str(mailbox.mailbox_socket_path(context.instance_root)),
     }
     subscriptions = _notify_subscriptions_payload(notify_subscriptions)
     if subscriptions:
@@ -333,7 +333,7 @@ def register_daemon_actor(
 
 
 def unregister_daemon_actor(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     identity_route: dict[str, str],
 ) -> dict[str, Any]:
     return daemon_client.unregister_actor(
@@ -344,7 +344,7 @@ def unregister_daemon_actor(
 
 
 def safe_unregister_daemon_actor(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     identity_route: dict[str, str],
     *,
     state: daemon_state.DaemonState | None = None,
@@ -366,7 +366,7 @@ def safe_unregister_daemon_actor(
 
 
 def heartbeat_daemon_actor(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     identity_route: dict[str, str],
 ) -> dict[str, Any]:
     return daemon_client.heartbeat_actor(
@@ -376,12 +376,12 @@ def heartbeat_daemon_actor(
 
 
 def build_application_commands(
-    context: daemon_contracts.DaemonContext,
-    factories: list[daemon_contracts.ApplicationCommandFactory]
-    | tuple[daemon_contracts.ApplicationCommandFactory, ...]
+    context: contracts.DaemonContext,
+    factories: list[contracts.ApplicationCommandFactory]
+    | tuple[contracts.ApplicationCommandFactory, ...]
     | None,
-) -> Mapping[str, daemon_contracts.ApplicationCommand]:
-    commands: dict[str, daemon_contracts.ApplicationCommand] = {}
+) -> Mapping[str, contracts.ApplicationCommand]:
+    commands: dict[str, contracts.ApplicationCommand] = {}
     for factory in factories or ():
         if not callable(factory):
             raise ValueError("application command factories must be callable")
@@ -394,7 +394,7 @@ def build_application_commands(
             normalized_key = key.strip()
             if normalized_key in commands:
                 raise ValueError(f"duplicate application command: {normalized_key}")
-            if normalized_key in daemon_mailbox.CONTROL_METHODS:
+            if normalized_key in mailbox.CONTROL_METHODS:
                 raise ValueError(f"application command conflicts with control method: {normalized_key}")
             if not callable(command):
                 raise ValueError(f"application command must be callable: {normalized_key}")
@@ -404,16 +404,17 @@ def build_application_commands(
 
 def start_daemon_mailbox(
     *,
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     state: daemon_state.DaemonState,
     identity_route: dict[str, str],
     handlers: list[Any] | tuple[Any, ...],
-    application_command_factories: list[daemon_contracts.ApplicationCommandFactory]
-    | tuple[daemon_contracts.ApplicationCommandFactory, ...]
+    host: contracts.DaemonHost,
+    application_command_factories: list[contracts.ApplicationCommandFactory]
+    | tuple[contracts.ApplicationCommandFactory, ...]
     | None = None,
-) -> daemon_mailbox.DaemonMailboxServer:
-    server = daemon_mailbox.DaemonMailboxServer(
-        socket_path=daemon_mailbox.mailbox_socket_path(context.instance_root),
+) -> mailbox.DaemonMailboxServer:
+    server = mailbox.DaemonMailboxServer(
+        socket_path=mailbox.mailbox_socket_path(context.instance_root),
         local_identity_id=identity_route["identity_id"],
         local_role_id=identity_route["role_id"],
         handlers=handlers,
@@ -422,7 +423,7 @@ def start_daemon_mailbox(
         trigger_dispatcher=lambda trigger: dispatch_trigger(
             context,
             state,
-            daemon_runtime.DaemonRuntime(context=context),
+            daemon_runtime.DaemonRuntime(context=context, host=host),
             trigger,
             handlers,
         ),
@@ -432,43 +433,28 @@ def start_daemon_mailbox(
     thread.start()
     deadline = time.monotonic() + DAEMON_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        if daemon_mailbox.mailbox_socket_path(context.instance_root).exists():
+        if mailbox.mailbox_socket_path(context.instance_root).exists():
             return server
         time.sleep(DAEMON_READY_POLL_SECONDS)
     server.close()
     raise RuntimeError(f"daemon mailbox did not become ready for {context.actor_id}")
 
 
-def bind_main_thread(context: daemon_contracts.DaemonContext, client: Any) -> None:
-    result = client.request(
-        "thread/resume",
-        {
-            "threadId": context.main_thread_id,
-            "cwd": str(context.workspace_dir),
-            "runtimeWorkspaceRoots": [
-                str(context.workspace_dir),
-                str(context.project_workspace_dir),
-            ],
-            "permissions": context.permissions,
-            "excludeTurns": True,
-        },
-    )
-    thread = result.get("thread")
-    if not isinstance(thread, dict) or _string_field(thread, "id") != context.main_thread_id:
-        raise app_server.AppServerProtocolError(
-            f"thread/resume returned unexpected thread id for {context.actor_id}"
-        )
+def bind_main_thread(context: contracts.DaemonContext, client: Any) -> None:
+    client.bind(context)
 
 
 def dispatch_notification(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     state: daemon_state.DaemonState,
     client: Any,
     notification: dict[str, Any],
     handlers: list[Any] | tuple[Any, ...],
+    *,
+    host: contracts.DaemonHost,
 ) -> bool:
-    runtime = daemon_runtime.DaemonRuntime(context=context)
-    trigger = daemon_triggers.normalize_app_server_notification(
+    daemon_handler_runtime = daemon_runtime.DaemonRuntime(context=context, host=host)
+    trigger = triggers.normalize_app_server_notification(
         notification,
         target_identity_id=context.actor_id,
         target_role_id=context.role,
@@ -479,7 +465,13 @@ def dispatch_notification(
         trigger_type=trigger.type,
         origin_id=_trigger_origin_id(trigger),
     )
-    result = dispatch_trigger(context, state, runtime, trigger, handlers)
+    result = dispatch_trigger(
+        context,
+        state,
+        daemon_handler_runtime,
+        trigger,
+        handlers,
+    )
     handled_count = result.get("handled_count")
     return isinstance(handled_count, int) and handled_count > 0
 
@@ -490,10 +482,10 @@ def _trigger_origin_id(trigger: Any) -> str | None:
 
 
 def dispatch_trigger(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     state: daemon_state.DaemonState,
     runtime: Any,
-    trigger: daemon_triggers.DaemonTrigger,
+    trigger: triggers.DaemonTrigger,
     handlers: list[Any] | tuple[Any, ...],
 ) -> dict[str, Any]:
     handled = 0
@@ -567,7 +559,7 @@ def dispatch_trigger(
                 error_type="invalid_result",
             )
             continue
-        normalized = daemon_contracts.HandlerResult(status, str(message) if status == "failed" and message else None)
+        normalized = contracts.HandlerResult(status, str(message) if status == "failed" and message else None)
         state.record_handler_result(handler_name, normalized, origin_turn_id=origin_id)
         _append_daemon_event(
             context,
@@ -600,7 +592,7 @@ def dispatch_trigger(
 
 
 def reconcile_handlers(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     state: daemon_state.DaemonState,
     runtime: Any,
     handlers: list[Any] | tuple[Any, ...],
@@ -664,7 +656,7 @@ def reconcile_handlers(
                 "message": message,
             })
             continue
-        normalized = daemon_contracts.HandlerResult(
+        normalized = contracts.HandlerResult(
             status,
             str(message) if status == "failed" and message else None,
         )
@@ -701,7 +693,7 @@ def reconcile_handlers(
 
 
 def sweep_due_scheduled_triggers(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     state: daemon_state.DaemonState,
     runtime: Any,
     handlers: list[Any] | tuple[Any, ...],
@@ -716,7 +708,7 @@ def sweep_due_scheduled_triggers(
     results: list[dict[str, Any]] = []
     for schedule in state.due_schedules(now=timestamp):
         schedule_id = schedule["schedule_id"]
-        trigger = daemon_triggers.normalize_scheduled_trigger(
+        trigger = triggers.normalize_scheduled_trigger(
             schedule,
             target_identity_id=identity_route["identity_id"],
             target_role_id=identity_route["role_id"],
@@ -822,11 +814,12 @@ def _schedule_status_payload(state: daemon_state.DaemonState) -> dict[str, Any]:
 def daemon_status(
     instance_json: Path,
     *,
+    host: contracts.DaemonHost,
     handlers: list[Any] | tuple[Any, ...] | None = None,
     notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    context = load_daemon_context(instance_json)
-    runtime = daemon_runtime_dir(context.instance_root)
+    context = load_daemon_context(instance_json, host=host)
+    runtime_dir = daemon_runtime_dir(context.instance_root)
     pid_path = daemon_pid_file(context.instance_root)
     log_path = daemon_log_file(context.instance_root)
     state_path = daemon_state.daemon_state_file(context.instance_root)
@@ -852,10 +845,10 @@ def daemon_status(
         "identity_matches": bool(identity_matches),
         "ready": ready,
         "ready_main_thread_id": ready_main_thread_id,
-        "runtime_dir": str(runtime),
+        "runtime_dir": str(runtime_dir),
         "pid_file": str(pid_path),
         "log_path": str(log_path),
-        "log": runtime_event_log.log_metadata(log_path),
+        "log": event_log.log_metadata(log_path),
         "state_path": str(state_path),
         "last_error": state.payload.get("last_error"),
         "schedules": _schedule_status_payload(state),
@@ -867,14 +860,15 @@ def daemon_status(
 def start_daemon(
     instance_json: Path,
     *,
+    host: contracts.DaemonHost,
     handlers: list[Any] | tuple[Any, ...] | None = None,
     notify_subscriptions: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    context = load_daemon_context(instance_json)
-    runtime = daemon_runtime_dir(context.instance_root)
+    context = load_daemon_context(instance_json, host=host)
+    runtime_dir = daemon_runtime_dir(context.instance_root)
     pid_path = daemon_pid_file(context.instance_root)
     log_path = daemon_log_file(context.instance_root)
-    runtime.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
     log_path.touch(exist_ok=True)
     state = daemon_state.DaemonState.load(
         instance_root=context.instance_root,
@@ -888,7 +882,12 @@ def start_daemon(
     recorded = process_identity.read_record(pid_path)
     if recorded is not None and process_identity.is_running(recorded):
         if state.ready_for(pid, context.main_thread_id):
-            status = daemon_status(instance_json, handlers=handlers, notify_subscriptions=notify_subscriptions)
+            status = daemon_status(
+                instance_json,
+                host=host,
+                handlers=handlers,
+                notify_subscriptions=notify_subscriptions,
+            )
             status["started"] = False
             return status
         _terminate_record(recorded)
@@ -898,14 +897,7 @@ def start_daemon(
     state.payload["ready"] = None
     state.save()
 
-    command = [
-        sys.executable,
-        "-m",
-        "buddyswitch.application.entrypoints.instance_daemon",
-        "run",
-        "--instance-json",
-        str(instance_json),
-    ]
+    command = host.instance_daemon_command(instance_json)
     child_env = os.environ.copy()
     child_env.update(derive_daemon_runtime_env(context))
     with log_path.open("ab") as log_handle:
@@ -928,7 +920,12 @@ def start_daemon(
             main_thread_id=context.main_thread_id,
         )
         if wait_state.ready_for(process.pid, context.main_thread_id):
-            status = daemon_status(instance_json, handlers=handlers, notify_subscriptions=notify_subscriptions)
+            status = daemon_status(
+                instance_json,
+                host=host,
+                handlers=handlers,
+                notify_subscriptions=notify_subscriptions,
+            )
             status["started"] = True
             status["pid"] = process.pid
             status["pid_live"] = _pid_is_live(process.pid)
@@ -945,8 +942,12 @@ def start_daemon(
     raise RuntimeError(f"daemon did not become ready for {context.actor_id}; see {log_path}")
 
 
-def stop_daemon(instance_json: Path) -> dict[str, Any]:
-    context = load_daemon_context(instance_json)
+def stop_daemon(
+    instance_json: Path,
+    *,
+    host: contracts.DaemonHost,
+) -> dict[str, Any]:
+    context = load_daemon_context(instance_json, host=host)
     identity_route = identity_route_for_context(context)
     state = daemon_state.DaemonState.load(
         instance_root=context.instance_root,
@@ -977,13 +978,14 @@ def stop_daemon(instance_json: Path) -> dict[str, Any]:
 def run_daemon(
     instance_json: Path,
     *,
+    host: contracts.DaemonHost,
     handlers: list[Any] | None = None,
     notify_subscriptions: list[str] | tuple[str, ...] | None = None,
-    application_command_factories: list[daemon_contracts.ApplicationCommandFactory]
-    | tuple[daemon_contracts.ApplicationCommandFactory, ...]
+    application_command_factories: list[contracts.ApplicationCommandFactory]
+    | tuple[contracts.ApplicationCommandFactory, ...]
     | None = None,
 ) -> int:
-    context = load_daemon_context(instance_json)
+    context = load_daemon_context(instance_json, host=host)
     pid_path = daemon_pid_file(context.instance_root)
     process_identity.write_record(pid_path, os.getpid())
     os.environ.update(derive_daemon_runtime_env(context))
@@ -999,14 +1001,9 @@ def run_daemon(
     daemon_handlers = list(handlers or [])
     state.register_handlers(_handler_names(daemon_handlers))
     registered = False
-    mailbox_server: daemon_mailbox.DaemonMailboxServer | None = None
+    mailbox_server: mailbox.DaemonMailboxServer | None = None
     try:
-        with app_server.AppServerClient(
-            context.socket_path,
-            timeout_seconds=app_server.DEFAULT_RPC_TIMEOUT_SECONDS,
-            client_name=DAEMON_CLIENT_NAME,
-            client_title=DAEMON_CLIENT_TITLE,
-        ) as client:
+        with host.notification_client(context) as client:
             bind_main_thread(context, client)
             state.record_ready(pid=os.getpid(), main_thread_id=context.main_thread_id)
             _append_daemon_event(context, "daemon_ready", pid=os.getpid(), main_thread_id=context.main_thread_id)
@@ -1015,6 +1012,7 @@ def run_daemon(
                 state=state,
                 identity_route=identity_route,
                 handlers=daemon_handlers,
+                host=host,
                 application_command_factories=application_command_factories,
             )
             if notify_subscriptions is None:
@@ -1022,53 +1020,64 @@ def run_daemon(
             else:
                 register_daemon_actor(context, identity_route, notify_subscriptions=notify_subscriptions)
             registered = True
-            runtime = daemon_runtime.DaemonRuntime(context=context)
+            daemon_handler_runtime = daemon_runtime.DaemonRuntime(context=context, host=host)
             reconcile_handlers(
                 context,
                 state,
-                runtime,
+                daemon_handler_runtime,
                 daemon_handlers,
             )
-            next_maintenance_at = time.monotonic() + DAEMON_MAINTENANCE_INTERVAL_SECONDS
+            next_maintenance_at = time.monotonic() + host.maintenance_interval_seconds
             while True:
                 try:
                     notification = client.read_notification()
-                except app_server.AppServerTimeoutError:
+                except contracts.DaemonHostTimeout:
                     reconcile_handlers(
                         context,
                         state,
-                        runtime,
+                        daemon_handler_runtime,
                         daemon_handlers,
                     )
                     sweep_due_scheduled_triggers(
                         context,
                         state,
-                        runtime,
+                        daemon_handler_runtime,
                         daemon_handlers,
                     )
                     heartbeat_daemon_actor(context, identity_route)
-                    next_maintenance_at = time.monotonic() + DAEMON_MAINTENANCE_INTERVAL_SECONDS
+                    next_maintenance_at = (
+                        time.monotonic() + host.maintenance_interval_seconds
+                    )
                     continue
-                except app_server.AppServerError as exc:
+                except contracts.DaemonHostError as exc:
                     state.record_error(origin_turn_id=None, message=str(exc))
                     return 1
-                dispatch_notification(context, state, client, notification, daemon_handlers)
+                dispatch_notification(
+                    context,
+                    state,
+                    client,
+                    notification,
+                    daemon_handlers,
+                    host=host,
+                )
                 sweep_due_scheduled_triggers(
                     context,
                     state,
-                    runtime,
+                    daemon_handler_runtime,
                     daemon_handlers,
                 )
                 if time.monotonic() >= next_maintenance_at:
                     reconcile_handlers(
                         context,
                         state,
-                        runtime,
+                        daemon_handler_runtime,
                         daemon_handlers,
                     )
                     heartbeat_daemon_actor(context, identity_route)
-                    next_maintenance_at = time.monotonic() + DAEMON_MAINTENANCE_INTERVAL_SECONDS
-    except app_server.AppServerError as exc:
+                    next_maintenance_at = (
+                        time.monotonic() + host.maintenance_interval_seconds
+                    )
+    except contracts.DaemonHostError as exc:
         state.record_error(origin_turn_id=None, message=str(exc))
         return 1
     finally:

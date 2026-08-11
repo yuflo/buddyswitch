@@ -1,7 +1,7 @@
 """Verified central Daemon entrypoint."""
 
 from buddyswitch.foundation.process_runtime.invocation import run_verified
-from buddyswitch.launcher.central_daemon import main
+from buddyswitch.foundation.daemon.central_process import main
 
 
 if __name__ == "__main__":

@@ -33,13 +33,13 @@ from tests.support.cli import write_executable
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 from buddyswitch.foundation.runtime_broker import protocol  # noqa: E402
 import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 
 PROXY = ROOT / "src" / "buddyswitch" / "foundation" / "browser_runtime" / "cockpit_proxy.py"
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
-DAEMON_MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_mailbox.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
+DAEMON_MAILBOX_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "mailbox.py"
 MODULE_COUNTER = count()
 SOFT_PAGE_HINT_5 = "Browser pages: 5/10. Reuse or close pages before opening many more."
 HARD_PAGE_BLOCK = (
@@ -141,7 +141,9 @@ def _make_cdp_list_handler(state: dict[str, object]) -> type[BaseHTTPRequestHand
 
 
 def load_module(path: Path) -> Any:
-    return importlib.reload(importlib.import_module(f"buddyswitch.launcher.{path.stem}"))
+    return importlib.reload(
+        importlib.import_module(f"buddyswitch.foundation.daemon.{path.stem}")
+    )
 
 
 from tests.support.processes import ResourceLedger
@@ -615,16 +617,16 @@ for raw_line in sys.stdin:
             msg=rpc_requests,
         )
     def _start_mailbox(self, instance_root: Path, *, now: str = "2026-06-24T00:00:00Z") -> tuple[Any, Any, threading.Thread]:
-        daemon_core = load_module(DAEMON_CORE_PATH)
-        daemon_mailbox = load_module(DAEMON_MAILBOX_PATH)
+        instance = load_module(DAEMON_CORE_PATH)
+        mailbox = load_module(DAEMON_MAILBOX_PATH)
         instance_root.mkdir(parents=True, exist_ok=True)
         state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id="act-dev-browser",
             main_thread_id="thr-main",
         )
-        server = daemon_mailbox.DaemonMailboxServer(
-            socket_path=daemon_mailbox.mailbox_socket_path(instance_root),
+        server = mailbox.DaemonMailboxServer(
+            socket_path=mailbox.mailbox_socket_path(instance_root),
             local_identity_id="act-dev-browser",
             local_role_id="dev",
             handlers=[],
@@ -634,7 +636,7 @@ for raw_line in sys.stdin:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(server.close)
-        return daemon_core, server, thread
+        return instance, server, thread
     def _write_page_idle_state(self, instance_root: Path, payload: dict[str, object]) -> None:
         state_path = instance_root / "runtime" / "browser" / "page_idle.json"
         state_path.parent.mkdir(parents=True, exist_ok=True)

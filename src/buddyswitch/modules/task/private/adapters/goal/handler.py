@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 
 from buddyswitch.launcher import app_server  # noqa: E402
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.task.private.adapters.goal import protocol  # noqa: E402
 from buddyswitch.modules.task.private.domain import task_sys  # noqa: E402
@@ -24,21 +24,21 @@ class TaskGoalInvariantError(RuntimeError):
     """Canonical Task and native Goal cannot be safely converged."""
 
 
-def _actor_target(context: daemon_contracts.DaemonContext) -> dict[str, str]:
+def _actor_target(context: contracts.DaemonContext) -> dict[str, str]:
     return {
         "actor_id": state_runtime.require_id(context.actor_id, "context.actor_id"),
         "role_id": state_runtime.require_id(context.role, "context.role"),
     }
 
 
-def _require_task_owner(context: daemon_contracts.DaemonContext, task: Mapping[str, Any]) -> None:
+def _require_task_owner(context: contracts.DaemonContext, task: Mapping[str, Any]) -> None:
     if task.get("actor_target") != _actor_target(context):
         raise TaskGoalInvariantError(
             f"Task {task.get('id')} does not belong to daemon Actor {context.actor_id}"
         )
 
 
-def _read_goal(context: daemon_contracts.DaemonContext) -> dict[str, Any] | None:
+def _read_goal(context: contracts.DaemonContext) -> dict[str, Any] | None:
     payload = app_server.goal_get(context.socket_path, context.main_thread_id)
     if not isinstance(payload, Mapping) or "goal" not in payload:
         raise TaskGoalInvariantError("thread/goal/get returned no goal field")
@@ -58,7 +58,7 @@ def _goal_status(goal: Mapping[str, Any]) -> str:
 
 
 def _goal_matches_task(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     task: Mapping[str, Any],
     goal: Mapping[str, Any],
     *,
@@ -82,7 +82,7 @@ def _goal_matches_task(
 
 
 def _goal_was_consumed_by_completed_task(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     goal: Mapping[str, Any],
     *,
     except_task_id: str,
@@ -112,7 +112,7 @@ def _goal_was_consumed_by_completed_task(
 
 
 def _set_goal(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     task: Mapping[str, Any],
 ) -> dict[str, Any]:
     payload = app_server.goal_set(
@@ -149,7 +149,7 @@ def _result(
 
 
 def reconcile_task(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
     task_id: str,
 ) -> dict[str, Any]:
     normalized_id = state_runtime.require_id(task_id, "task_id")
@@ -262,7 +262,7 @@ def reconcile_task(
 
 
 def _current_reconciliation_task(
-    context: daemon_contracts.DaemonContext,
+    context: contracts.DaemonContext,
 ) -> dict[str, Any] | None:
     tasks = task_sys.list_tasks(actor_target=_actor_target(context))
     active = [task for task in tasks if task["status"] == task_sys.ACTIVE]
@@ -283,14 +283,14 @@ def _current_reconciliation_task(
     )
 
 
-def _handler_result(result: Mapping[str, Any] | None) -> daemon_contracts.HandlerResult:
+def _handler_result(result: Mapping[str, Any] | None) -> contracts.HandlerResult:
     if result is None or result.get("goal_action") in {
         "unchanged",
         "goal_absent",
         "already_completed",
     }:
-        return daemon_contracts.HandlerResult.ignored()
-    return daemon_contracts.HandlerResult.handled()
+        return contracts.HandlerResult.ignored()
+    return contracts.HandlerResult.handled()
 
 
 class TaskGoalHandler:
@@ -303,38 +303,38 @@ class TaskGoalHandler:
 
     def handle(
         self,
-        context: daemon_contracts.DaemonContext,
+        context: contracts.DaemonContext,
         state: Any,
         runtime: Any,
         trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         del state, runtime
         source_context = getattr(trigger, "source_context", None)
         if not isinstance(source_context, Mapping):
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         if source_context.get("thread_id") != context.main_thread_id:
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         task = _current_reconciliation_task(context)
         if task is None:
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         return _handler_result(reconcile_task(context, str(task["id"])))
 
     def reconcile(
         self,
-        context: daemon_contracts.DaemonContext,
+        context: contracts.DaemonContext,
         state: Any,
         runtime: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         del state, runtime
         task = _current_reconciliation_task(context)
         if task is None:
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         return _handler_result(reconcile_task(context, str(task["id"])))
 
 
 def command_handlers(
-    context: daemon_contracts.DaemonContext,
-) -> Mapping[str, daemon_contracts.ApplicationCommand]:
+    context: contracts.DaemonContext,
+) -> Mapping[str, contracts.ApplicationCommand]:
     def reconcile(params: Mapping[str, object]) -> Mapping[str, object]:
         if set(params) != {"task_id"}:
             raise ValueError("task_goal.reconcile_task accepts exactly task_id")

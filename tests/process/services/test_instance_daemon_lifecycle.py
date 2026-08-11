@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from buddyswitch.launcher import daemon_core
-from buddyswitch.launcher import daemon_mailbox
+from buddyswitch.foundation.daemon import instance
+from buddyswitch.foundation.daemon import mailbox
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 import pytest
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
 
@@ -31,13 +32,13 @@ def test_instance_daemon_early_exit_removes_pid_identity_and_mailbox(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(daemon_core, "DAEMON_READY_TIMEOUT_SECONDS", 2.0)
-    monkeypatch.setattr(daemon_core, "DAEMON_READY_POLL_SECONDS", 0.02)
+    monkeypatch.setattr(instance, "DAEMON_READY_TIMEOUT_SECONDS", 2.0)
+    monkeypatch.setattr(instance, "DAEMON_READY_POLL_SECONDS", 0.02)
 
     with pytest.raises(RuntimeError, match="exited before ready"):
-        daemon_core.start_daemon(instance_json)
+        instance.start_daemon(instance_json, host=AppActorDaemonHost())
 
-    pid_path = daemon_core.daemon_pid_file(instance_root)
+    pid_path = instance.daemon_pid_file(instance_root)
     assert not pid_path.exists()
     assert not process_identity.identity_file(pid_path).exists()
-    assert not daemon_mailbox.mailbox_socket_path(instance_root).exists()
+    assert not mailbox.mailbox_socket_path(instance_root).exists()

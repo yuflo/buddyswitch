@@ -7,7 +7,7 @@ class TestCockpitProxyPageState(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("select_page", {"pageId": "page-3", "bringToFront": True})],
@@ -48,7 +48,7 @@ class TestCockpitProxyPageState(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("select_page", {"pageId": "page-4", "bringToFront": True})],
@@ -71,7 +71,7 @@ class TestCockpitProxyPageState(BrowserCockpitProxyHarness):
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [
                     self._single_call("select_page", {"pageId": 3}),
@@ -109,7 +109,7 @@ class TestCockpitProxyPageState(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, _forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("select_page", {"bringToFront": True})],
@@ -127,7 +127,7 @@ class TestCockpitProxyPageState(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("take_snapshot", {})],
@@ -160,7 +160,7 @@ class TestCockpitProxyPageState(BrowserCockpitProxyHarness):
 
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [self._single_call("take_snapshot", {})],
@@ -196,7 +196,7 @@ class TestCockpitProxyPageState(BrowserCockpitProxyHarness):
         browser_url = self._start_cdp_list_server({"requests": [], "targets": []})
         with tempfile.TemporaryDirectory() as temp_root:
             instance_root = Path(temp_root) / "instances" / "act-dev-browser"
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [
                     self._single_call("select_page", {"pageId": 3, "bringToFront": True}),

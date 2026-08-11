@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from buddyswitch.launcher import daemon_contracts
-from buddyswitch.launcher import daemon_triggers
-from buddyswitch.launcher import instance_daemon
+from buddyswitch.foundation.daemon import contracts
+from buddyswitch.foundation.daemon import triggers
+from buddyswitch.application import daemon as application_daemon
 from buddyswitch.modules.task.private.adapters.goal import handler as task_goal_handler
 from buddyswitch.modules.task.private.adapters.goal import protocol as task_goal_runtime_protocol
 from buddyswitch.modules.task.private.domain import task_sys
@@ -20,9 +20,9 @@ class TaskGoalReconciliationTests(RuntimeWorkspaceTestCase):
         self.actor_id = self._runtime_actor_id(role="dev", label="task-goal-handler")
         self.context = self._context(self.actor_id)
 
-    def _context(self, actor_id: str) -> daemon_contracts.DaemonContext:
+    def _context(self, actor_id: str) -> contracts.DaemonContext:
         instance_root = self._instance_root(actor_id)
-        return daemon_contracts.DaemonContext(
+        return contracts.DaemonContext(
             instance_json=instance_root / "instance.json",
             instance_payload={"actor_id": actor_id, "role": "dev"},
             actor_id=actor_id,
@@ -49,7 +49,7 @@ class TaskGoalReconciliationTests(RuntimeWorkspaceTestCase):
 
     @staticmethod
     def _goal(
-        context: daemon_contracts.DaemonContext,
+        context: contracts.DaemonContext,
         objective: str,
         *,
         status: str = "active",
@@ -224,7 +224,7 @@ class TaskGoalReconciliationTests(RuntimeWorkspaceTestCase):
 
     def test_wrong_thread_goal_notification_is_ignored_without_query(self) -> None:
         handler = task_goal_handler.TaskGoalHandler()
-        trigger = daemon_triggers.normalize_app_server_notification(
+        trigger = triggers.normalize_app_server_notification(
             {
                 "method": "thread/goal/updated",
                 "params": {
@@ -264,13 +264,17 @@ class TaskGoalReconciliationTests(RuntimeWorkspaceTestCase):
         from buddyswitch.application.build import build_application
 
         application = build_application()
-        factories = instance_daemon.default_application_command_factories(
+        factories = application_daemon.daemon_application_command_factories(
             application.daemon_handlers
         )
-        handlers = instance_daemon.default_daemon_handlers(
-            application.daemon_handlers
+        handlers = application_daemon.compose_instance_daemon_handlers(
+            application.daemon_handlers,
+            application.inbound_sources,
         )
 
         self.assertIn(task_goal_handler.command_handlers, factories)
         self.assertTrue(any(isinstance(row, task_goal_handler.TaskGoalHandler) for row in handlers))
-        self.assertNotIn("task_sys_daemon_adapter", Path(instance_daemon.__file__).read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "task_sys_daemon_adapter",
+            Path(application_daemon.__file__).read_text(encoding="utf-8"),
+        )

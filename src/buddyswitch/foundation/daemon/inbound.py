@@ -90,4 +90,4 @@ def registration_records(registrations: list[Any] | tuple[Any, ...]) -> list[dic
 
 
 if __name__ == "__main__":
-    raise SystemExit("notification_center is not a standalone command")
+    raise SystemExit("inbound is not a standalone command")

@@ -19,7 +19,7 @@ from typing import Any, Mapping
 
 HELPER_DIR = Path(__file__).resolve().parent
 
-from buddyswitch.launcher import runtime_event_log  # noqa: E402
+from buddyswitch.foundation.process_runtime import event_log  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -591,7 +591,7 @@ def app_server_status(socket_path: Path, pid_path: Path, marker_path: Path, log_
         "marker_socket": marker_socket or None,
         "pid_file": str(pid_path),
         "log_file": str(log_path),
-        "log": runtime_event_log.log_metadata(log_path),
+        "log": event_log.log_metadata(log_path),
         "probe": probe,
     }
 
@@ -619,7 +619,7 @@ def ensure_app_server(
     runtime_dir(instance_root).mkdir(parents=True, exist_ok=True)
     _cleanup_runtime_files(socket_path, pid_path, marker_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    runtime_event_log.append_event(
+    event_log.append_event(
         log_path,
         service="app_server",
         event="app_server_start_requested",
@@ -648,7 +648,7 @@ def ensure_app_server(
             )
         status = app_server_status(socket_path, pid_path, marker_path, log_path)
         if status["healthy"]:
-            runtime_event_log.append_event(
+            event_log.append_event(
                 log_path,
                 service="app_server",
                 event="app_server_ready",
@@ -664,7 +664,7 @@ def ensure_app_server(
 
 
 def stop_app_server(socket_path: Path, pid_path: Path, marker_path: Path, log_path: Path) -> dict[str, Any]:
-    runtime_event_log.append_event(
+    event_log.append_event(
         log_path,
         service="app_server",
         event="app_server_stop_requested",

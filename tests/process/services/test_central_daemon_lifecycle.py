@@ -7,8 +7,8 @@ import subprocess
 import sys
 import time
 
-from buddyswitch.launcher import central_daemon
-from buddyswitch.launcher import central_daemon_core
+from buddyswitch.foundation.daemon import central_process
+from buddyswitch.foundation.daemon import central_service
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from tests.support.processes import ResourceLedger
 
@@ -39,13 +39,13 @@ def test_stop_refuses_stale_pid_identity_without_signalling_unrelated_process(
         stderr=subprocess.DEVNULL,
         text=True,
     )
-    paths = central_daemon_core.central_daemon_paths(tmp_path / "shared")
+    paths = central_service.central_daemon_paths(tmp_path / "shared")
     try:
         paths.run_dir.mkdir(parents=True)
         paths.pid_file.write_text(f"{unrelated.pid}\n", encoding="utf-8")
         paths.pid_identity_file.write_text("stale-start-identity\n", encoding="utf-8")
 
-        result = central_daemon.stop_central_daemon(paths)
+        result = central_process.stop_central_daemon(paths)
 
         assert unrelated.poll() is None
         assert result["terminated"] is False
@@ -63,7 +63,7 @@ def test_start_and_normal_stop_share_exact_identity_and_remove_runtime_files(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("BUDDYSWITCH_PYTHON", sys.executable)
-    paths = central_daemon_core.central_daemon_paths(tmp_path / "shared")
+    paths = central_service.central_daemon_paths(tmp_path / "shared")
     ledger = ResourceLedger.from_environment()
     ledger.register_process_descriptor(
         pid_file=paths.pid_file,
@@ -78,7 +78,7 @@ def test_start_and_normal_stop_share_exact_identity_and_remove_runtime_files(
     )
     pid = 0
     try:
-        started = central_daemon.start_central_daemon(paths)
+        started = central_process.start_central_daemon(paths)
         pid = int(started["pid"])
         ledger.reconcile_descriptors()
         record = process_identity.read_record(paths.pid_file)
@@ -86,7 +86,7 @@ def test_start_and_normal_stop_share_exact_identity_and_remove_runtime_files(
         assert record.pid == pid
         assert process_identity.matches(record)
 
-        stopped = central_daemon.stop_central_daemon(paths)
+        stopped = central_process.stop_central_daemon(paths)
 
         assert stopped["terminated"] is True
         assert stopped["identity_mismatch"] is False
@@ -108,7 +108,7 @@ def test_sigterm_service_uses_same_cleanup_owner_for_pid_identity_and_socket(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("BUDDYSWITCH_PYTHON", sys.executable)
-    paths = central_daemon_core.central_daemon_paths(tmp_path / "shared")
+    paths = central_service.central_daemon_paths(tmp_path / "shared")
     ledger = ResourceLedger.from_environment()
     ledger.register_process_descriptor(
         pid_file=paths.pid_file,
@@ -121,7 +121,7 @@ def test_sigterm_service_uses_same_cleanup_owner_for_pid_identity_and_socket(
             "socket": paths.socket_path,
         },
     )
-    started = central_daemon.start_central_daemon(paths)
+    started = central_process.start_central_daemon(paths)
     pid = int(started["pid"])
     ledger.reconcile_descriptors()
     try:

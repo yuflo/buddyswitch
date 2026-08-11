@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 import shutil
 import signal
 import subprocess
@@ -18,6 +19,7 @@ import buddyswitch.foundation.process_runtime.process_identity as process_identi
 
 
 POLL_INTERVAL = 0.02
+PROCESS_TIMEOUT_CLEANUP_SECONDS = 5.0
 VALID_CLEANUP_STRATEGIES = frozenset(
     {
         "central_daemon_stop",
@@ -415,17 +417,20 @@ class ResourceLedger:
         )
         try:
             if strategy == "central_daemon_stop":
-                from buddyswitch.launcher import central_daemon
-                from buddyswitch.launcher import central_daemon_core
+                from buddyswitch.foundation.daemon import central_process
+                from buddyswitch.foundation.daemon import central_service
 
-                paths = central_daemon_core.central_daemon_paths(
+                paths = central_service.central_daemon_paths(
                     Path(str(args["shared_root"]))
                 )
-                result = central_daemon.stop_central_daemon(paths)
+                result = central_process.stop_central_daemon(paths)
             elif strategy == "instance_daemon_stop":
-                from buddyswitch.launcher import daemon_core
+                from buddyswitch.foundation.daemon import instance
 
-                result = daemon_core.stop_daemon(Path(str(args["instance_json"])))
+                result = instance.stop_daemon(
+                    Path(str(args["instance_json"])),
+                    host=AppActorDaemonHost(),
+                )
             elif strategy == "runtime_broker_stop":
                 from buddyswitch.foundation.runtime_broker import lifecycle
 
@@ -746,10 +751,16 @@ def run_process(
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        captured_stdout, captured_stderr = process.communicate()
+        try:
+            captured_stdout, captured_stderr = process.communicate(
+                timeout=PROCESS_TIMEOUT_CLEANUP_SECONDS,
+            )
+        except subprocess.TimeoutExpired as cleanup_exc:
+            captured_stdout = cleanup_exc.stdout
+            captured_stderr = cleanup_exc.stderr
         exc.stdout = captured_stdout
         exc.stderr = captured_stderr
-        raise
+        raise exc
     finally:
         ledger.reconcile_descriptors()
 

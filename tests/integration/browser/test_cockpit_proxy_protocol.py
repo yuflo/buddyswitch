@@ -217,7 +217,7 @@ class TestCockpitProxyProtocol(BrowserCockpitProxyHarness):
                     },
                 },
             )
-            daemon_core, server, thread = self._start_mailbox(instance_root)
+            instance, server, thread = self._start_mailbox(instance_root)
 
             responses, forwarded, _upstream_argv, _stderr = self._run_proxy(
                 [

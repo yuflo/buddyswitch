@@ -1,4 +1,4 @@
-"""Small append-only JSONL runtime breadcrumb helper."""
+"""Small append-only JSONL process-runtime breadcrumb helper."""
 
 from __future__ import annotations
 

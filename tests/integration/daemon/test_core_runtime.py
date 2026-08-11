@@ -15,17 +15,18 @@ from unittest.mock import patch
 
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
-INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
+INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance_process.py"
 MODULE_COUNTER = count()
 RUNTIME_ENV_KEYS = (
     "BUDDYSWITCH_SHARED_ROOT",
@@ -41,7 +42,7 @@ RUNTIME_ENV_KEYS = (
 def load_daemon_core() -> Any:
     if not DAEMON_CORE_PATH.exists():
         raise AssertionError(f"expected daemon core module to exist: {DAEMON_CORE_PATH}")
-    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_core"))
+    return importlib.reload(importlib.import_module("buddyswitch.foundation.daemon.instance"))
 
 
 class StopDaemonLoop(RuntimeError):
@@ -53,6 +54,7 @@ class DaemonCoreTestCase(unittest.TestCase):
         self._saved_runtime_env = {key: os.environ.get(key) for key in RUNTIME_ENV_KEYS}
         self.addCleanup(self._restore_runtime_env, self._saved_runtime_env)
         self.core = load_daemon_core()
+        self.host = AppActorDaemonHost()
 
     def _restore_runtime_env(self, values: dict[str, str | None]) -> None:
         for key, value in values.items():
@@ -194,8 +196,8 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4321)
 
             with patch.dict(os.environ, {"BUDDYSWITCH_PYTHON": "/configured/runtime/python"}, clear=False):
-                first = self.core.start_daemon(instance["instance_json"])
-                second = self.core.start_daemon(instance["instance_json"])
+                first = self.core.start_daemon(instance["instance_json"], host=self.host)
+                second = self.core.start_daemon(instance["instance_json"], host=self.host)
 
             self.assertTrue(first["started"])
             self.assertFalse(second["started"])
@@ -204,7 +206,10 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.assertTrue(first["ready"])
             self.assertTrue(second["ready"])
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][0], self.core.sys.executable)
+            self.assertEqual(
+                commands[0],
+                self.host.instance_daemon_command(instance["instance_json"]),
+            )
             self.assertEqual(
                 commands[0][1:],
                 [
@@ -226,7 +231,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self._patch_pid_live({4326})
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4326)
 
-            payload = self.core.start_daemon(instance["instance_json"])
+            payload = self.core.start_daemon(instance["instance_json"], host=self.host)
 
             self.assertTrue(payload["started"])
             self.assertEqual(len(popen_kwargs), 1)
@@ -246,7 +251,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self._patch_pid_live({4330})
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4330)
 
-            payload = self.core.start_daemon(instance["instance_json"])
+            payload = self.core.start_daemon(instance["instance_json"], host=self.host)
 
             self.assertTrue(payload["started"])
             env = popen_kwargs[0].get("env")
@@ -264,7 +269,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self._patch_pid_live({4322})
             self._patch_sleep_to_record_ready(instance_root=instance["instance_root"], pid=4322)
 
-            payload = self.core.start_daemon(instance["instance_json"])
+            payload = self.core.start_daemon(instance["instance_json"], host=self.host)
 
             self.assertTrue(payload["started"])
             self.assertEqual(payload["pid"], 4322)
@@ -279,7 +284,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self._patch_pid_live(set())
 
             with self.assertRaises(RuntimeError):
-                self.core.start_daemon(instance["instance_json"])
+                self.core.start_daemon(instance["instance_json"], host=self.host)
 
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
 
@@ -296,7 +301,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.core._terminate_record = lambda record: terminated.append(record.pid) or True
 
             with self.assertRaises(RuntimeError):
-                self.core.start_daemon(instance["instance_json"])
+                self.core.start_daemon(instance["instance_json"], host=self.host)
 
             self.assertEqual(terminated, [4324])
             self.assertFalse(self.core.daemon_pid_file(instance["instance_root"]).exists())
@@ -317,7 +322,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
             self.addCleanup(setattr, self.core, "_terminate_record", original_terminate)
             self.core._terminate_record = lambda record: terminated.append(record.pid) or True
 
-            payload = self.core.start_daemon(instance["instance_json"])
+            payload = self.core.start_daemon(instance["instance_json"], host=self.host)
 
             self.assertEqual(terminated, [9999])
             self.assertTrue(payload["started"])
@@ -345,7 +350,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
                 {"context": context, "identity_route": dict(identity_route)}
             ) or {"record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}}
 
-            payload = self.core.stop_daemon(instance["instance_json"])
+            payload = self.core.stop_daemon(instance["instance_json"], host=self.host)
 
             self.assertTrue(payload["terminated"])
             self.assertEqual(terminated, [4321])
@@ -373,7 +378,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
 
             self.core.unregister_daemon_actor = fail_unregister
 
-            payload = self.core.stop_daemon(instance["instance_json"])
+            payload = self.core.stop_daemon(instance["instance_json"], host=self.host)
 
             self.assertTrue(payload["terminated"])
             self.assertEqual(payload["unregister_status"], "failed")
@@ -408,7 +413,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
                 "record": {"identity_id": identity_route["identity_id"], "role_id": identity_route["role_id"]}
             }
 
-            payload = self.core.stop_daemon(instance["instance_json"])
+            payload = self.core.stop_daemon(instance["instance_json"], host=self.host)
 
             self.assertTrue(payload["terminated"])
             self.assertEqual(identity_profiles.get_actor_identity_profile("act-dev-daed00000001"), expected_profile)
@@ -429,7 +434,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
                 4321,
             )
 
-            payload = self.core.daemon_status(instance["instance_json"])
+            payload = self.core.daemon_status(instance["instance_json"], host=self.host)
 
             self.assertEqual(payload["pid"], 4321)
             self.assertTrue(payload["pid_live"])
@@ -450,6 +455,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
 
             payload = self.core.daemon_status(
                 instance["instance_json"],
+                host=self.host,
                 handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "example_handler"})()],
             )
 
@@ -490,6 +496,7 @@ class DaemonCoreLifecycleTests(DaemonCoreTestCase):
 
             payload = self.core.daemon_status(
                 instance["instance_json"],
+                host=self.host,
                 handlers=[FakeHandler(), type("FakeMessageHandler", (), {"name": "example_handler"})()],
             )
 
@@ -533,6 +540,14 @@ class FakeRunDaemonClient:
                 raise self.bind_error
             return self.bind_result
         raise AssertionError(f"unexpected request method: {method}")
+
+    def bind(self, context: contracts.DaemonContext) -> None:
+        if self.bind_error is not None:
+            raise self.bind_error
+        thread = self.bind_result.get("thread")
+        if not isinstance(thread, dict) or thread.get("id") != context.main_thread_id:
+            raise contracts.DaemonHostError("unexpected resumed thread")
+        self.requests.append({"method": "bind", "context": context})
 
     def read_notification(self) -> dict[str, object]:
         if not self.notifications:
@@ -578,7 +593,7 @@ class ReconcileHandler:
     ) -> object:
         del context, state, runtime
         self.calls.append("reconcile")
-        return daemon_contracts.HandlerResult.handled()
+        return contracts.HandlerResult.handled()
 
 
 class ExplodingOnceHandler:
@@ -645,13 +660,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
         }
 
     def _patch_app_server_client(self, fake_client: FakeRunDaemonClient) -> None:
-        original_client = self.core.app_server.AppServerClient
-
-        def fake_factory(*_args: object, **_kwargs: object) -> FakeRunDaemonClient:
-            return fake_client
-
-        self.addCleanup(setattr, self.core.app_server, "AppServerClient", original_client)
-        self.core.app_server.AppServerClient = fake_factory
+        self.host.notification_client = lambda _context: fake_client
 
     def _patch_daemon_communication(self) -> dict[str, list[object]]:
         original_start_mailbox = self.core.start_daemon_mailbox
@@ -717,7 +726,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.core.start_daemon_mailbox = observing_start_mailbox
 
             with self.assertRaises(StopDaemonLoop):
-                self.core.run_daemon(instance["instance_json"], handlers=[])
+                self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[])
 
             expected_state_root = Path(temp_root) / "state"
             expected_resolved_state_root = expected_state_root.resolve(strict=False)
@@ -742,7 +751,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.core.register_daemon_actor = observing_register
 
             with self.assertRaises(StopDaemonLoop):
-                self.core.run_daemon(instance["instance_json"], handlers=[])
+                self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[])
 
             profile = identity_profiles.get_actor_identity_profile("act-dev-daed00000001")
             self.assertEqual(
@@ -767,17 +776,17 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             communication = self._patch_daemon_communication()
 
             with self.assertRaisesRegex(ValueError, "actor identity profile role mismatch"):
-                self.core.run_daemon(instance["instance_json"], handlers=[])
+                self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[])
 
             self.assertEqual(communication["registered"], [])
 
     def test_run_daemon_continues_after_notification_idle_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            handler = RecordingHandler(name="recording", result=daemon_contracts.HandlerResult.ignored())
+            handler = RecordingHandler(name="recording", result=contracts.HandlerResult.ignored())
             fake_client = FakeRunDaemonClient(
                 notifications=[
-                    self.core.app_server.AppServerTimeoutError("idle"),
+                    contracts.DaemonHostTimeout("idle"),
                     self._completed(turn_id="turn-user-1"),
                     StopDaemonLoop("stop"),
                 ],
@@ -786,9 +795,9 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             communication = self._patch_daemon_communication()
 
             with self.assertRaises(StopDaemonLoop):
-                self.core.run_daemon(instance["instance_json"], handlers=[handler])
+                self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[handler])
 
-            self.assertEqual([request["method"] for request in fake_client.requests], ["thread/resume"])
+            self.assertEqual([request["method"] for request in fake_client.requests], ["bind"])
             self.assertEqual([trigger.type for trigger in handler.triggers], ["app_server.turn_completed"])
             self.assertEqual([trigger.origin_id for trigger in handler.triggers], ["turn-user-1"])
             self.assertEqual(len(communication["mailbox_started"]), 1)
@@ -804,7 +813,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             handler = ReconcileHandler()
             fake_client = FakeRunDaemonClient(
                 notifications=[
-                    self.core.app_server.AppServerTimeoutError("idle"),
+                    contracts.DaemonHostTimeout("idle"),
                     StopDaemonLoop("stop"),
                 ],
             )
@@ -814,6 +823,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             with self.assertRaises(StopDaemonLoop):
                 self.core.run_daemon(
                     instance["instance_json"],
+                    host=self.host,
                     handlers=[handler],
                 )
 
@@ -824,7 +834,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             handler = ReconcileHandler()
             clock = {"value": 0.0}
-            notification_step = self.core.app_server.DEFAULT_RPC_TIMEOUT_SECONDS / 2 + 0.1
+            notification_step = self.host.maintenance_interval_seconds / 2 + 0.1
 
             class AdvancingFakeClient(FakeRunDaemonClient):
                 def read_notification(self) -> dict[str, object]:
@@ -847,6 +857,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             with self.assertRaises(StopDaemonLoop):
                 self.core.run_daemon(
                     instance["instance_json"],
+                    host=self.host,
                     handlers=[handler],
                 )
 
@@ -857,7 +868,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             fake_client = FakeRunDaemonClient(
                 notifications=[
-                    self.core.app_server.AppServerTimeoutError("idle"),
+                    contracts.DaemonHostTimeout("idle"),
                     StopDaemonLoop("stop"),
                 ],
             )
@@ -881,7 +892,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.core.sweep_due_scheduled_triggers = fake_sweep
 
             with self.assertRaises(StopDaemonLoop):
-                self.core.run_daemon(instance["instance_json"], handlers=[])
+                self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[])
 
             self.assertEqual(len(sweep_calls), 1)
             self.assertEqual(sweep_calls[0]["actor_id"], "act-dev-daed00000001")
@@ -900,7 +911,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
                 def handle(self, context: object, state: object, runtime: object, trigger: object) -> object:
                     del context, state, runtime, trigger
                     order.append("handler")
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
             self_core = self.core
             handler = OrderedHandler()
@@ -923,7 +934,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self.core.sweep_due_scheduled_triggers = fake_sweep
 
             with self.assertRaises(StopDaemonLoop):
-                self.core.run_daemon(instance["instance_json"], handlers=[handler])
+                self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[handler])
 
             self.assertEqual(order, ["handler", "sweep"])
             state_payload = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
@@ -934,12 +945,12 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
             fake_client = FakeRunDaemonClient(
-                notifications=[self.core.app_server.AppServerUnavailableError("socket gone")],
+                notifications=[contracts.DaemonHostError("socket gone")],
             )
             self._patch_app_server_client(fake_client)
             self._patch_daemon_communication()
 
-            result = self.core.run_daemon(instance["instance_json"], handlers=[])
+            result = self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[])
 
             self.assertEqual(result, 1)
             state = json.loads(daemon_state.daemon_state_file(instance["instance_root"]).read_text(encoding="utf-8"))
@@ -949,8 +960,8 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
     def test_run_daemon_records_handler_exception_and_continues_to_later_notifications(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            exploding = ExplodingOnceHandler(result=daemon_contracts.HandlerResult.ignored())
-            recorder = RecordingHandler(name="recorder", result=daemon_contracts.HandlerResult.ignored())
+            exploding = ExplodingOnceHandler(result=contracts.HandlerResult.ignored())
+            recorder = RecordingHandler(name="recorder", result=contracts.HandlerResult.ignored())
             notification_one = self._completed(turn_id="turn-user-1")
             notification_two = self._completed(turn_id="turn-user-2")
             fake_client = FakeRunDaemonClient(
@@ -964,7 +975,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             self._patch_daemon_communication()
 
             with self.assertRaises(StopDaemonLoop):
-                self.core.run_daemon(instance["instance_json"], handlers=[exploding, recorder])
+                self.core.run_daemon(instance["instance_json"], host=self.host, handlers=[exploding, recorder])
 
             self.assertEqual(exploding.calls, 2)
             self.assertEqual([trigger.origin_id for trigger in recorder.triggers], ["turn-user-1", "turn-user-2"])
@@ -978,7 +989,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             instance = self._instance(temp_root)
             seen: list[tuple[str, str]] = []
             notification = self._completed(turn_id="turn-user-1")
-            result = daemon_contracts.HandlerResult.ignored()
+            result = contracts.HandlerResult.ignored()
 
             class OrderedHandler:
                 def __init__(self, name: str) -> None:
@@ -1013,6 +1024,7 @@ class DaemonCoreRunLoopTests(DaemonCoreTestCase):
             with self.assertRaises(StopDaemonLoop):
                 self.core.run_daemon(
                     instance["instance_json"],
+                    host=self.host,
                     handlers=[OrderedHandler("one"), OrderedHandler("two")],
                 )
 

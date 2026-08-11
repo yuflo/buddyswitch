@@ -11,7 +11,8 @@ import pytest
 from tests.support.paths import REPO_ROOT
 
 
-INSTANCE_DAEMON = Path("src/buddyswitch/launcher/instance_daemon.py")
+INSTANCE_DAEMON = Path("src/buddyswitch/foundation/daemon/instance_process.py")
+APPLICATION_DAEMON = Path("src/buddyswitch/application/daemon.py")
 APPLICATION_ENTRYPOINT = Path(
     "src/buddyswitch/application/entrypoints/instance_daemon.py"
 )
@@ -49,7 +50,7 @@ def test_application_validates_and_rejects_duplicate_inbound_events() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import TRACK
     from buddyswitch.foundation.composition import ModuleAssembly
-    from buddyswitch.launcher.notification_center import (
+    from buddyswitch.foundation.daemon.inbound import (
         InboundSourceRegistration,
     )
 
@@ -130,13 +131,13 @@ def test_application_validates_and_rejects_duplicate_inbound_events() -> None:
 
 def test_component_inbound_sources_are_contributed_once_and_generic_daemon_stays_neutral() -> None:
     from buddyswitch.application.build import build_application
-    from buddyswitch.launcher import instance_daemon
+    from buddyswitch.application import daemon as application_daemon
 
     application = build_application()
     assert [
         registration.event_type for registration in application.inbound_sources
     ] == ["track.comment.added", "im.message.created"]
-    assert instance_daemon.default_notify_subscriptions(
+    assert application_daemon.daemon_notify_subscriptions(
         application.inbound_sources
     ) == ["track.comment.added", "im.message.created"]
 
@@ -147,19 +148,21 @@ def test_component_inbound_sources_are_contributed_once_and_generic_daemon_stays
         if imported.startswith("buddyswitch.modules.track")
         or "track_comment" in imported
     ]
+    application_daemon_imports = _imports(REPO_ROOT / APPLICATION_DAEMON)
+    assert "buddyswitch.foundation.browser_runtime" in application_daemon_imports
     entrypoint_source = (REPO_ROOT / APPLICATION_ENTRYPOINT).read_text(
         encoding="utf-8"
     )
-    assert "application.inbound_sources" in entrypoint_source
+    assert "build_instance_daemon_application" in entrypoint_source
 
 
 def test_component_and_browser_inbound_handlers_remain_exact() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.foundation.browser_runtime import inbound as browser_inbound
-    from buddyswitch.launcher import instance_daemon
+    from buddyswitch.application import daemon as application_daemon
 
     application = build_application()
-    handlers = instance_daemon.default_daemon_handlers(
+    handlers = application_daemon.compose_instance_daemon_handlers(
         application.daemon_handlers,
         application.inbound_sources,
     )

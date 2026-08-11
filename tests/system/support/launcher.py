@@ -12,9 +12,9 @@ import time
 from pathlib import Path
 
 from buddyswitch.launcher import app_server
-from buddyswitch.launcher import central_daemon_core
-from buddyswitch.launcher import daemon_core
-from buddyswitch.launcher import daemon_mailbox
+from buddyswitch.foundation.daemon import central_service
+from buddyswitch.foundation.daemon import instance
+from buddyswitch.foundation.daemon import mailbox
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
 from buddyswitch.foundation.runtime_broker import lifecycle
 from tests.support.launcher import LauncherTestSupport
@@ -103,7 +103,7 @@ class SystemLauncherHarness(LauncherTestSupport):
         env["BUDDYSWITCH_TEST_APP_SERVER_STATE_FILE"] = str(state_file)
 
         shared_root = source_home_path / ".codex-buddyswitch"
-        central_paths = central_daemon_core.central_daemon_paths(shared_root)
+        central_paths = central_service.central_daemon_paths(shared_root)
         central_descriptor_id = self._ledger.register_process_descriptor(
             pid_file=central_paths.pid_file,
             cleanup_strategy="central_daemon_stop",
@@ -190,7 +190,7 @@ class SystemLauncherHarness(LauncherTestSupport):
         )
         cleanup_stack.callback(self._cleanup_process_descriptor, broker_descriptor_id)
 
-        daemon_pid_path = daemon_core.daemon_pid_file(instance_root)
+        daemon_pid_path = instance.daemon_pid_file(instance_root)
         daemon_descriptor_id = self._ledger.register_process_descriptor(
             pid_file=daemon_pid_path,
             cleanup_strategy="instance_daemon_stop",
@@ -199,7 +199,7 @@ class SystemLauncherHarness(LauncherTestSupport):
             owned_paths={
                 "pid": daemon_pid_path,
                 "pid_identity": process_identity.identity_file(daemon_pid_path),
-                "socket": daemon_mailbox.mailbox_socket_path(instance_root),
+                "socket": mailbox.mailbox_socket_path(instance_root),
             },
         )
         cleanup_stack.callback(self._cleanup_process_descriptor, daemon_descriptor_id)

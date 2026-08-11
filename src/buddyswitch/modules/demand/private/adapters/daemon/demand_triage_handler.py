@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 from buddyswitch.launcher import actor_side_thread  # noqa: E402
 from buddyswitch.launcher import app_server  # noqa: E402
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
 from buddyswitch.launcher import side_thread_registry  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.demand.private.adapters.daemon import (  # noqa: E402
@@ -145,18 +145,18 @@ class DemandTriageHandler:
         context: Any,
         state: Any,
         trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         actor_target = _actor_target(context)
         source_key, receipt = _claim_or_get(actor_target, trigger)
         if receipt["state"] in {"settled", "failed"}:
-            return daemon_contracts.HandlerResult.handled()
+            return contracts.HandlerResult.handled()
         self._launch_resolution(
             context,
             state,
             actor_target=actor_target,
             source_key=source_key,
         )
-        return daemon_contracts.HandlerResult.handled()
+        return contracts.HandlerResult.handled()
 
     def _launch_resolution(
         self,
@@ -389,7 +389,7 @@ class DemandTriageHandler:
         context: Any,
         state: Any,
         runtime: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         del runtime
         actor_target = _actor_target(context)
         ingress_changed = self._reconcile_ingress(
@@ -398,8 +398,8 @@ class DemandTriageHandler:
             actor_target,
         )
         if ingress_changed:
-            return daemon_contracts.HandlerResult.handled()
-        return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.handled()
+        return contracts.HandlerResult.ignored()
 
     def handle(
         self,
@@ -407,10 +407,10 @@ class DemandTriageHandler:
         state: Any,
         runtime: Any,
         trigger: Any,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         if not self.handles(trigger):
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         try:
             return self._start_triage(context, state, trigger)
         except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
+            return contracts.HandlerResult.failed(str(exc))

@@ -13,12 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 from tests.support.runtime import RuntimeWorkspaceTestCase
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 from buddyswitch.modules.track.private.state import track_comments as comment_repo  # noqa: E402
@@ -27,7 +28,7 @@ from buddyswitch.modules.demand.private.domain import demand_sys  # noqa: E402
 from buddyswitch.modules.demand.private.state import demands  # noqa: E402
 
 TRACK_COMMENT_DOMAIN_PATH = ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "domain" / "track_comments.py"
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
 HANDLER_PATH = ROOT / "src" / "buddyswitch" / "modules" / "track" / "private" / "adapters" / "daemon" / "track_comment_added_handler.py"
 MODULE_COUNTER = count()
 
@@ -36,7 +37,7 @@ def load_module(path: Path) -> Any:
     if not path.exists():
         raise AssertionError(f"expected module to exist: {path}")
     module_name = (
-        "buddyswitch.launcher.daemon_core"
+        "buddyswitch.foundation.daemon.instance"
         if path == DAEMON_CORE_PATH
         else "buddyswitch.modules.track.private.adapters.daemon.track_comment_added_handler"
     )
@@ -74,7 +75,7 @@ class FakeDaemonRuntime:
 class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.daemon_core = load_module(DAEMON_CORE_PATH)
+        self.instance = load_module(DAEMON_CORE_PATH)
         self.handler_module = load_module(HANDLER_PATH)
         self.handler = self.handler_module.TrackCommentAddedHandler()
 
@@ -101,7 +102,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
             "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
         }
         instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
-        context = self.daemon_core.load_daemon_context(instance_json)
+        context = self.instance.load_daemon_context(instance_json, host=AppActorDaemonHost())
         state = daemon_state.DaemonState.load(
             instance_root=instance_root,
             actor_id=actor_id,
@@ -128,7 +129,7 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
             if source_context is None
             else source_context
         )
-        return self.daemon_core.daemon_triggers.DaemonTrigger(
+        return self.instance.triggers.DaemonTrigger(
             source="mailbox_cross_actor_signal" if trigger_type == "track.comment.added" else "mailbox_local_trigger",
             type=trigger_type,
             target_identity_id=to_actor_id,
@@ -389,9 +390,9 @@ class TrackCommentAddedHandlerTests(RuntimeWorkspaceTestCase):
                 "app_server_socket": str(instance_root / "runtime" / "app-server.sock"),
             }
             instance_json.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
-            context = self.daemon_core.load_daemon_context(instance_json)
+            context = self.instance.load_daemon_context(instance_json, host=AppActorDaemonHost())
 
-            os.environ.update(self.daemon_core.derive_daemon_runtime_env(context))
+            os.environ.update(self.instance.derive_daemon_runtime_env(context))
             os.environ["BUDDYSWITCH_ACTOR_ID"] = "act-dev-track-handler"
             state_runtime.refresh_runtime_roots_from_env()
 

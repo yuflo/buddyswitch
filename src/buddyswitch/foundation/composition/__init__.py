@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
     from buddyswitch.launcher.cli_contract import CliCommandRegistration
-    from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
-    from buddyswitch.launcher.notification_center import InboundSourceRegistration
+    from buddyswitch.foundation.daemon.contracts import DaemonHandlerRegistration
+    from buddyswitch.foundation.daemon.inbound import InboundSourceRegistration
     from buddyswitch.launcher.web_contracts import (
         ActorConsoleSectionRegistration,
         WebRouteRegistration,

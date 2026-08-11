@@ -181,10 +181,11 @@ Demand work is split by responsibility:
 
 Both are exported as typed registrations by
 `src/buddyswitch/modules/demand/module.py`. The application selects that
-passive module once, and `instance_daemon.py` receives the registrations
-without importing Demand. Generic daemon code supplies triggers, schedules,
-reconciliation activation, and opaque checkpoints but contains no Demand
-meaning.
+passive module once, and `src/buddyswitch/application/daemon.py` turns the
+registrations into the finished ordered handler sequence. `instance_process.py`
+receives that sequence without importing Demand. Generic daemon code supplies
+triggers, schedules, reconciliation activation, and opaque checkpoints but
+contains no Demand meaning.
 
 ## Physical module and application composition
 

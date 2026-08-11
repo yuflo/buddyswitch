@@ -53,13 +53,12 @@ os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_SHARED_ROOT / "state"))
 
 from buddyswitch.launcher import (  # noqa: E402
     actor_session,
-    central_daemon,
-    central_daemon_core,
     cli_contract,
     codex_runtime,
     host_control,
     runtime_lock,
 )
+from buddyswitch.foundation.daemon import central_process, central_service  # noqa: E402
 
 
 DASH = "--"
@@ -363,8 +362,8 @@ def _dispatch_env_browser(args: list[str]) -> CommandResult:
 
 def _run_web(args: list[str]) -> int:
     parsed = _parse_web_args(args)
-    paths = central_daemon_core.central_daemon_paths(_shared_root_from_env())
-    daemon_result = central_daemon.start_central_daemon(paths)
+    paths = central_service.central_daemon_paths(_shared_root_from_env())
+    daemon_result = central_process.start_central_daemon(paths)
     env = os.environ.copy()
     env["BUDDYSWITCH_CENTRAL_DAEMON_SOCKET"] = str(daemon_result.get("socket_path") or paths.socket_path)
     argv = [str(_python()), "-m", "buddyswitch.application.entrypoints.web"]
@@ -376,7 +375,7 @@ def _run_web(args: list[str]) -> int:
         completed = subprocess.run(argv, cwd=PACKAGE_ROOT, env=env, check=False)
         return int(completed.returncode)
     finally:
-        central_daemon.stop_if_idle(paths)
+        central_process.stop_if_idle(paths)
 
 
 def _actor_session() -> actor_session.ActorSession:

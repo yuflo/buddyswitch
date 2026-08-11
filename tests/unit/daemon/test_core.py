@@ -15,16 +15,17 @@ from unittest.mock import patch
 
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.application.daemon_host import AppActorDaemonHost
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "src" / "buddyswitch" / "launcher"
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
-from buddyswitch.launcher import daemon_state  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
+from buddyswitch.foundation.daemon import state as daemon_state  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime  # noqa: E402
 
-DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "daemon_core.py"
-INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
+DAEMON_CORE_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
+INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance_process.py"
 MODULE_COUNTER = count()
 RUNTIME_ENV_KEYS = (
     "BUDDYSWITCH_SHARED_ROOT",
@@ -40,7 +41,7 @@ RUNTIME_ENV_KEYS = (
 def load_daemon_core() -> Any:
     if not DAEMON_CORE_PATH.exists():
         raise AssertionError(f"expected daemon core module to exist: {DAEMON_CORE_PATH}")
-    return importlib.reload(importlib.import_module("buddyswitch.launcher.daemon_core"))
+    return importlib.reload(importlib.import_module("buddyswitch.foundation.daemon.instance"))
 
 
 class StopDaemonLoop(RuntimeError):
@@ -89,7 +90,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 ),
                 encoding="utf-8",
             )
-            context = self.core.load_daemon_context(instance_json)
+            context = self.core.load_daemon_context(instance_json, host=AppActorDaemonHost())
             identity_route = self.core.identity_route_for_context(context)
             calls: list[dict[str, Any]] = []
             original_register = self.core.daemon_client.register_actor
@@ -112,7 +113,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
             self.assertEqual(row["identity_id"], "act-dev-daed00000001")
             self.assertEqual(row["role_id"], "dev")
             self.assertEqual(row["endpoint"]["kind"], "daemon_mailbox_socket")
-            self.assertEqual(row["endpoint"]["socket_path"], str(self.core.daemon_mailbox.mailbox_socket_path(context.instance_root)))
+            self.assertEqual(row["endpoint"]["socket_path"], str(self.core.mailbox.mailbox_socket_path(context.instance_root)))
             self.assertEqual(calls[0]["heartbeat"], {"kind": "central_daemon_rpc"})
             self.assertEqual(calls[0]["socket_path"], self.core.central_daemon_socket_path(context))
 
@@ -137,7 +138,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 ),
                 encoding="utf-8",
             )
-            context = self.core.load_daemon_context(instance_json)
+            context = self.core.load_daemon_context(instance_json, host=AppActorDaemonHost())
             identity_route = self.core.identity_route_for_context(context)
 
             self.assertEqual(identity_route, {"identity_id": "act-dev-daed00000001", "role_id": "dev"})
@@ -201,7 +202,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 }),
                 encoding="utf-8",
             )
-            context = self.core.load_daemon_context(instance_json)
+            context = self.core.load_daemon_context(instance_json, host=AppActorDaemonHost())
             state = daemon_state.DaemonState.load(
                 instance_root=instance_root,
                 actor_id=context.actor_id,
@@ -224,7 +225,7 @@ class DaemonCoreStateTests(DaemonCoreTestCase):
                 def reconcile(self, context: object, state: object, runtime: object) -> object:
                     del context, state, runtime
                     calls.append(self.name)
-                    return daemon_contracts.HandlerResult.handled()
+                    return contracts.HandlerResult.handled()
 
             class TriggerOnly:
                 name = "trigger-only"
@@ -264,11 +265,13 @@ class FakeBindingClient:
         self.error = error
         self.requests: list[dict[str, object]] = []
 
-    def request(self, method: str, params: dict[str, object] | None) -> dict[str, object]:
-        self.requests.append({"method": method, "params": params or {}})
+    def bind(self, context: contracts.DaemonContext) -> None:
+        self.requests.append({"method": "bind", "context": context})
         if self.error is not None:
             raise self.error
-        return self.result
+        thread = self.result.get("thread")
+        if not isinstance(thread, dict) or thread.get("id") != context.main_thread_id:
+            raise contracts.DaemonHostError("unexpected resumed thread")
 
 
 class DaemonCoreBindingTests(DaemonCoreTestCase):
@@ -297,39 +300,27 @@ class DaemonCoreBindingTests(DaemonCoreTestCase):
     def test_bind_main_thread_uses_thread_resume_for_current_instance_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
             client = FakeBindingClient()
 
             self.core.bind_main_thread(context, client)
 
-            self.assertEqual([request["method"] for request in client.requests], ["thread/resume"])
-            params = client.requests[0]["params"]
-            assert isinstance(params, dict)
-            self.assertEqual(params["threadId"], "thr-main")
-            self.assertEqual(params["cwd"], str(instance["workspace_dir"]))
-            self.assertEqual(
-                params["runtimeWorkspaceRoots"],
-                [
-                    str(instance["workspace_dir"]),
-                    str(Path(temp_root) / "project" / "workspace"),
-                ],
-            )
-            self.assertEqual(params["permissions"], "buddyswitch-runtime")
-            self.assertEqual(params["excludeTurns"], True)
+            self.assertEqual([request["method"] for request in client.requests], ["bind"])
+            self.assertIs(client.requests[0]["context"], context)
 
     def test_bind_main_thread_fails_on_wrong_resumed_thread_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
             client = FakeBindingClient(result={"thread": {"id": "thr-other"}})
 
-            with self.assertRaises(self.core.app_server.AppServerProtocolError):
+            with self.assertRaises(contracts.DaemonHostError):
                 self.core.bind_main_thread(context, client)
 
     def test_derive_daemon_runtime_env_projects_shared_state_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)
-            context = self.core.load_daemon_context(instance["instance_json"])
+            context = self.core.load_daemon_context(instance["instance_json"], host=AppActorDaemonHost())
 
             env = self.core.derive_daemon_runtime_env(context)
 

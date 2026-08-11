@@ -13,7 +13,6 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 FINAL_TOOL_RUNTIME_ROOT = ROOT / "src" / "buddyswitch" / "foundation" / "tool_runtime"
-FINAL_DAEMON_ROOT = ROOT / "src" / "buddyswitch" / "foundation" / "daemon"
 FINAL_DAEMON_CLIENT = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
 FINAL_ROLE_POLICY = ROOT / "src" / "buddyswitch" / "runtime_support" / "role_auth.py"
 RETIRED_TOOL_RUNTIME_ROOT = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime"
@@ -70,10 +69,6 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
         }
 
         self.assertEqual(actual_runtime_files, expected_runtime_files)
-        self.assertEqual(
-            {path.name for path in FINAL_DAEMON_ROOT.glob("*.py")},
-            {"__init__.py", "client.py"},
-        )
         self.assertTrue(FINAL_DAEMON_CLIENT.is_file())
         self.assertTrue(FINAL_ROLE_POLICY.is_file())
         self.assertFalse(RETIRED_TOOL_RUNTIME_ROOT.exists())

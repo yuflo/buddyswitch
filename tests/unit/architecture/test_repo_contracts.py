@@ -10,11 +10,11 @@ from tests.support.paths import REPO_ROOT
 
 
 GENERIC_DAEMON_PATHS = (
-    Path("src/buddyswitch/launcher/daemon_contracts.py"),
-    Path("src/buddyswitch/launcher/daemon_state.py"),
-    Path("src/buddyswitch/launcher/daemon_runtime.py"),
-    Path("src/buddyswitch/launcher/daemon_core.py"),
-    Path("src/buddyswitch/launcher/daemon_mailbox.py"),
+    Path("src/buddyswitch/foundation/daemon/contracts.py"),
+    Path("src/buddyswitch/foundation/daemon/state.py"),
+    Path("src/buddyswitch/foundation/daemon/runtime.py"),
+    Path("src/buddyswitch/foundation/daemon/instance.py"),
+    Path("src/buddyswitch/foundation/daemon/mailbox.py"),
     Path("src/buddyswitch/foundation/daemon/client.py"),
 )
 
@@ -163,14 +163,14 @@ def test_handlers_use_stable_contracts_and_one_composition_root() -> None:
     )
     for relative in handlers:
         imports = _imported_modules(REPO_ROOT / relative)
-        assert "buddyswitch.launcher.daemon_contracts" in imports
-        assert "buddyswitch.launcher.daemon_core" not in imports
+        assert "buddyswitch.foundation.daemon.contracts" in imports
+        assert "buddyswitch.foundation.daemon.instance" not in imports
 
-    instance_daemon = (
-        REPO_ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
+    instance_process = (
+        REPO_ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance_process.py"
     )
-    instance_imports = _imported_modules(instance_daemon)
-    assert "buddyswitch.launcher.daemon_core" in instance_imports
+    instance_imports = _imported_modules(instance_process)
+    assert "buddyswitch.foundation.daemon.instance" in instance_imports
     assert not [
         imported
         for imported in instance_imports

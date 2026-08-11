@@ -14,7 +14,7 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.launcher import daemon_mailbox  # noqa: E402
+from buddyswitch.foundation.daemon import mailbox  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.web import im_http_router  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.daemon import im_wake_handler  # noqa: E402
 import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
@@ -333,7 +333,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = Path(temp_root) / "mailbox.sock"
             dispatcher = _WakeHandlerDispatcher(identity_id=target_identity_id, role_id=target_role_id)
-            server = daemon_mailbox.DaemonMailboxServer(
+            server = mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
                 local_identity_id=target_identity_id,
                 local_role_id=target_role_id,
@@ -413,7 +413,7 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             socket_path = Path(temp_root) / "target-mailbox.sock"
             dispatcher = _WakeHandlerDispatcher(identity_id=target_identity_id, role_id=target_role_id)
-            server = daemon_mailbox.DaemonMailboxServer(
+            server = mailbox.DaemonMailboxServer(
                 socket_path=socket_path,
                 local_identity_id=target_identity_id,
                 local_role_id=target_role_id,

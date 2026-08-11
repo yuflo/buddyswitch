@@ -35,14 +35,13 @@ checkpoint, derives a product transition, or discovers product handlers.
 
 ## Product handlers
 
-The instance composition currently registers, among other owners:
+The application composition supplies the complete ordered sequence:
 
-- `DemandTriageHandler` for isolated inbound Demand triage recovery;
-- `TaskGoalHandler` for canonical Task/native Goal convergence;
-- `DemandOrchestrationHandler` for Demand reconciliation and Task selection;
-- Message built-in handlers and Browser Foundation registrations for their
-  current source lifecycles;
-- Track's contributed `track.comment.added` inbound registration and handler.
+1. module inbound registrations, including Track's contributed
+   `track.comment.added` handler and Communication's IM handler;
+2. the three Browser Foundation inbound registrations;
+3. `DemandTriageHandler`, `TaskGoalHandler`, and
+   `DemandOrchestrationHandler`, in that exact component-handler order.
 
 These modules may import product domains and App Server adapters. Generic
 daemon modules may not.
@@ -101,10 +100,12 @@ does not add a product switch to daemon core.
 `src/buddyswitch/application/composition.py` is the production component
 selection root and the only owner of the complete current component list. It
 selects each passive `ModuleAssembly` once in the explicit order Demand, Task,
-Search, Artifact, Track, Evidence. It owns concrete cross-component wiring such as
-Task's Demand resolver and the two Artifact Public callables injected into
-Track's consumer-owned ports. Search, Artifact, Track, and Evidence contribute no
-ordered reconciliation handler, so the exact handler order remains:
+Search, Artifact, Track, Evidence, Communication, Context. It owns concrete
+cross-component wiring such as Task's Demand resolver, Communication's Demand
+enqueue operation, and the two Artifact Public callables injected into Track's
+consumer-owned ports. Search, Artifact, Track, Evidence, Communication, and
+Context contribute no ordered reconciliation handler, so the exact handler
+order remains:
 
 ```text
 demand_triage -> task_goal -> demand_orchestration
@@ -113,11 +114,14 @@ demand_triage -> task_goal -> demand_orchestration
 `src/buddyswitch/application/build.py` validates that this order is a
 one-to-one permutation of the contributed handler names and flattens each
 typed registration, including Task's mailbox command factory and Track's
-inbound source. `src/buddyswitch/launcher/instance_daemon.py` imports generic
-daemon orchestration and the exact externally owned Browser registrations from
-`src/buddyswitch/foundation/browser_runtime/inbound.py`. It combines Message,
-contributed Track, and Browser handlers without importing Track or defining
-Browser event meaning.
+inbound source. `src/buddyswitch/application/daemon.py` explicitly combines
+module inbound registrations, the exact Browser Foundation registrations from
+`src/buddyswitch/foundation/browser_runtime/inbound.py`, and the contributed
+component handlers in that order. It also supplies the
+concrete App/Actor host from
+`src/buddyswitch/application/daemon_host.py`. Foundation Daemon
+receives the finished handlers, subscriptions, command factories, and host; it
+does not import Browser, Launcher, or application semantics.
 
 There is no plugin discovery, semantic event bus, central product workflow
 engine, or product service locator.
@@ -138,8 +142,8 @@ Allowed:
 product module -> typed daemon registration
 product handler -> daemon contracts/runtime
 product handler -> product domain or App Server adapter
-application -> selected product module + generic host
-instance_daemon -> daemon core + typed handler registrations
+application -> selected product module + Browser registrations + App/Actor host
+instance_process -> daemon core + supplied handlers and host
 product tool -> generic invocation facts + product-private runtime
 ```
 
@@ -153,4 +157,5 @@ product tool -> broad daemon service locator
 generic host -> Demand private package
 generic host -> Task private package
 generic host -> Track private package
+Foundation Daemon -> Launcher or application
 ```

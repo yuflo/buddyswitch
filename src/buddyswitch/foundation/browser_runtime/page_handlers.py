@@ -9,7 +9,7 @@ from typing import Any
 
 
 
-from buddyswitch.launcher import daemon_contracts  # noqa: E402
+from buddyswitch.foundation.daemon import contracts  # noqa: E402
 from buddyswitch.foundation.browser_runtime import lifecycle as browser_lifecycle  # noqa: E402
 from buddyswitch.foundation.browser_runtime import target as cdp_target  # noqa: E402
 
@@ -138,10 +138,10 @@ class BrowserPageExpiredHandler:
     def handles(self, trigger: Any) -> bool:
         return getattr(trigger, "type", None) == BROWSER_PAGE_EXPIRED_EVENT_TYPE
 
-    def handle(self, context: Any, state: Any, runtime: Any, trigger: Any) -> daemon_contracts.HandlerResult:
+    def handle(self, context: Any, state: Any, runtime: Any, trigger: Any) -> contracts.HandlerResult:
         del state
         if not self.handles(trigger):
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         try:
             _require_target_route(context, trigger)
             payload = _payload(trigger)
@@ -150,37 +150,37 @@ class BrowserPageExpiredHandler:
                 raise browser_lifecycle.BrowserLifecycleError("instance_root is required for browser target expiry")
             target_id = payload["tab_target_id"]
             if not _tracked_target(root, target_id):
-                return daemon_contracts.HandlerResult.handled()
+                return contracts.HandlerResult.handled()
             if browser_lifecycle.active_tab_target_id(root) == target_id and _parent_turn_is_running(runtime):
                 browser_lifecycle.refresh_tab_idle(
                     instance_root=root,
                     tab_target_id=target_id,
                     active=True,
                 )
-                return daemon_contracts.HandlerResult.handled()
+                return contracts.HandlerResult.handled()
             if browser_lifecycle.tab_idle_expiry_after_due_at(
                 instance_root=root,
                 tab_target_id=target_id,
                 due_at=_trigger_due_at(trigger),
                 idle_seconds=payload["idle_seconds"],
             ):
-                return daemon_contracts.HandlerResult.handled()
+                return contracts.HandlerResult.handled()
             endpoint = _browser_endpoint(context)
             if endpoint is None:
                 _forget_and_release_if_empty(root, target_id)
-                return daemon_contracts.HandlerResult.handled()
+                return contracts.HandlerResult.handled()
             if cdp_target.get_target_info(endpoint, target_id) is None:
                 _forget_and_release_if_empty(root, target_id)
-                return daemon_contracts.HandlerResult.handled()
+                return contracts.HandlerResult.handled()
             cdp_target.close_target(endpoint, target_id)
             if cdp_target.get_target_info(endpoint, target_id) is not None:
-                return daemon_contracts.HandlerResult.failed(
+                return contracts.HandlerResult.failed(
                     f"browser target still present after exact close: {target_id}"
                 )
             _forget_and_release_if_empty(root, target_id)
-            return daemon_contracts.HandlerResult.handled()
+            return contracts.HandlerResult.handled()
         except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
+            return contracts.HandlerResult.failed(str(exc))
 
 
 class BrowserFailedOpenPageCleanupHandler:
@@ -189,26 +189,26 @@ class BrowserFailedOpenPageCleanupHandler:
     def handles(self, trigger: Any) -> bool:
         return getattr(trigger, "type", None) == BROWSER_FAILED_OPEN_PAGE_CLEANUP_EVENT_TYPE
 
-    def handle(self, context: Any, state: Any, runtime: Any, trigger: Any) -> daemon_contracts.HandlerResult:
+    def handle(self, context: Any, state: Any, runtime: Any, trigger: Any) -> contracts.HandlerResult:
         del state, runtime
         if not self.handles(trigger):
-            return daemon_contracts.HandlerResult.ignored()
+            return contracts.HandlerResult.ignored()
         try:
             _require_target_route(context, trigger)
             return self._cleanup(context, _failed_open_cleanup_payload(trigger))
         except Exception as exc:
-            return daemon_contracts.HandlerResult.failed(str(exc))
+            return contracts.HandlerResult.failed(str(exc))
 
-    def _cleanup(self, context: Any, payload: dict[str, Any]) -> daemon_contracts.HandlerResult:
+    def _cleanup(self, context: Any, payload: dict[str, Any]) -> contracts.HandlerResult:
         endpoint = _browser_endpoint(context)
         if endpoint is None:
-            return daemon_contracts.HandlerResult.handled()
+            return contracts.HandlerResult.handled()
         try:
             targets = cdp_target.list_page_targets(endpoint)
         except Exception as exc:
             return self._reschedule_or_escalate(context, payload, reason=str(exc))
         if not _target_present(targets, payload["target_id"]):
-            return daemon_contracts.HandlerResult.handled()
+            return contracts.HandlerResult.handled()
         try:
             cdp_target.close_target(endpoint, payload["target_id"])
         except Exception as exc:
@@ -231,7 +231,7 @@ class BrowserFailedOpenPageCleanupHandler:
                     instance_root=root,
                     reason="failed_open_page_cleanup_complete",
                 )
-        return daemon_contracts.HandlerResult.handled()
+        return contracts.HandlerResult.handled()
 
     def _reschedule_or_escalate(
         self,
@@ -239,10 +239,10 @@ class BrowserFailedOpenPageCleanupHandler:
         payload: dict[str, Any],
         *,
         reason: str,
-    ) -> daemon_contracts.HandlerResult:
+    ) -> contracts.HandlerResult:
         root = _instance_root(context)
         if root is None:
-            return daemon_contracts.HandlerResult.failed(
+            return contracts.HandlerResult.failed(
                 f"instance_root is required for browser failed-open cleanup: {reason}"
             )
         attempts = payload["attempts"]
@@ -254,7 +254,7 @@ class BrowserFailedOpenPageCleanupHandler:
                 attempts=attempts + 1,
                 first_seen_at=payload.get("first_seen_at"),
             )
-            return daemon_contracts.HandlerResult.handled()
+            return contracts.HandlerResult.handled()
         print(
             f"Browser failed-open cleanup exhausted for target {payload['target_id']}: {reason}",
             file=sys.stderr,
@@ -263,7 +263,7 @@ class BrowserFailedOpenPageCleanupHandler:
             instance_root=root,
             reason="failed_open_page_cleanup_exhausted",
         )
-        return daemon_contracts.HandlerResult.handled()
+        return contracts.HandlerResult.handled()
 
 
 if __name__ == "__main__":

@@ -16,11 +16,12 @@ from typing import Any
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-INSTANCE_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "instance_daemon.py"
+INSTANCE_PROCESS_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance_process.py"
+APPLICATION_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "application" / "daemon.py"
 DAEMON_SH_PATH = (
     ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "daemon.sh"
 )
-CENTRAL_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "central_daemon.py"
+CENTRAL_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "central_process.py"
 MODULE_COUNTER = count()
 EXPECTED_SUBSCRIPTIONS = ["track.comment.added", "im.message.created"]
 EXPECTED_HANDLER_TYPES = [
@@ -46,9 +47,9 @@ EXPECTED_HANDLER_NAMES = [
 
 
 def load_instance_daemon() -> Any:
-    if not INSTANCE_DAEMON_PATH.exists():
-        raise AssertionError(f"expected module to exist: {INSTANCE_DAEMON_PATH}")
-    return importlib.reload(importlib.import_module("buddyswitch.launcher.instance_daemon"))
+    if not INSTANCE_PROCESS_PATH.exists():
+        raise AssertionError(f"expected module to exist: {INSTANCE_PROCESS_PATH}")
+    return importlib.reload(importlib.import_module("buddyswitch.foundation.daemon.instance_process"))
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -68,7 +69,7 @@ def imported_modules(path: Path) -> set[str]:
 
 class InstanceDaemonEntrypointTests(unittest.TestCase):
     def test_task_application_commands_are_registered_only_at_composition_root(self) -> None:
-        imports = imported_modules(INSTANCE_DAEMON_PATH)
+        imports = imported_modules(APPLICATION_DAEMON_PATH)
         self.assertFalse(
             [
                 name
@@ -78,7 +79,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             ]
         )
         self.assertNotIn("task_sys_daemon_adapter", imports)
-        factories = self.instance_daemon.default_application_command_factories(
+        factories = self.application_daemon.daemon_application_command_factories(
             self.application.daemon_handlers
         )
         expected = [
@@ -89,15 +90,20 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(factories, expected)
 
     def setUp(self) -> None:
-        self.instance_daemon = load_instance_daemon()
+        self.instance_process = load_instance_daemon()
         from buddyswitch.application.build import build_application
+        from buddyswitch.application import daemon as application_daemon
 
         self.application = build_application()
+        self.application_daemon = application_daemon
+        self.configuration = application_daemon.build_instance_daemon_application(
+            self.application
+        )
 
-    def test_default_daemon_handlers_are_built_through_notification_center(self) -> None:
-        imports = imported_modules(INSTANCE_DAEMON_PATH)
+    def test_default_daemon_handlers_are_built_through_inbound_registrations(self) -> None:
+        imports = imported_modules(APPLICATION_DAEMON_PATH)
 
-        self.assertIn("buddyswitch.launcher.notification_center", imports)
+        self.assertIn("buddyswitch.foundation.daemon.inbound", imports)
         self.assertIn("buddyswitch.foundation.browser_runtime.inbound", imports)
         self.assertNotIn("buddyswitch.launcher.message_inbound", imports)
         self.assertFalse(
@@ -116,12 +122,12 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertNotIn("task_" + "checkout_handler", imports)
         self.assertFalse((ROOT / "src" / "buddyswitch" / "launcher" / ("task_" + "checkout_handler.py")).exists())
         self.assertEqual(
-            self.instance_daemon.default_notify_subscriptions(
+            self.application_daemon.daemon_notify_subscriptions(
                 self.application.inbound_sources
             ),
             EXPECTED_SUBSCRIPTIONS,
         )
-        handlers = self.instance_daemon.default_daemon_handlers(
+        handlers = self.application_daemon.compose_instance_daemon_handlers(
             self.application.daemon_handlers,
             self.application.inbound_sources,
         )
@@ -130,7 +136,7 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(type(handlers[-1]).__name__, "DemandOrchestrationHandler")
 
     def test_component_handler_identity_must_match_registration_and_built_ins(self) -> None:
-        from buddyswitch.launcher.daemon_contracts import DaemonHandlerRegistration
+        from buddyswitch.foundation.daemon.contracts import DaemonHandlerRegistration
 
         class MismatchedHandler:
             name = "actual"
@@ -139,13 +145,14 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             ValueError,
             "daemon handler registration 'declared' constructed 'actual'",
         ):
-            self.instance_daemon.default_daemon_handlers(
+            self.application_daemon.compose_instance_daemon_handlers(
                 (
                     DaemonHandlerRegistration(
                         name="declared",
                         factory=MismatchedHandler,
                     ),
-                )
+                ),
+                (),
             )
 
         class BuiltInCollision:
@@ -155,39 +162,46 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
             ValueError,
             "duplicate daemon handler registration: browser_page_expired",
         ):
-            self.instance_daemon.default_daemon_handlers(
+            self.application_daemon.compose_instance_daemon_handlers(
                 (
                     DaemonHandlerRegistration(
                         name="browser_page_expired",
                         factory=BuiltInCollision,
                     ),
-                )
+                ),
+                (),
             )
 
     def test_run_passes_unified_daemon_handler_list_to_daemon_core(self) -> None:
         recorded: dict[str, object] = {}
-        original_run = self.instance_daemon.daemon_core.run_daemon
+        original_run = self.instance_process.instance.run_daemon
 
         def fake_run(
             instance_json: Path,
             *,
+            host: object,
             handlers: list[object] | None = None,
             notify_subscriptions: list[str] | None = None,
             application_command_factories: list[object] | None = None,
         ) -> int:
             recorded["instance_json"] = instance_json
+            recorded["host"] = host
             recorded["handlers"] = handlers or []
             recorded["notify_subscriptions"] = notify_subscriptions or []
             recorded["application_command_factories"] = application_command_factories or []
             return 0
 
-        self.addCleanup(setattr, self.instance_daemon.daemon_core, "run_daemon", original_run)
-        self.instance_daemon.daemon_core.run_daemon = fake_run
+        self.addCleanup(setattr, self.instance_process.instance, "run_daemon", original_run)
+        self.instance_process.instance.run_daemon = fake_run
 
-        result = self.instance_daemon.main(
+        result = self.instance_process.main(
             ["run", "--instance-json", "/tmp/inst.json"],
-            component_registrations=self.application.daemon_handlers,
-            inbound_source_registrations=self.application.inbound_sources,
+            host=self.configuration.host,
+            handlers=self.configuration.handlers,
+            notify_subscriptions=self.configuration.notify_subscriptions,
+            application_command_factories=(
+                self.configuration.application_command_factories
+            ),
         )
 
         self.assertEqual(result, 0)
@@ -200,34 +214,37 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
         self.assertEqual(
             recorded["application_command_factories"],
-            self.instance_daemon.default_application_command_factories(
+            self.application_daemon.daemon_application_command_factories(
                 self.application.daemon_handlers
             ),
         )
 
     def test_start_prints_json_from_daemon_core(self) -> None:
-        original_start = self.instance_daemon.daemon_core.start_daemon
+        original_start = self.instance_process.instance.start_daemon
         recorded: dict[str, object] = {}
 
         def fake_start(
             instance_json: Path,
             *,
+            host: object,
             handlers: list[object] | None = None,
             notify_subscriptions: list[str] | None = None,
         ) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
+            self.assertIs(host, self.configuration.host)
             recorded["handlers"] = handlers or []
             recorded["notify_subscriptions"] = notify_subscriptions or []
             return {"started": True, "pid": 4321}
 
-        self.addCleanup(setattr, self.instance_daemon.daemon_core, "start_daemon", original_start)
-        self.instance_daemon.daemon_core.start_daemon = fake_start
+        self.addCleanup(setattr, self.instance_process.instance, "start_daemon", original_start)
+        self.instance_process.instance.start_daemon = fake_start
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = self.instance_daemon.main(
+            result = self.instance_process.main(
                 ["start", "--instance-json", "/tmp/inst.json"],
-                component_registrations=self.application.daemon_handlers,
-                inbound_source_registrations=self.application.inbound_sources,
+                host=self.configuration.host,
+                handlers=self.configuration.handlers,
+                notify_subscriptions=self.configuration.notify_subscriptions,
             )
 
         self.assertEqual(result, 0)
@@ -239,48 +256,57 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
         self.assertEqual(recorded["notify_subscriptions"], EXPECTED_SUBSCRIPTIONS)
 
     def test_stop_prints_json_from_daemon_core(self) -> None:
-        original_stop = self.instance_daemon.daemon_core.stop_daemon
+        original_stop = self.instance_process.instance.stop_daemon
 
-        def fake_stop(instance_json: Path) -> dict[str, object]:
+        def fake_stop(
+            instance_json: Path,
+            *,
+            host: object,
+        ) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
+            self.assertIs(host, self.configuration.host)
             return {"ok": True, "terminated": True}
 
-        self.addCleanup(setattr, self.instance_daemon.daemon_core, "stop_daemon", original_stop)
-        self.instance_daemon.daemon_core.stop_daemon = fake_stop
+        self.addCleanup(setattr, self.instance_process.instance, "stop_daemon", original_stop)
+        self.instance_process.instance.stop_daemon = fake_stop
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = self.instance_daemon.main(
+            result = self.instance_process.main(
                 ["stop", "--instance-json", "/tmp/inst.json"],
-                component_registrations=self.application.daemon_handlers,
-                inbound_source_registrations=self.application.inbound_sources,
+                host=self.configuration.host,
+                handlers=self.configuration.handlers,
+                notify_subscriptions=self.configuration.notify_subscriptions,
             )
 
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue()), {"ok": True, "terminated": True})
 
     def test_status_prints_json_from_daemon_core(self) -> None:
-        original_status = self.instance_daemon.daemon_core.daemon_status
+        original_status = self.instance_process.instance.daemon_status
         recorded: dict[str, object] = {}
 
         def fake_status(
             instance_json: Path,
             *,
+            host: object,
             handlers: list[object] | None = None,
             notify_subscriptions: list[str] | None = None,
         ) -> dict[str, object]:
             self.assertEqual(instance_json, Path("/tmp/inst.json"))
+            self.assertIs(host, self.configuration.host)
             recorded["handlers"] = handlers or []
             recorded["notify_subscriptions"] = notify_subscriptions or []
             return {"live": True, "ready": True}
 
-        self.addCleanup(setattr, self.instance_daemon.daemon_core, "daemon_status", original_status)
-        self.instance_daemon.daemon_core.daemon_status = fake_status
+        self.addCleanup(setattr, self.instance_process.instance, "daemon_status", original_status)
+        self.instance_process.instance.daemon_status = fake_status
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = self.instance_daemon.main(
+            result = self.instance_process.main(
                 ["status", "--instance-json", "/tmp/inst.json", "--json"],
-                component_registrations=self.application.daemon_handlers,
-                inbound_source_registrations=self.application.inbound_sources,
+                host=self.configuration.host,
+                handlers=self.configuration.handlers,
+                notify_subscriptions=self.configuration.notify_subscriptions,
             )
 
         self.assertEqual(result, 0)

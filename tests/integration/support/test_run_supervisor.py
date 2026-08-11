@@ -543,15 +543,15 @@ def test_monitor_persists_descriptor_identity_before_owner_process_exits() -> No
 def test_serialized_central_daemon_strategy_runs_normal_stop_before_group_fallback(
     monkeypatch,
 ) -> None:
-    from buddyswitch.launcher import central_daemon
-    from buddyswitch.launcher import central_daemon_core
+    from buddyswitch.foundation.daemon import central_process
+    from buddyswitch.foundation.daemon import central_service
 
     run = RunEnvironment.create()
     pid = 0
     try:
         monkeypatch.setenv("BUDDYSWITCH_PYTHON", sys.executable)
         ledger = ResourceLedger(run.ledger_path, run.root)
-        paths = central_daemon_core.central_daemon_paths(run.root / "shared")
+        paths = central_service.central_daemon_paths(run.root / "shared")
         ledger.register_process_descriptor(
             pid_file=paths.pid_file,
             cleanup_strategy="central_daemon_stop",
@@ -563,7 +563,7 @@ def test_serialized_central_daemon_strategy_runs_normal_stop_before_group_fallba
                 "socket": paths.socket_path,
             },
         )
-        started = central_daemon.start_central_daemon(paths)
+        started = central_process.start_central_daemon(paths)
         pid = int(started["pid"])
         ledger.reconcile_descriptors()
 
@@ -969,7 +969,7 @@ def test_sigterm_runner_cleans_public_instance_start_detached_services_and_envir
             "central",
             "app_server",
             "runtime_broker",
-            "instance_daemon",
+            "instance_process",
         }
         assert Path(str(ready["browser_ttl_config"])).read_text(encoding="utf-8") == ready["browser_ttl_config_text"]
         for environment_root in ready["environment_roots"]:
