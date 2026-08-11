@@ -146,9 +146,18 @@ order, not arbitrary file counts.
 - leave Role-bound Host Control, Actor workspace build, Web and CLI as current
   consumers or later owners.
 
-### C6 remaining — Host Control, Actor build, Web and CLI hosts
+### C6C — Actor Environment
 
-- refresh each remaining independently runnable owner after C6B acceptance;
+- separate current Role/Skill resolution from product-neutral Actor workspace
+  publication through one explicit resolved bootstrap projection;
+- move atomic Git-free Actor workspace publication and cleanup into the direct
+  Actor Runtime owner;
+- preserve the stable application build entrypoint and leave central Role
+  selection as the single S6-owned input, not a Foundation dependency.
+
+### C6 remaining — Host Control, Web and CLI hosts
+
+- refresh each remaining independently runnable owner after C6C acceptance;
 - converge remaining host and packaged asset ownership without inheriting C6A
   execution authority;
 - keep interface ownership separate from product semantics;

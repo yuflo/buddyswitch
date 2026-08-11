@@ -15,13 +15,14 @@
 | S5 C5B acceptance | `05-foundation-convergence-plan/daemon/S5-C5B-ACCEPTANCE.md`; patch `9e7da89c…`; FINAL `e91948e42eb0498bbc473714cd48e09d` |
 | S5 C6A acceptance | `05-foundation-convergence-plan/app-server/S5-C6A-ACCEPTANCE.md`; patch `63f54a92…`; FINAL `2136e109979a470485151eb4b0c132e1` |
 | S5 C6B acceptance | `05-foundation-convergence-plan/actor-runtime/S5-C6B-ACCEPTANCE.md`; patch `6548db01…`; FINAL `7678be695ad14ba1b3cfdf2780a9670a` |
+| S5 C6C handoff | `05-foundation-convergence-plan/actor-environment/S5-C6C-READY-REVIEW.md`; packet `BS-MM-S5-ACTOR-ENVIRONMENT-R1-20260811-01`; topology `S5C6CP-20260811-01` |
 | Active stage | S5 — Foundation Convergence |
-| State | C1–C6B ACCEPTED — remaining C6 PREPARATION ONLY |
-| Runtime migration authorized | none; next C6 owner requires a fresh source-bound READY packet |
+| State | C1–C6B ACCEPTED; C6C READY |
+| Runtime migration authorized | C6C Actor Environment only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | commit/push C6B, then refresh and READY-review the next remaining C6 owner |
+| Next gate | execute C6C from the exact clean READY commit and return its Result Packet |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State, Process, Runtime Broker, Daemon, App Server and Actor Runtime owners |
 
 ## Stage ledger
@@ -33,7 +34,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C6B ACCEPTED — remaining C6 PREPARATION ONLY | S4 | coordinating hub | refresh and READY-review the next remaining C6 owner; C7 blocked |
+| S5 Foundation | C1–C6B ACCEPTED; C6C READY | S4 | coordinating hub | execute C6C only; later C6/C7 blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -522,6 +523,7 @@ refresh and READY preparation are unblocked.
 | 2026-08-11 | S5 C6A App Server acceptance | ACCEPTED | `05-foundation-convergence-plan/app-server/S5-C6A-ACCEPTANCE.md`; patch `63f54a92…`; focused/affected `622998aa54c742918697d9cd2744f1a2`, `28c9b73167eb42dba116cc0cf9d72a43`, `d4d529b1c5ef42ad8be47f0cf89907d3`; FINAL `2136e109979a470485151eb4b0c132e1` | commit/push C6A checkpoint, then refresh the next C6 owner from committed source; never resume C6A R1 |
 | 2026-08-11 | S5 C6B Actor Runtime handoff | READY | `05-foundation-convergence-plan/actor-runtime/S5-C6B-READY-REVIEW.md`; direct `d38fa5baa4a9407ea08119ba6965c3b7`; affected `2f61b0ec789f4a28888c6176bf1a9b16`; topology `S5C6BP-20260811-01`; packet `BS-MM-S5-ACTOR-RUNTIME-R1-20260811-01`; D-066 | execute C6B only from the exact clean preparation commit; remaining C6/C7 blocked |
 | 2026-08-11 | S5 C6B Actor Runtime acceptance | ACCEPTED | `05-foundation-convergence-plan/actor-runtime/S5-C6B-ACCEPTANCE.md`; patch `6548db01…`; direct/affected `60bf541659eb496f98ad600ae4a584b4`, `aaefa823fe4b4fe3bf5e618f09a8ce14`; System `c666068cbbfe467c8e1b2ad925ffcda5`; FINAL `7678be695ad14ba1b3cfdf2780a9670a` | commit/push C6B checkpoint, then refresh the next remaining C6 owner; never resume C6B R1 |
+| 2026-08-11 | S5 C6C Actor Environment handoff | READY | `05-foundation-convergence-plan/actor-environment/S5-C6C-READY-REVIEW.md`; direct `7e3800b10a9e4dbaa69c019ad52eb9c0`; private boundary `f70f9357f31c4507863974942352895b`; System `d743845fca5847a7822f10c293cb5961`; topology `S5C6CP-20260811-01`; packet `BS-MM-S5-ACTOR-ENVIRONMENT-R1-20260811-01`; D-067 | execute C6C only from the exact clean READY commit; later C6/C7/S6 remain blocked |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -543,11 +545,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / remaining C6 PREPARATION ONLY
-Master state: C1–C6B ACCEPTED — remaining C6 PREPARATION ONLY
-Goal Packet: none; BS-MM-S5-ACTOR-RUNTIME-R1-20260811-01 consumed
+Stage: S5 / Foundation / C6C Actor Environment
+Master state: C1–C6B ACCEPTED; C6C READY
+Goal Packet: BS-MM-S5-ACTOR-ENVIRONMENT-R1-20260811-01 READY
 Execution session: none
-Last hub checkpoint: C6B acceptance; patch `6548db01...`, FINAL `7678be695ad14ba1b3cfdf2780a9670a`
-Next action: commit/push C6B candidate, then refresh and READY-review the next remaining C6 owner
-No-polling state: not entered
+Last hub checkpoint: C6C READY; direct `7e3800b1...`, System `d743845f...`, topology `S5C6CP-20260811-01`
+Next action: commit/push READY preparation, then user starts one independent C6C task
+No-polling state: enter after handoff
 ```

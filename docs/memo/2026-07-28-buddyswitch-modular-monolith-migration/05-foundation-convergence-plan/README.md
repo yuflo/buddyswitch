@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C6B ACCEPTED — remaining C6 PREPARATION ONLY`
-> Current execution authority: none; next C6 owner requires a fresh source-bound READY packet
+> Stage state: `C1–C6B ACCEPTED; C6C READY`
+> Current execution authority: C6C Actor Environment only
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -29,8 +29,10 @@ also consumed. C6A is accepted in
 `app-server/S5-C6A-ACCEPTANCE.md`; its R1 packet is consumed. Remaining
 C6B Actor Session/side runtime is accepted at
 `actor-runtime/S5-C6B-ACCEPTANCE.md`; its R1 packet is consumed. Remaining
-Host Control/Actor-build/Web/CLI convergence, RoleHost and final S5 acceptance
-remain unauthorized.
+Actor Environment C6C is READY at
+`actor-environment/S5-C6C-READY-REVIEW.md`. Host Control, remaining
+Actor/Web/CLI convergence, RoleHost and final S5 acceptance remain
+unauthorized.
 
 ## Remaining checkpoints
 
@@ -44,7 +46,8 @@ remain unauthorized.
 | C5B | central and instance Daemon host | ACCEPTED |
 | C6A | App Server Python owner plus live shell projection | ACCEPTED |
 | C6B | Actor Session and side-thread runtime | ACCEPTED |
-| C6 remaining | Host Control, Actor build, Web and CLI physical convergence | PREPARATION ONLY |
+| C6C | Actor Environment publication | READY |
+| C6 remaining | Host Control, Web and CLI physical convergence | BLOCKED pending refresh |
 | C7 | final guidance, residue proof and frozen S5 acceptance | BLOCKED |
 
 Checkpoint labels are program navigation. A checkpoint is handed off only

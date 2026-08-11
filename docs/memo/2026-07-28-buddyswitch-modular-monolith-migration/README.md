@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6B ACCEPTED — remaining C6 PREPARATION ONLY
-> Runtime authorization: none; next C6 owner requires a fresh source-bound READY packet
+> Current state: S0–S4 ACCEPTED; S5 C1–C6B ACCEPTED; C6C READY
+> Runtime authorization: C6C Actor Environment only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6B ACCEPTED — remaining C6 PREPARATION ONLY |
+| S5 | `05-foundation-convergence.md` | C1–C6B ACCEPTED; C6C READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -241,6 +241,15 @@ frozen FINAL `7678be69...` passed. C6B is accepted in
 `05-foundation-convergence-plan/actor-runtime/S5-C6B-ACCEPTANCE.md`; its packet
 is consumed. Only remaining C6 source refresh and READY preparation are
 unlocked; C7 and S6 remain unauthorized.
+
+C6C source refresh then separated product-neutral atomic Actor workspace
+publication from central Role/Skill selection. Direct baseline `7e3800b1...`,
+private invocation `f70f9357...`, consumer System `d743845f...` and topology
+`S5C6CP-20260811-01` passed. D-067 selects one resolved bootstrap projection:
+the current application produces it from existing Role/Skill truth, while the
+Foundation publisher performs one code-free atomic write path and imports no
+Role implementation. Packet `BS-MM-S5-ACTOR-ENVIRONMENT-R1-20260811-01` is
+READY. Only C6C is authorized; later C6, C7 and S6 remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,
