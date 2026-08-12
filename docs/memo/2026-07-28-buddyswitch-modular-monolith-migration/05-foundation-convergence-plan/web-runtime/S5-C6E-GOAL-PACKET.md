@@ -1,5 +1,8 @@
 # S5 C6E Web Runtime Goal Packet
 
+> Status: `CONSUMED — R1 REJECTED; DO NOT EXECUTE`
+> Continuation: `S5-C6E-R2-GOAL-PACKET.md`
+
 ## Copy-paste request
 
 ```text

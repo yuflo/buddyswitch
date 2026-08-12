@@ -29,6 +29,11 @@ roles, and adding actors does not create new test obligations.
   change the relevant path or ownership state between the phases and assert the
   real external effect and reported result; planner rejection alone does not
   prove executor safety.
+- When a lower-layer independence claim is material, inspect every executable
+  representation owned by that boundary: imports, subprocess/module arguments,
+  embedded module or path strings, shell invocations, and package projections.
+  An AST import graph alone cannot prove the claim. Keep the check bounded to
+  the owner and stable forbidden roots; do not build a general static analyzer.
 
 ## Controller
 

@@ -1,6 +1,6 @@
 # S5 C6E Web Runtime READY Review
 
-> Decision: `READY`
+> Decision: `CONSUMED — R1 REJECTED; DO NOT EXECUTE`
 > Packet: `BS-MM-S5-WEB-RUNTIME-R1-20260812-01`
 > Executable base: `cfcbf387726359d766889114eb87688c211f0276`
 > Entry HEAD: exact pushed READY coordination commit supplied by the hub

@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6D ACCEPTED; C6E READY
-> Runtime authorization: `BS-MM-S5-WEB-RUNTIME-R1-20260812-01` only
+> Current state: S0–S4 ACCEPTED; S5 C1–C6D ACCEPTED; C6E R2 READY
+> Runtime authorization: `BS-MM-S5-WEB-RUNTIME-R2-20260812-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6D ACCEPTED; C6E READY |
+| S5 | `05-foundation-convergence.md` | C1–C6D ACCEPTED; C6E R2 READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -279,8 +279,11 @@ remaining CliHost from that clean checkpoint. Web preservation runs
 `05e68f98a675479d91013f53abcaa6fe`,
 `f74dd3efc6824a2f97a903b1a28aeea2` and real System
 `c9c8b863f4b14f22bea5d7b26f92eea3` pass; topology
-`S5C6EP-20260812-01` is acyclic. Only packet
-`BS-MM-S5-WEB-RUNTIME-R1-20260812-01` may execute.
+`S5C6EP-20260812-01` is acyclic. R1 completed the move and passed FINAL, but
+hub review found its Open-TUI builder still embedded the concrete Application
+CLI module. R1 is consumed; the candidate remains intact, and only bounded
+packet `BS-MM-S5-WEB-RUNTIME-R2-20260812-01` may finish that dependency
+inversion and rerun frozen FINAL.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,
