@@ -13,6 +13,7 @@ from pathlib import Path
 
 from buddyswitch.application.build import build_application
 from tests.support.paths import REPO_ROOT
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
@@ -222,6 +223,7 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
             },
             instance_json_path=self._instance_json(),
             manifest_path=MANIFEST,
+            manifest_loader=env_manifest.load_manifest,
         )
         self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:

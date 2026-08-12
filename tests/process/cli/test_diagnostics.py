@@ -1,4 +1,4 @@
-"""Runless turn runtime command contract tests."""
+"""Runless diagnostics command contract tests."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ ROOT = REPO_ROOT
 from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 
 
-class TurnRuntimeRunlessTests(unittest.TestCase):
+class RunlessDiagnosticsTests(unittest.TestCase):
     def _invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
         return run_process(
             [

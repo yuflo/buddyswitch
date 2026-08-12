@@ -30,7 +30,7 @@ from buddyswitch.modules.communication.private.domain import messages as message
 from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 from buddyswitch.foundation.tool_runtime import results as tool_results  # noqa: E402
 from buddyswitch.foundation.tool_runtime import context as runtime_context  # noqa: E402
-from buddyswitch.runtime_support import turn_runtime  # noqa: E402
+from buddyswitch.foundation.cli_runtime import diagnostics  # noqa: E402
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
@@ -68,7 +68,7 @@ class EnvToolResponseRegistryTests(EnvToolResponseCase):
                 demand_catalog["action_semantics"][action],
                 registry_demand["action_semantics"][action],
             )
-        self.assertNotEqual(full.get("tool_catalog"), turn_runtime._build_env_tools_desc())
+        self.assertNotEqual(full.get("tool_catalog"), diagnostics._build_env_tools_desc())
         self.assertNotIn("tool_catalog", summary)
         self.assertNotIn("operation_semantics", summary)
         self.assertEqual(summary.get("tool_affordances"), tool_catalog.compact_tool_affordances())

@@ -32,6 +32,13 @@ assemble that same required input. Foundation validates it and projects only
 the supplied facts into its owner-local shell environment; it has no default,
 fallback, discovery, provider, registry, locator or second executable path.
 
+The cleanup and diagnostics entrypoints remain stable Application process
+interfaces. Generic cleanup execution is owned by
+`src/buddyswitch/foundation/state/cleanup.py`; runless status and Tool-catalog
+projection are owned by
+`src/buddyswitch/foundation/cli_runtime/diagnostics.py`. Application supplies
+their required current Role-source facts directly.
+
 Foundation CLI Runtime imports or embeds no Application, Launcher, component,
 runtime-support or concrete Role implementation. Current Role assets remain
 unchanged under `src/buddyswitch/launcher/assets/roles/` as an Application/S6

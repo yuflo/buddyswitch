@@ -76,6 +76,7 @@ def test_cli_runtime_has_one_direct_owner_and_launcher_is_inert() -> None:
         "__init__.py",
         "config.py",
         "contracts.py",
+        "diagnostics.py",
         "runtime.py",
         "shell/browser_cockpit.sh",
         "shell/cleanup.sh",

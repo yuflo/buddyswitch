@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.runtime_support.env_cleanup import (
+from buddyswitch.foundation.composition import (
     CleanupContribution,
     CleanupIndexProjection,
     OwnedStatePath,

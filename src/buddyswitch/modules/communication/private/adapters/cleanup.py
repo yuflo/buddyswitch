@@ -6,12 +6,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.runtime_support.env_cleanup import (
+from buddyswitch.foundation.composition import (
     CleanupContribution,
     CleanupIndexProjection,
     OwnedStatePath,
-    iter_directory_files,
 )
+from buddyswitch.foundation.state.cleanup import iter_directory_files
 
 
 _MESSAGE_OBJECTS = Path("im/messages")

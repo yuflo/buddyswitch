@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
@@ -86,6 +87,7 @@ class TrackEnvToolTests(RuntimeWorkspaceTestCase):
             request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
+            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)

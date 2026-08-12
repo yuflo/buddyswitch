@@ -13,7 +13,20 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 from buddyswitch.application.build import build_application  # noqa: E402
-from buddyswitch.runtime_support import env_cleanup  # noqa: E402
+from buddyswitch.application.role_source import load_valid_role_ids  # noqa: E402
+from buddyswitch.foundation.composition import (  # noqa: E402
+    CleanupContribution,
+    CleanupIndexProjection,
+    OwnedStatePath,
+)
+from buddyswitch.foundation.state import cleanup as state_cleanup  # noqa: E402
+
+
+def _build_cleanup_plan(**kwargs: object) -> dict[str, object]:
+    return state_cleanup.build_cleanup_plan(
+        valid_role_ids_loader=load_valid_role_ids,
+        **kwargs,
+    )
 
 
 class CleanupRepositoryTests(unittest.TestCase):
@@ -127,7 +140,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         return workspace
 
     def test_cleanup_plan_excludes_handoff_indexing(self) -> None:
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="role",
             role="pm",
             repo_root=self.repo_root,
@@ -143,15 +156,43 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertNotIn("handoff_objects", plan.get("counts_by_category", {}))
         self.assertNotIn("task_" + "objects", plan.get("counts_by_category", {}))
 
+    def test_cleanup_plan_uses_required_valid_role_projection(self) -> None:
+        loaded_paths: list[Path] = []
+
+        def load_valid_roles(path: Path) -> frozenset[str]:
+            loaded_paths.append(path)
+            return frozenset({"pm"})
+
+        plan = state_cleanup.build_cleanup_plan(
+            scope="role",
+            role="pm",
+            repo_root=self.repo_root,
+            manifest_path=self.manifest_path,
+            valid_role_ids_loader=load_valid_roles,
+            contributions=(),
+        )
+
+        self.assertEqual(loaded_paths, [self.manifest_path])
+        self.assertEqual(plan["role"], "pm")
+        with self.assertRaisesRegex(ValueError, "valid Role source"):
+            state_cleanup.build_cleanup_plan(
+                scope="all-data",
+                role=None,
+                repo_root=self.repo_root,
+                manifest_path=self.manifest_path,
+                valid_role_ids_loader=lambda _path: {"pm"},  # type: ignore[arg-type,return-value]
+                contributions=(),
+            )
+
     def test_execute_all_data_cleanup_recreates_active_skeleton_only(self) -> None:
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
-        result = env_cleanup.execute_cleanup_plan(
+        result = state_cleanup.execute_cleanup_plan(
             plan,
             contributions=self.product_cleanup,
         )
@@ -206,7 +247,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             },
         )
         for role in ("pm", "dev"):
-            role_plan = env_cleanup.build_cleanup_plan(
+            role_plan = _build_cleanup_plan(
                 scope="role",
                 role=role,
                 repo_root=self.repo_root,
@@ -223,7 +264,7 @@ class CleanupRepositoryTests(unittest.TestCase):
                 msg=role_plan,
             )
             self.assertEqual(role_plan["message_object_ids"], ["msg-test"])
-        unrelated_plan = env_cleanup.build_cleanup_plan(
+        unrelated_plan = _build_cleanup_plan(
             scope="role",
             role="design",
             repo_root=self.repo_root,
@@ -235,7 +276,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             unrelated_plan["path_categories"],
             msg=unrelated_plan,
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -298,7 +339,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         retired_nested.parent.mkdir(parents=True, exist_ok=True)
         retired_nested.write_text("{", encoding="utf-8")
 
-        role_plan = env_cleanup.build_cleanup_plan(
+        role_plan = _build_cleanup_plan(
             scope="role",
             role="pm",
             repo_root=self.repo_root,
@@ -346,7 +387,7 @@ class CleanupRepositoryTests(unittest.TestCase):
                 msg=(warning_path, role_plan["warnings"]),
             )
 
-        role_result = env_cleanup.execute_cleanup_plan(
+        role_result = state_cleanup.execute_cleanup_plan(
             role_plan,
             contributions=self.product_cleanup,
         )
@@ -368,7 +409,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         external_before_all_data = external_target.read_text(encoding="utf-8")
 
         self._write_json(valid_path, valid_message)
-        all_data_plan = env_cleanup.build_cleanup_plan(
+        all_data_plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -400,7 +441,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             len(expected_message_paths),
         )
 
-        all_data_result = env_cleanup.execute_cleanup_plan(
+        all_data_result = state_cleanup.execute_cleanup_plan(
             all_data_plan,
             contributions=self.product_cleanup,
         )
@@ -480,14 +521,14 @@ class CleanupRepositoryTests(unittest.TestCase):
             },
         )
 
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="role",
             role="dev",
             repo_root=self.repo_root,
             manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
-        result = env_cleanup.execute_cleanup_plan(
+        result = state_cleanup.execute_cleanup_plan(
             plan,
             contributions=self.product_cleanup,
         )
@@ -509,7 +550,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         dev_owned.parent.mkdir(parents=True, exist_ok=True)
         dev_owned.write_text("dev-owned", encoding="utf-8")
 
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="role",
             role="pm",
             repo_root=self.repo_root,
@@ -525,7 +566,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             ),
             msg=plan,
         )
-        result = env_cleanup.execute_cleanup_plan(
+        result = state_cleanup.execute_cleanup_plan(
             plan,
             contributions=self.product_cleanup,
         )
@@ -533,7 +574,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertFalse(pm_owned.exists())
         self.assertTrue(dev_owned.exists())
 
-        all_data_plan = env_cleanup.build_cleanup_plan(
+        all_data_plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -541,7 +582,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             shared_root=self.shared_root,
             contributions=self.product_cleanup,
         )
-        all_data_result = env_cleanup.execute_cleanup_plan(
+        all_data_result = state_cleanup.execute_cleanup_plan(
             all_data_plan,
             contributions=self.product_cleanup,
         )
@@ -553,10 +594,10 @@ class CleanupRepositoryTests(unittest.TestCase):
         selected = self._path(relative_path)
         selected.parent.mkdir(parents=True, exist_ok=True)
         selected.write_text("planned", encoding="utf-8")
-        contribution = env_cleanup.CleanupContribution(
+        contribution = CleanupContribution(
             category="indexed_stale",
             discover=lambda _root: (
-                env_cleanup.OwnedStatePath(
+                OwnedStatePath(
                     relative_path=relative_path,
                     owner_roles=("pm",),
                     index_record={
@@ -566,12 +607,12 @@ class CleanupRepositoryTests(unittest.TestCase):
                     },
                 ),
             ),
-            index_projection=env_cleanup.CleanupIndexProjection(
+            index_projection=CleanupIndexProjection(
                 object_ids_field="artifact_object_ids",
                 records_field="artifact_records",
             ),
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -588,7 +629,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         outside_target.write_text("outside-relative", encoding="utf-8")
         selected.parent.symlink_to(outside_parent, target_is_directory=True)
 
-        result = env_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
+        result = state_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
 
         self.assertEqual(outside_target.read_text(encoding="utf-8"), "outside-relative")
         self.assertNotIn(relative_path, result["deleted_paths"])
@@ -609,17 +650,17 @@ class CleanupRepositoryTests(unittest.TestCase):
         selected = self._path(relative_path)
         selected.parent.mkdir(parents=True, exist_ok=True)
         selected.write_text("planned", encoding="utf-8")
-        contribution = env_cleanup.CleanupContribution(
+        contribution = CleanupContribution(
             category="state_root_swap",
             discover=lambda _root: (
-                env_cleanup.OwnedStatePath(
+                OwnedStatePath(
                     relative_path=relative_path,
                     owner_roles=("pm",),
                 ),
             ),
             required_directories=("required/current",),
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -637,7 +678,7 @@ class CleanupRepositoryTests(unittest.TestCase):
 
         raised: ValueError | None = None
         try:
-            env_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
+            state_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
         except ValueError as exc:
             raised = exc
 
@@ -653,7 +694,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         selected = workspace / "private" / "notes" / "draft.md"
         selected.parent.mkdir(parents=True, exist_ok=True)
         selected.write_text("planned-private", encoding="utf-8")
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="role",
             role="pm",
             repo_root=self.repo_root,
@@ -672,7 +713,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         outside_target.write_text("outside-private", encoding="utf-8")
         selected.parent.symlink_to(outside_parent, target_is_directory=True)
 
-        result = env_cleanup.execute_cleanup_plan(plan, contributions=())
+        result = state_cleanup.execute_cleanup_plan(plan, contributions=())
 
         self.assertEqual(outside_target.read_text(encoding="utf-8"), "outside-private")
         self.assertEqual(
@@ -702,7 +743,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             json.dumps({"actor_id": "act-pm-shared", "role": "pm"}),
             encoding="utf-8",
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -723,7 +764,7 @@ class CleanupRepositoryTests(unittest.TestCase):
 
         raised: ValueError | None = None
         try:
-            env_cleanup.execute_cleanup_plan(plan, contributions=())
+            state_cleanup.execute_cleanup_plan(plan, contributions=())
         except ValueError as exc:
             raised = exc
 
@@ -742,10 +783,10 @@ class CleanupRepositoryTests(unittest.TestCase):
         selected = self._path(relative_path)
         selected.parent.mkdir(parents=True, exist_ok=True)
         selected.write_text("planned", encoding="utf-8")
-        contribution = env_cleanup.CleanupContribution(
+        contribution = CleanupContribution(
             category="indexed_missing",
             discover=lambda _root: (
-                env_cleanup.OwnedStatePath(
+                OwnedStatePath(
                     relative_path=relative_path,
                     owner_roles=("pm",),
                     index_record={
@@ -755,12 +796,12 @@ class CleanupRepositoryTests(unittest.TestCase):
                     },
                 ),
             ),
-            index_projection=env_cleanup.CleanupIndexProjection(
+            index_projection=CleanupIndexProjection(
                 object_ids_field="artifact_object_ids",
                 records_field="artifact_records",
             ),
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -770,7 +811,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertEqual(plan["artifact_object_ids"], ["art-missing-execution"])
         selected.unlink()
 
-        result = env_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
+        result = state_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
 
         self.assertNotIn(relative_path, result["deleted_paths"])
         self.assertEqual(result["deleted_count"], 0)
@@ -790,10 +831,10 @@ class CleanupRepositoryTests(unittest.TestCase):
         selected = self._path(relative_path)
         selected.parent.mkdir(parents=True, exist_ok=True)
         selected.write_text("probe", encoding="utf-8")
-        contribution = env_cleanup.CleanupContribution(
+        contribution = CleanupContribution(
             category="probe_objects",
             discover=lambda _root: (
-                env_cleanup.OwnedStatePath(
+                OwnedStatePath(
                     relative_path=relative_path,
                     owner_roles=("pm",),
                     index_record={
@@ -802,13 +843,13 @@ class CleanupRepositoryTests(unittest.TestCase):
                     },
                 ),
             ),
-            index_projection=env_cleanup.CleanupIndexProjection(
+            index_projection=CleanupIndexProjection(
                 object_ids_field="probe_object_ids",
                 records_field="probe_records",
             ),
         )
 
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -828,7 +869,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         ):
             self.assertNotIn(unselected_field, plan)
 
-        result = env_cleanup.execute_cleanup_plan(
+        result = state_cleanup.execute_cleanup_plan(
             plan,
             contributions=(contribution,),
         )
@@ -846,14 +887,14 @@ class CleanupRepositoryTests(unittest.TestCase):
         child = self._path(child_path)
         child.parent.mkdir(parents=True, exist_ok=True)
         child.write_text("nested", encoding="utf-8")
-        contribution = env_cleanup.CleanupContribution(
+        contribution = CleanupContribution(
             category="nested_cleanup",
             discover=lambda _root: (
-                env_cleanup.OwnedStatePath(relative_path=parent_path),
-                env_cleanup.OwnedStatePath(relative_path=child_path),
+                OwnedStatePath(relative_path=parent_path),
+                OwnedStatePath(relative_path=child_path),
             ),
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -861,7 +902,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             contributions=(contribution,),
         )
         observed_effect_targets: list[tuple[str, bool]] = []
-        delete_relative_path = env_cleanup.delete_relative_path
+        delete_relative_path = state_cleanup.delete_relative_path
 
         def observe_delete(root: Path, relative_path: str) -> bool:
             target = root / relative_path
@@ -871,11 +912,11 @@ class CleanupRepositoryTests(unittest.TestCase):
             return bool(delete_relative_path(root, relative_path))
 
         with mock.patch.object(
-            env_cleanup,
+            state_cleanup,
             "delete_relative_path",
             side_effect=observe_delete,
         ):
-            result = env_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
+            result = state_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
 
         self.assertEqual(
             observed_effect_targets,
@@ -901,13 +942,13 @@ class CleanupRepositoryTests(unittest.TestCase):
         private_link.symlink_to(private_target)
         private_display_path = private_link.relative_to(self.shared_root).as_posix()
 
-        contribution = env_cleanup.CleanupContribution(
+        contribution = CleanupContribution(
             category="stable_leaf_links",
             discover=lambda _root: (
-                env_cleanup.OwnedStatePath(relative_path=relative_path),
+                OwnedStatePath(relative_path=relative_path),
             ),
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -915,7 +956,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             shared_root=self.shared_root,
             contributions=(contribution,),
         )
-        result = env_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
+        result = state_cleanup.execute_cleanup_plan(plan, contributions=(contribution,))
 
         self.assertFalse(relative_link.is_symlink())
         self.assertFalse(private_link.is_symlink())
@@ -962,7 +1003,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         malformed_path.write_text("{", encoding="utf-8")
         invalid_utf8_path.write_bytes(b"\xff")
 
-        role_plan = env_cleanup.build_cleanup_plan(
+        role_plan = _build_cleanup_plan(
             scope="role",
             role="pm",
             repo_root=self.repo_root,
@@ -981,7 +1022,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             any("cannot be safely attributed" in warning for warning in role_plan["warnings"]),
             msg=role_plan,
         )
-        role_result = env_cleanup.execute_cleanup_plan(
+        role_result = state_cleanup.execute_cleanup_plan(
             role_plan,
             contributions=self.product_cleanup,
         )
@@ -991,7 +1032,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertTrue(malformed_path.exists())
         self.assertTrue(invalid_utf8_path.exists())
 
-        all_data_plan = env_cleanup.build_cleanup_plan(
+        all_data_plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -1010,7 +1051,7 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "buddyswitch/objects/demand-sys/actors/malformed.json",
             },
         )
-        all_data_result = env_cleanup.execute_cleanup_plan(
+        all_data_result = state_cleanup.execute_cleanup_plan(
             all_data_plan,
             contributions=self.product_cleanup,
         )
@@ -1047,7 +1088,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         malformed_path.parent.mkdir(parents=True, exist_ok=True)
         malformed_path.write_text("{", encoding="utf-8")
 
-        role_plan = env_cleanup.build_cleanup_plan(
+        role_plan = _build_cleanup_plan(
             scope="role",
             role="pm",
             repo_root=self.repo_root,
@@ -1066,7 +1107,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             any("cannot be safely attributed" in warning for warning in role_plan["warnings"]),
             msg=role_plan,
         )
-        role_result = env_cleanup.execute_cleanup_plan(
+        role_result = state_cleanup.execute_cleanup_plan(
             role_plan,
             contributions=self.product_cleanup,
         )
@@ -1075,7 +1116,7 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertTrue(dev_path.exists())
         self.assertTrue(malformed_path.exists())
 
-        all_data_plan = env_cleanup.build_cleanup_plan(
+        all_data_plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -1093,7 +1134,7 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "buddyswitch/objects/task-sys/tasks/malformed.json",
             },
         )
-        all_data_result = env_cleanup.execute_cleanup_plan(
+        all_data_result = state_cleanup.execute_cleanup_plan(
             all_data_plan,
             contributions=self.product_cleanup,
         )
@@ -1103,13 +1144,10 @@ class CleanupRepositoryTests(unittest.TestCase):
 
     def test_cleanup_host_unlinks_leaf_symlink_but_rejects_escaping_and_symlinked_parents(self) -> None:
         self.assertTrue(
-            (ROOT / "src" / "buddyswitch" / "runtime_support" / "env_cleanup.py").is_file()
+            (ROOT / "src" / "buddyswitch" / "foundation" / "state" / "cleanup.py").is_file()
         )
-        self.assertTrue(hasattr(env_cleanup, "CleanupContribution"))
-        self.assertTrue(hasattr(env_cleanup, "OwnedStatePath"))
-        from buddyswitch.runtime_support.env_cleanup import (
-            CleanupContribution,
-            OwnedStatePath,
+        self.assertFalse(
+            (ROOT / "src" / "buddyswitch" / "runtime_support" / "env_cleanup.py").exists()
         )
 
         outside = self.shared_root / "outside.json"
@@ -1139,7 +1177,7 @@ class CleanupRepositoryTests(unittest.TestCase):
                 ),
             ),
         )
-        plan = env_cleanup.build_cleanup_plan(
+        plan = _build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
@@ -1160,7 +1198,7 @@ class CleanupRepositoryTests(unittest.TestCase):
             3,
             msg=plan,
         )
-        result = env_cleanup.execute_cleanup_plan(
+        result = state_cleanup.execute_cleanup_plan(
             plan,
             contributions=self.product_cleanup,
         )

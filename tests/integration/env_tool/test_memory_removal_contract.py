@@ -11,10 +11,12 @@ import uuid
 from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_cleanup  # noqa: E402
+from buddyswitch.application.role_source import load_valid_role_ids  # noqa: E402
+from buddyswitch.foundation.state import cleanup as state_cleanup  # noqa: E402
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
@@ -101,6 +103,7 @@ class MemoryRemovalContractTests(unittest.TestCase):
             },
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
+            manifest_loader=env_manifest.load_manifest,
         )
         self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:
@@ -190,11 +193,12 @@ class MemoryRemovalContractTests(unittest.TestCase):
         runtime_manifest = self._copy_manifest_into_runtime()
         self._write_old_memory_file(memory_id="mem-old-projection", role="pm")
 
-        cleanup_plan = env_cleanup.build_cleanup_plan(
+        cleanup_plan = state_cleanup.build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.runtime_root,
             manifest_path=runtime_manifest,
+            valid_role_ids_loader=load_valid_role_ids,
         )
         self.assertNotIn("memory_object_ids", cleanup_plan)
         self.assertNotIn("handoff_object_ids", cleanup_plan)

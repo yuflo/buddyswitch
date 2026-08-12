@@ -67,7 +67,8 @@ remains `demand_triage -> task_goal -> demand_orchestration`.
 
 Communication privately discovers current and retired Message objects and
 projects every guarded path with both attributable Actor roles. The generic
-cleanup host selects a path when the scoped role is in `owner_roles`, copies
+`src/buddyswitch/foundation/state/cleanup.py` host selects a path when the
+scoped role is in `owner_roles`, copies
 opaque index records through the contribution's `CleanupIndexProjection`, and
 deletes selected paths. The host does not parse Message, Artifact, or Track
 Comment schemas and does not branch on their category names.

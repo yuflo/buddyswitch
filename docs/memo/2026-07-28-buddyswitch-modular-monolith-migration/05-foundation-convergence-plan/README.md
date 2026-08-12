@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C6F ACCEPTED; C7 READY`
-> Current execution authority: `BS-MM-S5-FOUNDATION-FINAL-R1-20260812-01` only
+> Stage state: `S5 ACCEPTED`
+> Current execution authority: none; every S5 packet is consumed
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -37,10 +37,11 @@ consumed. Web Runtime C6E is accepted at
 remaining CliHost/shell/config owner is accepted at
 `cli-runtime/S5-C6F-ACCEPTANCE.md`; its R1 packet is consumed. C7 source
 refresh found three generic owners still mixed with S6 Role truth under
-`runtime_support` plus one direct Broker-to-Role implementation edge. The
-source snapshot, boundary design, implementation plan and READY packet are at
-`final-acceptance/README.md`. RoleHost remains unauthorized until final S5
-acceptance.
+`runtime_support` plus one direct Broker-to-Role implementation edge. C7 moved
+those owners to Foundation, inverted all current Role facts through
+Application, removed the retired paths and passed frozen S5 acceptance. The
+accepted record is at `final-acceptance/S5-C7-ACCEPTANCE.md`. S6 source refresh
+and READY preparation are now unblocked.
 
 ## Remaining checkpoints
 
@@ -58,7 +59,7 @@ acceptance.
 | C6D | private Host Control lifecycle and shared runtime lock | ACCEPTED |
 | C6E | Web runtime/contracts/assets plus shared machine contract | ACCEPTED |
 | C6F | remaining CLI runtime and shell convergence | ACCEPTED |
-| C7 | final generic-owner cutover, guidance, residue proof and frozen S5 acceptance | READY |
+| C7 | final generic-owner cutover, guidance, residue proof and frozen S5 acceptance | ACCEPTED |
 
 Checkpoint labels are program navigation. A checkpoint is handed off only
 after its own source refresh, consumer manifest, affected baseline, topology

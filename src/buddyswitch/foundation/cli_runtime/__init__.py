@@ -1,1 +1,1 @@
-"""Machine-first CLI runtime contracts."""
+"""Machine-first CLI runtime contracts, host, and diagnostics."""

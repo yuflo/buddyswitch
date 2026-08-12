@@ -207,7 +207,7 @@ def test_module_test_roots_import_private_code_only_from_their_owner() -> None:
 
 
 def test_cleanup_host_uses_generic_multi_owner_and_index_projection_contracts() -> None:
-    cleanup_path = REPO_ROOT / "src/buddyswitch/runtime_support/env_cleanup.py"
+    cleanup_path = REPO_ROOT / "src/buddyswitch/foundation/state/cleanup.py"
     source = cleanup_path.read_text(encoding="utf-8")
     assert "owner_roles" in source
     assert "CleanupIndexProjection" in source
@@ -252,7 +252,7 @@ def test_cleanup_host_uses_generic_multi_owner_and_index_projection_contracts() 
 def test_application_rejects_cleanup_projection_collisions_without_discovery() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.foundation.composition import ModuleAssembly
-    from buddyswitch.runtime_support.env_cleanup import (
+    from buddyswitch.foundation.composition import (
         CleanupContribution,
         CleanupIndexProjection,
     )

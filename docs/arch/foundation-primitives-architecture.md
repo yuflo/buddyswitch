@@ -3,8 +3,9 @@
 ## Purpose
 
 Foundation primitives provide small, product-neutral owners for identity,
-runtime state, actor-private cleanup, process-start identity, and local-socket
-JSON framing. Process Runtime also owns the shared global lifecycle lock.
+runtime state, generic cleanup execution, actor-private cleanup, process-start
+identity, and local-socket JSON framing. Process Runtime also owns the shared
+global lifecycle lock.
 Product and host modules import these owners directly; the
 package roots are inert.
 
@@ -19,6 +20,9 @@ package roots are inert.
   atomic JSON object storage.
 - `src/buddyswitch/foundation/state/actor_private.py` owns only containment-safe
   deletion used by runtime cleanup.
+- `src/buddyswitch/foundation/state/cleanup.py` owns generic cleanup planning,
+  effect-time safety revalidation, deletion and truthful result projection; it
+  receives cleanup contributions and valid Role IDs explicitly.
 - `src/buddyswitch/foundation/process_runtime/process_identity.py` owns exact
   process-start records and liveness checks used by lifecycle controllers.
 - `src/buddyswitch/foundation/process_runtime/json_framing.py` owns the shared
@@ -34,12 +38,12 @@ identity model <- identity profiles -> state runtime
 product or host consumer -----------> direct Foundation owner
 lifecycle controller ---------------> process identity
 Broker/Daemon socket transport ------> JSON framing
-runtime cleanup --------------------> actor-private deletion
+state cleanup ----------------------> composition contracts + actor-private deletion
 ```
 
 Foundation primitive owners do not import product modules, launchers, Runtime
-Broker services, or runtime-support modules. Composition and consumer policy
-remain outside these primitives.
+Broker services, runtime-support modules or concrete Role policy. Application
+supplies cleanup's current valid-Role projection.
 
 ## State and mutation
 

@@ -1,2 +1,1 @@
-"""BuddySwitch launcher modules."""
-
+"""Current Role bootstrap assets package."""

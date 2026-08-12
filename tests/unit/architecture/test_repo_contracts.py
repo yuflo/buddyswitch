@@ -197,7 +197,7 @@ def test_active_runtime_modules_use_owned_repositories_not_env_store() -> None:
     from buddyswitch.application.composition import COMPONENTS
 
     roots = (
-        REPO_ROOT / "src" / "buddyswitch" / "runtime_support" / "turn_runtime.py",
+        REPO_ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "diagnostics.py",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "domain",
         REPO_ROOT / "src" / "buddyswitch" / "env" / "repos",
         *(

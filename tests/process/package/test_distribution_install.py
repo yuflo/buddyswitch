@@ -53,6 +53,7 @@ REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/cli_runtime/__init__.py",
     "buddyswitch/foundation/cli_runtime/config.py",
     "buddyswitch/foundation/cli_runtime/contracts.py",
+    "buddyswitch/foundation/cli_runtime/diagnostics.py",
     "buddyswitch/foundation/cli_runtime/runtime.py",
     "buddyswitch/foundation/host_control/__init__.py",
     "buddyswitch/foundation/host_control/runtime.py",
@@ -63,6 +64,7 @@ REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/state/__init__.py",
     "buddyswitch/foundation/state/runtime.py",
     "buddyswitch/foundation/state/actor_private.py",
+    "buddyswitch/foundation/state/cleanup.py",
     "buddyswitch/foundation/process_runtime/process_identity.py",
     "buddyswitch/foundation/process_runtime/json_framing.py",
     "buddyswitch/foundation/process_runtime/runtime_lock.py",
@@ -77,6 +79,11 @@ REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/web_runtime/__init__.py",
     "buddyswitch/foundation/web_runtime/contracts.py",
     "buddyswitch/foundation/web_runtime/runtime.py",
+}
+RETIRED_GENERIC_RUNTIME_SUPPORT_FILES = {
+    "buddyswitch/runtime_support/env_cleanup.py",
+    "buddyswitch/runtime_support/skill_contracts.py",
+    "buddyswitch/runtime_support/turn_runtime.py",
 }
 
 
@@ -113,6 +120,7 @@ def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path
     assert "buddyswitch/launcher/shell/env.sh" not in names
     assert "buddyswitch/launcher/shell/cleanup.sh" not in names
     assert "buddyswitch/launcher/shell/browser_cockpit.sh" not in names
+    assert RETIRED_GENERIC_RUNTIME_SUPPORT_FILES.isdisjoint(names)
     assert not any(
         name.startswith("buddyswitch/launcher/assets/web-management/")
         for name in names
@@ -154,6 +162,7 @@ current_modules = (
     "buddyswitch.foundation.actor_runtime.side_thread_registry",
     "buddyswitch.foundation.app_server.runtime",
     "buddyswitch.foundation.cli_runtime.contracts",
+    "buddyswitch.foundation.cli_runtime.diagnostics",
     "buddyswitch.foundation.cli_runtime.config",
     "buddyswitch.foundation.cli_runtime.runtime",
     "buddyswitch.foundation.host_control.runtime",
@@ -162,6 +171,7 @@ current_modules = (
     "buddyswitch.foundation.identity.profiles",
     "buddyswitch.foundation.state.runtime",
     "buddyswitch.foundation.state.actor_private",
+    "buddyswitch.foundation.state.cleanup",
     "buddyswitch.foundation.process_runtime.process_identity",
     "buddyswitch.foundation.process_runtime.json_framing",
     "buddyswitch.foundation.process_runtime.runtime_lock",
@@ -202,6 +212,9 @@ print(json.dumps({
         "buddyswitch.launcher.cli_contract": importlib.util.find_spec("buddyswitch.launcher.cli_contract") is not None,
         "buddyswitch.launcher.cli": importlib.util.find_spec("buddyswitch.launcher.cli") is not None,
         "buddyswitch.launcher.codex_config": importlib.util.find_spec("buddyswitch.launcher.codex_config") is not None,
+        "buddyswitch.runtime_support.env_cleanup": importlib.util.find_spec("buddyswitch.runtime_support.env_cleanup") is not None,
+        "buddyswitch.runtime_support.skill_contracts": importlib.util.find_spec("buddyswitch.runtime_support.skill_contracts") is not None,
+        "buddyswitch.runtime_support.turn_runtime": importlib.util.find_spec("buddyswitch.runtime_support.turn_runtime") is not None,
     },
 }, sort_keys=True))
 """
@@ -248,6 +261,9 @@ print(json.dumps({
         "buddyswitch.launcher.cli_contract": False,
         "buddyswitch.launcher.cli": False,
         "buddyswitch.launcher.codex_config": False,
+        "buddyswitch.runtime_support.env_cleanup": False,
+        "buddyswitch.runtime_support.skill_contracts": False,
+        "buddyswitch.runtime_support.turn_runtime": False,
     }
     assert set(payload["module_files"]) == {
         "buddyswitch.foundation.actor_runtime",
@@ -260,6 +276,7 @@ print(json.dumps({
         "buddyswitch.foundation.actor_runtime.side_thread_registry",
         "buddyswitch.foundation.app_server.runtime",
         "buddyswitch.foundation.cli_runtime.contracts",
+        "buddyswitch.foundation.cli_runtime.diagnostics",
         "buddyswitch.foundation.cli_runtime.config",
         "buddyswitch.foundation.cli_runtime.runtime",
         "buddyswitch.foundation.host_control.runtime",
@@ -268,6 +285,7 @@ print(json.dumps({
         "buddyswitch.foundation.identity.profiles",
         "buddyswitch.foundation.state.runtime",
         "buddyswitch.foundation.state.actor_private",
+        "buddyswitch.foundation.state.cleanup",
         "buddyswitch.foundation.process_runtime.process_identity",
         "buddyswitch.foundation.process_runtime.json_framing",
         "buddyswitch.foundation.process_runtime.runtime_lock",

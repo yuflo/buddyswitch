@@ -99,6 +99,8 @@ package/build declaration.
 - `src/buddyswitch/foundation/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
 - `src/buddyswitch/foundation/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
 - `src/buddyswitch/foundation/tool_runtime/registry.py` for explicit catalog/semantics projection and selected tool dispatch.
+- `src/buddyswitch/foundation/composition/__init__.py` for passive module, Skill, cleanup, Web, CLI, Tool and Daemon contribution assembly contracts.
+- `src/buddyswitch/foundation/state/cleanup.py` for generic cleanup planning, effect-time safety revalidation and result projection.
 - `src/buddyswitch/modules/track/` for Track Public facts and external reads, Track/comment state, Tool, CLI/Web, inbound, cleanup, and Skills.
 - `src/buddyswitch/modules/artifact/` for Artifact Public decisions, Artifact/attachment state, Tool, selection assets/entrypoint, cleanup, and Skill.
 - `src/buddyswitch/modules/evidence/` for the Evidence Tool implementation and its stable Runtime Broker command entrypoint.
@@ -111,6 +113,8 @@ package/build declaration.
 - `src/buddyswitch/foundation/host_control/` for private instance lifecycle coordination and state.
 - `src/buddyswitch/foundation/web_runtime/` for the generic Web host, passive contribution contracts, and packaged Web UI assets.
 - `src/buddyswitch/foundation/cli_runtime/` for the generic public CLI host, Codex config and shell adapters, with `src/buddyswitch/foundation/cli_runtime/contracts.py` as the shared machine-first envelope and passive CLI contribution contract.
+- `src/buddyswitch/foundation/cli_runtime/diagnostics.py` for runless status and Tool-catalog diagnostics.
+- `src/buddyswitch/application/role_source.py` for the current Application-owned Role projections supplied to Foundation until S6.
 - `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.
 - `src/buddyswitch/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
 - `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md` for Role bootstrap guidance.

@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import patch
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
@@ -22,7 +23,6 @@ from buddyswitch.modules.communication.private.domain import messages as message
 from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 from buddyswitch.foundation.tool_runtime import results as tool_results  # noqa: E402
 from buddyswitch.foundation.tool_runtime import context as runtime_context  # noqa: E402
-from buddyswitch.runtime_support import turn_runtime  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
@@ -143,6 +143,7 @@ class EnvToolResponseCase(RuntimeWorkspaceTestCase):
             },
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
+            manifest_loader=env_manifest.load_manifest,
         )
         self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:

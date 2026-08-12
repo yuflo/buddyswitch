@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6F ACCEPTED; C7 READY
-> Runtime authorization: C7 packet `BS-MM-S5-FOUNDATION-FINAL-R1-20260812-01` only
+> Current state: S0–S5 ACCEPTED; S6 source refresh and READY preparation unblocked
+> Runtime authorization: none; all S5 packets are consumed
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,8 +24,8 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6F ACCEPTED; C7 READY |
-| S6 | `06-role-host-cutover.md` | BLOCKED |
+| S5 | `05-foundation-convergence.md` | ACCEPTED |
+| S6 | `06-role-host-cutover.md` | SOURCE REFRESH / READY PREPARATION UNBLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
 ## Control surfaces
@@ -305,10 +305,13 @@ three direct edges into that root. Direct preservation
 `84becba089ea4b60b715cc257098fee5`, architecture/package preservation
 `d0afd8e28dbd47beb80cdc8b6a58d7fa`, source-equivalent FINAL
 `f9dea78e158e473db2a89081e60cb595` and topology
-`S5C7P-20260812-01` pass. D-072 selects one atomic final Foundation seam
-extraction and S5 acceptance packet at
-`05-foundation-convergence-plan/final-acceptance/README.md`. Only that C7
-packet is executable; S6 remains blocked until coordinating acceptance.
+`S5C7P-20260812-01` pass. D-072 selected one atomic final Foundation seam
+extraction and S5 acceptance packet. It moved the three generic owners to
+Foundation, made all Role facts explicit Application inputs, removed the old
+source and installed paths, and passed frozen FINAL
+`364f7e924501414a9ca48b3404645307`. C7 and S5 are accepted at
+`05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md`; its
+packet is consumed. S6 source refresh and READY preparation are unblocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

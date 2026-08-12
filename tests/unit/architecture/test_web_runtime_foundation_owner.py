@@ -110,6 +110,7 @@ def test_web_and_cli_runtimes_have_one_direct_foundation_owner() -> None:
         "__init__.py",
         "config.py",
         "contracts.py",
+        "diagnostics.py",
         "runtime.py",
         "shell/browser_cockpit.sh",
         "shell/cleanup.sh",

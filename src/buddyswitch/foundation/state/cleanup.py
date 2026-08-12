@@ -1,4 +1,4 @@
-"""Storage-aware BuddySwitch cleanup backend."""
+"""Product-neutral cleanup planning and guarded state execution."""
 
 from __future__ import annotations
 
@@ -8,18 +8,17 @@ import os
 import re
 import shutil
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Callable
 
+from buddyswitch.foundation.composition import (
+    CleanupContribution,
+    CleanupIndexProjection,
+    OwnedStatePath,
+)
 import buddyswitch.foundation.state.actor_private as actor_private_state
 import buddyswitch.foundation.state.runtime as state_runtime
-from buddyswitch.runtime_support.env_manifest import (
-    DEFAULT_MANIFEST,
-    ManifestError,
-    load_manifest as _load_manifest_full,
-)
 
 ROOT = state_runtime.ROOT
 _PROJECTION_FIELD_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -43,28 +42,6 @@ _RESERVED_PROJECTION_FIELDS = frozenset(
 
 
 ACTOR_PRIVATE_RELATIVE_DIR = "private"
-
-
-@dataclass(frozen=True)
-class OwnedStatePath:
-    relative_path: str
-    owner_roles: tuple[str, ...] = ()
-    index_record: Mapping[str, Any] | None = None
-    warning: str | None = None
-
-
-@dataclass(frozen=True)
-class CleanupIndexProjection:
-    object_ids_field: str
-    records_field: str
-
-
-@dataclass(frozen=True)
-class CleanupContribution:
-    category: str
-    discover: Callable[[Path], tuple[OwnedStatePath, ...]]
-    required_directories: tuple[str, ...] = ()
-    index_projection: CleanupIndexProjection | None = None
 
 
 def validate_cleanup_contributions(
@@ -211,13 +188,18 @@ def append_warning(warnings: list[str] | None, message: str) -> None:
         warnings.append(message)
 
 
-def load_valid_roles(manifest_path: Path) -> set[str]:
-    data = _load_manifest_full(manifest_path)
-    return {
-        role["id"]
-        for role in data["roles"]
-        if isinstance(role, dict) and isinstance(role.get("id"), str)
-    }
+def _valid_role_ids(
+    manifest_path: Path,
+    *,
+    loader: Callable[[Path], frozenset[str]],
+) -> frozenset[str]:
+    role_ids = loader(manifest_path)
+    if not isinstance(role_ids, frozenset) or not role_ids or not all(
+        isinstance(role_id, str) and bool(role_id) and role_id.strip() == role_id
+        for role_id in role_ids
+    ):
+        raise ValueError("valid Role source must return a frozenset of normalized strings")
+    return role_ids
 
 
 def _new_plan(
@@ -600,23 +582,21 @@ def ensure_required_skeleton(
             )
 
 
-def default_manifest_path(repo_root: Path) -> Path:
-    del repo_root
-    return DEFAULT_MANIFEST
-
-
 def build_cleanup_plan(
     *,
     scope: str,
     role: str | None,
     repo_root: Path = ROOT,
-    manifest_path: Path | None = None,
+    manifest_path: Path,
+    valid_role_ids_loader: Callable[[Path], frozenset[str]],
     shared_root: Path | None = None,
     contributions: tuple[CleanupContribution, ...] = (),
 ) -> dict[str, Any]:
     contributions = validate_cleanup_contributions(contributions)
-    manifest_path = manifest_path or default_manifest_path(repo_root)
-    valid_roles = load_valid_roles(manifest_path)
+    valid_roles = _valid_role_ids(
+        manifest_path,
+        loader=valid_role_ids_loader,
+    )
     if scope == "role" and (role is None or role not in valid_roles):
         raise ValueError(f"Invalid role '{role}'. Check the installed BuddySwitch role catalog.")
 
@@ -1064,7 +1044,9 @@ def resolve_state_root_arg(*, state_root_arg: Path | None, shared_root: Path | N
 
 def main(
     *,
-    contributions: tuple[CleanupContribution, ...] = (),
+    contributions: tuple[CleanupContribution, ...],
+    default_manifest_path: Path,
+    valid_role_ids_loader: Callable[[Path], frozenset[str]],
 ) -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -1074,13 +1056,14 @@ def main(
         if shared_root is not None and shared_root.is_symlink():
             raise ValueError(f"Refusing cleanup: shared root argument is a symlink ({shared_root}).")
         repo_root = resolve_state_root_arg(state_root_arg=args.state_root, shared_root=shared_root)
-        manifest_path = args.manifest.resolve() if args.manifest else default_manifest_path(repo_root)
+        manifest_path = args.manifest.resolve() if args.manifest else default_manifest_path
         scope, role = resolve_scope(args)
         plan = build_cleanup_plan(
             scope=scope,
             role=role,
             repo_root=repo_root,
             manifest_path=manifest_path,
+            valid_role_ids_loader=valid_role_ids_loader,
             shared_root=shared_root,
             contributions=contributions,
         )
@@ -1095,6 +1078,6 @@ def main(
         )
         print(json.dumps({"plan": plan, "result": result}, ensure_ascii=True, sort_keys=True))
         return 0
-    except (OSError, ValueError, ManifestError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

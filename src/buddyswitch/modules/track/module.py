@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
-from buddyswitch.foundation.composition import ModuleAssembly
+from buddyswitch.foundation.composition import ModuleAssembly, SkillExport
 from buddyswitch.modules.track.private.adapters.cleanup import (
     TRACK_COMMENTS_CONTRIBUTION,
     TRACK_RECORDS_CONTRIBUTION,
@@ -26,7 +26,6 @@ from buddyswitch.modules.track.public.contracts import (
     ReadReferenceMetadata,
     ResolvePublicationCandidate,
 )
-from buddyswitch.runtime_support.skill_contracts import SkillExport
 
 
 def build_track_module(

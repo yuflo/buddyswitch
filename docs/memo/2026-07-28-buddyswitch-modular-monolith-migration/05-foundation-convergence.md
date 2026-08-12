@@ -1,8 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Current state: C1–C6F ACCEPTED; C7 PREPARATION
+> Current state: S5 ACCEPTED
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: none; C7 source refresh only
+> Execution authority: none; every S5 packet is consumed
 > Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
 
 The executable blueprint and current handoff live at
@@ -37,8 +37,9 @@ still applies to the whole stage; C1 alone does not accept S5.
 - no owner work deferred from S2–S4;
 - foundation plan proves behavior preservation.
 
-The stage entry gate is satisfied. Each later Foundation checkpoint still
-requires its own current-source READY gate before execution.
+The stage entry and every owner checkpoint are accepted. Final proof and
+residue closure are recorded in
+`05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md`.
 
 ## Proof
 

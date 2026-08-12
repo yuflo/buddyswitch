@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
-from buddyswitch.foundation.composition import ModuleAssembly
+from buddyswitch.foundation.composition import ModuleAssembly, SkillExport
 from buddyswitch.modules.artifact.private.adapters.cleanup import (
     ARTIFACT_ATTACHMENTS_CONTRIBUTION,
     ARTIFACT_RECORDS_CONTRIBUTION,
@@ -12,7 +12,6 @@ from buddyswitch.modules.artifact.private.adapters.tool.tool import (
     DEFINITION,
     invoke,
 )
-from buddyswitch.runtime_support.skill_contracts import SkillExport
 
 
 ARTIFACT = ModuleAssembly(

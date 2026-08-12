@@ -167,7 +167,7 @@ def maybe_capture_runtime_smoke() -> list[dict[str, object]] | None:
     rows: list[dict[str, object]] = []
     smoke_commands = (
         (
-            "turn_runtime.status",
+            "diagnostics.status",
             [
                 os.environ["BUDDYSWITCH_PYTHON"],
                 "-m",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
-from buddyswitch.foundation.composition import ModuleAssembly
+from buddyswitch.foundation.composition import ModuleAssembly, SkillExport
 from buddyswitch.foundation.daemon.contracts import DaemonHandlerRegistration
 from buddyswitch.modules.demand.private.adapters.cleanup import CONTRIBUTION
 from buddyswitch.modules.demand.private.adapters.cli import REGISTRATION
@@ -14,7 +14,6 @@ from buddyswitch.modules.demand.private.adapters.daemon.demand_triage_handler im
     DemandTriageHandler,
 )
 from buddyswitch.modules.demand.private.adapters.tool.tool import DEFINITION, invoke
-from buddyswitch.runtime_support.skill_contracts import SkillExport
 
 
 DEMAND = ModuleAssembly(

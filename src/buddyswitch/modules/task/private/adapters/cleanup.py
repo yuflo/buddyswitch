@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from buddyswitch.runtime_support.env_cleanup import (
+from buddyswitch.foundation.composition import (
     CleanupContribution,
     OwnedStatePath,
 )

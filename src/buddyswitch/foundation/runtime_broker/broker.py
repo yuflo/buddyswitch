@@ -52,8 +52,14 @@ def _runtime_session(
 def _dispatch_with_runtime_session(
     request: dict[str, Any],
     runtime_session: dispatcher.RuntimeBrokerSession,
+    *,
+    manifest_loader: dispatcher.ManifestLoader,
 ) -> dict[str, Any]:
-    return dispatcher.dispatch_runtime_request(request, runtime_session)
+    return dispatcher.dispatch_runtime_request(
+        request,
+        runtime_session,
+        manifest_loader=manifest_loader,
+    )
 
 
 def _to_error_envelope(request_id: str | None, payload: dict[str, Any]) -> dict[str, Any]:
@@ -88,6 +94,7 @@ def _dispatch_v2_request(
     manifest_path: Path,
     socket_path: Path | None = None,
     pid_file: Path | None = None,
+    manifest_loader: dispatcher.ManifestLoader,
 ) -> dict[str, Any]:
     try:
         validated = protocol.validate_request(request)
@@ -114,7 +121,11 @@ def _dispatch_v2_request(
             manifest_path,
             request_params=validated.get("params") if isinstance(validated.get("params"), dict) else None,
         ),
-        lambda req, _ctx: _dispatch_with_runtime_session(req, runtime_session),
+        lambda req, _ctx: _dispatch_with_runtime_session(
+            req,
+            runtime_session,
+            manifest_loader=manifest_loader,
+        ),
     )
     if not isinstance(payload, dict):
         return protocol.error_response(
@@ -135,6 +146,7 @@ def dispatch_runtime_request(
     manifest_path: Path,
     socket_path: Path | None = None,
     pid_file: Path | None = None,
+    manifest_loader: dispatcher.ManifestLoader,
 ) -> dict[str, Any]:
     if not isinstance(request, dict):
         return protocol.error_response(
@@ -149,6 +161,7 @@ def dispatch_runtime_request(
         manifest_path=manifest_path,
         socket_path=socket_path,
         pid_file=pid_file,
+        manifest_loader=manifest_loader,
     )
 
 
@@ -202,7 +215,11 @@ def _expected_runtime_context(instance_json_path: Path) -> tuple[str, str, Path 
     return actor_id.strip(), active_role.strip(), workspace_root
 
 
-def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
+def _run_cli(
+    args: argparse.Namespace,
+    *,
+    manifest_loader: dispatcher.ManifestLoader,
+) -> tuple[int, dict[str, Any]]:
     if args.command == "serve":
         cfg = server.RuntimeBrokerConfig(
             socket_path=args.socket,
@@ -213,7 +230,11 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         )
         broker_server = server.RuntimeBrokerServer(
             config=cfg,
-            dispatch_fn=lambda req, sess: dispatcher.dispatch_runtime_request(req, sess),
+            dispatch_fn=lambda req, sess: dispatcher.dispatch_runtime_request(
+                req,
+                sess,
+                manifest_loader=manifest_loader,
+            ),
         )
         previous_sigint = signal.signal(
             signal.SIGINT,
@@ -276,10 +297,10 @@ def _run_cli(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     }
 
 
-def main() -> int:
+def main(*, manifest_loader: dispatcher.ManifestLoader) -> int:
     args = _parse_args()
     try:
-        code, payload = _run_cli(args)
+        code, payload = _run_cli(args, manifest_loader=manifest_loader)
     except Exception as exc:  # pragma: no cover - CLI safety net
         code = 1
         payload = {

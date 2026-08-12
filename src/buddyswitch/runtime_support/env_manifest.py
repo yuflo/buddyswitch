@@ -16,7 +16,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from buddyswitch.runtime_support.skill_contracts import SkillExport
+from buddyswitch.foundation.composition import SkillExport
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST = PACKAGE_ROOT / "catalog" / "manifest.toml"

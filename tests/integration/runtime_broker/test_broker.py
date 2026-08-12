@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support.cli import pid_alive, wait_until
 from tests.support.fake_cdp import FakeCdpServer, write_fake_chrome
 from tests.support.processes import ResourceLedger
@@ -129,6 +130,7 @@ class RuntimeBrokerTests(unittest.TestCase):
             request=request,
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
+            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)
@@ -649,7 +651,11 @@ class RuntimeBrokerTests(unittest.TestCase):
             "buddyswitch.foundation.runtime_broker.dispatcher.dispatch_env_tool_request",
             side_effect=fake_dispatch_env_tool_request,
         ):
-            response = dispatcher.dispatch_runtime_request(request, session)
+            response = dispatcher.dispatch_runtime_request(
+                request,
+                session,
+                manifest_loader=env_manifest.load_manifest,
+            )
 
         self.assertTrue(response["ok"], msg=response)
         self.assertEqual(seen_repo_roots, [None])
@@ -667,6 +673,11 @@ class RuntimeBrokerTests(unittest.TestCase):
             manifest_path=projected_manifest,
         )
         seen_repo_roots: list[str | None] = []
+        loaded_manifest_paths: list[Path] = []
+
+        def load_projected_manifest(path: Path) -> dict[str, object]:
+            loaded_manifest_paths.append(path)
+            return env_manifest.load_manifest(path)
 
         def fake_dispatch_env_tool_request(**_kwargs: object) -> dict[str, object]:
             seen_repo_roots.append(os.environ.get("BUDDYSWITCH_REPO_ROOT"))
@@ -691,9 +702,14 @@ class RuntimeBrokerTests(unittest.TestCase):
             "buddyswitch.foundation.runtime_broker.dispatcher.dispatch_env_tool_request",
             side_effect=fake_dispatch_env_tool_request,
         ):
-            response = dispatcher.dispatch_runtime_request(request, session)
+            response = dispatcher.dispatch_runtime_request(
+                request,
+                session,
+                manifest_loader=load_projected_manifest,
+            )
 
         self.assertTrue(response["ok"], msg=response)
+        self.assertEqual(loaded_manifest_paths, [projected_manifest])
         self.assertEqual(seen_repo_roots, [None])
         self.assertFalse(hasattr(session, "repo_root_path"))
 
@@ -1274,7 +1290,11 @@ class RuntimeBrokerPersistIdempotencyTests(unittest.TestCase):
             "deadline_ms": 35000,
         }
         session = dispatcher.RuntimeBrokerSession(instance_json_path=self._instance_json(), manifest_path=MANIFEST)
-        response = dispatcher.dispatch_runtime_request(request, session)
+        response = dispatcher.dispatch_runtime_request(
+            request,
+            session,
+            manifest_loader=env_manifest.load_manifest,
+        )
         self.assertFalse(response["ok"], msg=response)
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_PROTOCOL")
         self.assertIs(response["error"]["retriable"], False)
@@ -1325,6 +1345,7 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
                 request=request,
                 instance_json_path=instance_json,
                 manifest_path=MANIFEST,
+                manifest_loader=env_manifest.load_manifest,
             )
 
         self.assertFalse(envelope.get("ok"), msg=envelope)
@@ -1381,7 +1402,11 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
             },
         ):
             with self.subTest(request=request["request_id"]):
-                response = dispatcher.dispatch_runtime_request(request, session)
+                response = dispatcher.dispatch_runtime_request(
+                    request,
+                    session,
+                    manifest_loader=env_manifest.load_manifest,
+                )
                 self.assertFalse(response["ok"], msg=response)
                 self.assertIs(response["error"]["retriable"], False)
                 self.assertNotEqual(response["error"]["code"], "E_RUNTIME_BROKER_UNAVAILABLE")

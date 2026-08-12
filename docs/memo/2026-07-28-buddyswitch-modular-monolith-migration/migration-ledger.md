@@ -19,13 +19,14 @@
 | S5 C6D acceptance | `05-foundation-convergence-plan/host-control/S5-C6D-ACCEPTANCE.md`; patch `646fcf40…`; FINAL `374bde20002b48cfaa40b6585298d66f` |
 | S5 C6E acceptance | `05-foundation-convergence-plan/web-runtime/S5-C6E-ACCEPTANCE.md`; patch `05fc4a92…`; FINAL `69dd48e9e39e48c5bf232e4a8dd4552d` |
 | S5 C6F acceptance | `05-foundation-convergence-plan/cli-runtime/S5-C6F-ACCEPTANCE.md`; patch `4676cf6d…`; FINAL `f9dea78e158e473db2a89081e60cb595` |
-| Active stage | S5 — Foundation Convergence |
-| State | C1–C6F ACCEPTED; C7 READY |
-| Runtime migration authorized | `BS-MM-S5-FOUNDATION-FINAL-R1-20260812-01` only |
+| S5 C7/final acceptance | `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md`; patch `2126cb32…`; FINAL `364f7e924501414a9ca48b3404645307` |
+| Active stage | S6 — RoleHost source refresh / READY preparation |
+| State | S0–S5 ACCEPTED; S6 preparation unblocked |
+| Runtime migration authorized | none; every S5 packet is consumed |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | execute C7 final Foundation replacement and return its frozen Result Packet |
+| Next gate | refresh current S6 Role sources/consumers, prove the target boundary and issue READY only if the source-bound gate passes |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup, Browser Runtime, Identity, State, Process, Runtime Broker, Daemon, App Server, Actor Runtime, Host Control, Web Runtime and CLI Runtime owners |
 
 ## Stage ledger
@@ -37,8 +38,8 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C6F ACCEPTED; C7 READY | S4 | coordinating hub | execute C7 packet only; S6 blocked pending C7 acceptance |
-| S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
+| S5 Foundation | ACCEPTED | S4 | coordinating hub | closed; every S5 packet consumed |
+| S6 RoleHost | SOURCE REFRESH / READY PREPARATION | S5 | coordinating hub | final component Skill exports and current Role-source boundary |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
 ## S0 completed
@@ -550,6 +551,7 @@ source refresh and READY preparation are unblocked.
 | 2026-08-12 | S5 C6F CLI Runtime handoff | READY | `cli-runtime/S5-C6F-READY-REVIEW.md`; Unit/Architecture `b60e6afd68654b609f825a203a6d9a88`; Process `baa4660d36b847b4bed6a8fa4d1d4421`; Integration `e5dcb448c56e4632b87d07ff015384a9`; System `4874e9a11aa549eaab5835f817fbdd9c`; topology `S5C6FP-20260812-01`; packet `BS-MM-S5-CLI-RUNTIME-R1-20260812-01` | execute C6F only from exact clean READY commit; C7/S6 remain blocked |
 | 2026-08-12 | S5 C6F CLI Runtime acceptance | ACCEPTED | `cli-runtime/S5-C6F-ACCEPTANCE.md`; patch `4676cf6d…`; direct `ea94da2659854668ae893419a24fbcae`; affected `11111bd23b91470aa2e28dd1de90996c`; package `7a0ddfbc84704861b354503ff884091f`; System `d90a7ca7bcbc4c4691bc90f6d0fd2e9d`; FINAL `f9dea78e158e473db2a89081e60cb595` | commit/push C6F checkpoint, then refresh C7 from committed source; never resume C6F R1 |
 | 2026-08-12 | S5 C7 final Foundation handoff | READY | `final-acceptance/S5-C7-READY-REVIEW.md`; direct preservation `84becba089ea4b60b715cc257098fee5`; architecture/package `d0afd8e28dbd47beb80cdc8b6a58d7fa`; source-equivalent FINAL `f9dea78e158e473db2a89081e60cb595`; topology `S5C7P-20260812-01`; packet `BS-MM-S5-FOUNDATION-FINAL-R1-20260812-01`; D-072 | execute C7 only from the clean preparation checkpoint; S6/S7 remain blocked |
+| 2026-08-12 | S5 C7 / final Foundation acceptance | ACCEPTED | `final-acceptance/S5-C7-ACCEPTANCE.md`; patch `2126cb32…`; architecture `c07abe8fa4924f2e8784ebbeb5b34971`; cleanup/diagnostics `ee0e9c699714485da942792c48fd322e`; Broker `adccf283199c4c36ae9446d8afb61671`; consumers `4d3f802e3db747d191d7c46635c35476`; package/Application `52163438a3074689b18d4e6187f766f8`; destructive reset `9102f16350e24da6bdf014b98eee75fd`; FINAL `364f7e924501414a9ca48b3404645307` | C7/S5 accepted; consume C7 packet; commit/push S5 checkpoint; then begin S6 source refresh and READY preparation |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -571,11 +573,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / C7 final acceptance
-Master state: C1–C6F ACCEPTED; C7 READY
-Goal Packet: BS-MM-S5-FOUNDATION-FINAL-R1-20260812-01
+Stage: S5 / Foundation / complete
+Master state: S0–S5 ACCEPTED; S6 source refresh and READY preparation unblocked
+Goal Packet: none; every S5 packet is consumed
 Execution session: none
-Last product checkpoint: C6F accepted and pushed at 74e93676e083b6ca755974b92ed487ac172d57ac
-Next action: user starts one independent C7 task from the pushed preparation checkpoint; hub stops without polling
-No-polling state: active after handoff
+Last product checkpoint: C7 accepted on frozen candidate rooted at d634dda5e67f2bfbbf18547912234a5ef1c26ba2
+Next action: commit/push the S5 checkpoint, then refresh S6 source and prepare its READY gate
+No-polling state: inactive
 ```

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
@@ -15,8 +17,35 @@ if TYPE_CHECKING:
         WebRouteRegistration,
         WebWorkerRegistration,
     )
-    from buddyswitch.runtime_support.env_cleanup import CleanupContribution
-    from buddyswitch.runtime_support.skill_contracts import SkillExport
+
+
+@dataclass(frozen=True)
+class SkillExport:
+    id: str
+    package_path: str
+    enabled_by_default: bool = True
+
+
+@dataclass(frozen=True)
+class OwnedStatePath:
+    relative_path: str
+    owner_roles: tuple[str, ...] = ()
+    index_record: Mapping[str, Any] | None = None
+    warning: str | None = None
+
+
+@dataclass(frozen=True)
+class CleanupIndexProjection:
+    object_ids_field: str
+    records_field: str
+
+
+@dataclass(frozen=True)
+class CleanupContribution:
+    category: str
+    discover: Callable[[Path], tuple[OwnedStatePath, ...]]
+    required_directories: tuple[str, ...] = ()
+    index_projection: CleanupIndexProjection | None = None
 
 
 @dataclass(frozen=True)

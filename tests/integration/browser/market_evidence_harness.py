@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
+from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
@@ -191,6 +192,7 @@ class MarketEvidenceHarness(RuntimeWorkspaceTestCase):
             },
             instance_json_path=instance_json,
             manifest_path=MANIFEST,
+            manifest_loader=env_manifest.load_manifest,
         )
         self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:

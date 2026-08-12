@@ -1,13 +1,19 @@
 """Verified cleanup entrypoint."""
 
 from buddyswitch.application.build import activate_application
+from buddyswitch.application.role_source import load_valid_role_ids
 from buddyswitch.foundation.process_runtime.invocation import run_verified
-from buddyswitch.runtime_support import env_cleanup
+from buddyswitch.foundation.state import cleanup
+from buddyswitch.runtime_support import env_manifest
 
 
 def main() -> int:
     application = activate_application()
-    return env_cleanup.main(contributions=application.cleanup)
+    return cleanup.main(
+        contributions=application.cleanup,
+        default_manifest_path=env_manifest.DEFAULT_MANIFEST,
+        valid_role_ids_loader=load_valid_role_ids,
+    )
 
 
 if __name__ == "__main__":

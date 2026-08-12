@@ -54,11 +54,13 @@ FOUNDATION_PRIMITIVE_FILES = (
     "foundation/state/__init__.py",
     "foundation/state/runtime.py",
     "foundation/state/actor_private.py",
+    "foundation/state/cleanup.py",
     "foundation/process_runtime/json_framing.py",
     "foundation/process_runtime/process_identity.py",
     "foundation/process_runtime/runtime_lock.py",
 )
 FOUNDATION_PRIMITIVE_DOC = "docs/arch/foundation-primitives-architecture.md"
+FOUNDATION_FINAL_DOC = "docs/arch/foundation-architecture.md"
 RUNTIME_BROKER_DOC = "docs/arch/runtime-broker-architecture.md"
 ACTOR_RUNTIME_DOC = "docs/arch/actor-runtime-architecture.md"
 HOST_CONTROL_DOC = "docs/arch/host-control-architecture.md"
@@ -84,6 +86,7 @@ CLI_RUNTIME_FILES = (
     "foundation/cli_runtime/__init__.py",
     "foundation/cli_runtime/config.py",
     "foundation/cli_runtime/contracts.py",
+    "foundation/cli_runtime/diagnostics.py",
     "foundation/cli_runtime/runtime.py",
     "foundation/cli_runtime/shell/browser_cockpit.sh",
     "foundation/cli_runtime/shell/cleanup.sh",
@@ -105,6 +108,11 @@ RETIRED_CLI_RUNTIME_PATHS = (
     "src/buddyswitch/launcher/shell/env.sh",
     "src/buddyswitch/launcher/shell/cleanup.sh",
     "src/buddyswitch/launcher/shell/browser_cockpit.sh",
+)
+RETIRED_GENERIC_RUNTIME_SUPPORT_PATHS = (
+    "src/buddyswitch/runtime_support/env_cleanup.py",
+    "src/buddyswitch/runtime_support/skill_contracts.py",
+    "src/buddyswitch/runtime_support/turn_runtime.py",
 )
 PACKAGE_ENTRYPOINTS = (
     "runtime_activation",
@@ -214,6 +222,7 @@ def test_minimal_package_and_activation_entrypoint_exist_under_src_only() -> Non
         *(PACKAGE_ROOT / relative for relative in WEB_RUNTIME_FILES),
         REPO_ROOT / ACTOR_RUNTIME_DOC,
         REPO_ROOT / FOUNDATION_PRIMITIVE_DOC,
+        REPO_ROOT / FOUNDATION_FINAL_DOC,
         REPO_ROOT / WEB_RUNTIME_DOC,
         REPO_ROOT / CLI_RUNTIME_DOC,
     )
@@ -256,6 +265,11 @@ def test_atomic_cutover_has_one_source_and_entrypoint_topology() -> None:
         for relative in RETIRED_CLI_RUNTIME_PATHS
         if (REPO_ROOT / relative).exists()
     ]
+    retired_generic_runtime_support_paths = [
+        relative
+        for relative in RETIRED_GENERIC_RUNTIME_SUPPORT_PATHS
+        if (REPO_ROOT / relative).exists()
+    ]
 
     assert old_paths == []
     assert missing_owners == []
@@ -263,6 +277,7 @@ def test_atomic_cutover_has_one_source_and_entrypoint_topology() -> None:
     assert retired_foundation_paths == []
     assert retired_web_runtime_paths == []
     assert retired_cli_runtime_paths == []
+    assert retired_generic_runtime_support_paths == []
 
 
 def test_current_guidance_names_only_current_installed_package_owners() -> None:
@@ -289,6 +304,12 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         "src/buddyswitch/launcher/shell/env.sh",
         "src/buddyswitch/launcher/shell/cleanup.sh",
         "src/buddyswitch/launcher/shell/browser_cockpit.sh",
+        "src/buddyswitch/runtime_support/env_cleanup.py",
+        "src/buddyswitch/runtime_support/skill_contracts.py",
+        "src/buddyswitch/runtime_support/turn_runtime.py",
+        "buddyswitch.runtime_support.env_cleanup",
+        "buddyswitch.runtime_support.skill_contracts",
+        "buddyswitch.runtime_support.turn_runtime",
     )
     guidance_paths = (
         REPO_ROOT / "README.md",
@@ -327,6 +348,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/tool_runtime/context.py",
             "src/buddyswitch/foundation/tool_runtime/results.py",
             "src/buddyswitch/foundation/tool_runtime/registry.py",
+            "src/buddyswitch/foundation/composition/__init__.py",
+            "src/buddyswitch/foundation/state/cleanup.py",
             "src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}",
             "src/buddyswitch/modules/context/",
             "src/buddyswitch/foundation/runtime_broker/protocol.py",
@@ -335,6 +358,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/process_runtime/runtime_lock.py",
             "src/buddyswitch/foundation/web_runtime/",
             "src/buddyswitch/foundation/cli_runtime/contracts.py",
+            "src/buddyswitch/foundation/cli_runtime/diagnostics.py",
+            "src/buddyswitch/application/role_source.py",
             "src/buddyswitch/contracts/prepare-turn-context.json",
             "src/buddyswitch/contracts/{pm,design,dev,market,test}.md",
             "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
@@ -415,6 +440,7 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/identity/profiles.py",
             "src/buddyswitch/foundation/state/runtime.py",
             "src/buddyswitch/foundation/state/actor_private.py",
+            "src/buddyswitch/foundation/state/cleanup.py",
             "src/buddyswitch/foundation/process_runtime/process_identity.py",
             "src/buddyswitch/foundation/process_runtime/json_framing.py",
         ),
@@ -427,6 +453,18 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/runtime_broker/server.py",
             "src/buddyswitch/foundation/runtime_broker/lifecycle.py",
             "src/buddyswitch/foundation/process_runtime/json_framing.py",
+            "src/buddyswitch/application/entrypoints/runtime_broker.py",
+        ),
+        REPO_ROOT / FOUNDATION_FINAL_DOC: (
+            "src/buddyswitch/foundation/composition/__init__.py",
+            "src/buddyswitch/foundation/state/cleanup.py",
+            "src/buddyswitch/foundation/cli_runtime/diagnostics.py",
+            "src/buddyswitch/application/entrypoints/cleanup.py",
+            "src/buddyswitch/application/entrypoints/diagnostics.py",
+            "src/buddyswitch/application/entrypoints/runtime_broker.py",
+            "src/buddyswitch/runtime_support/",
+            "src/buddyswitch/catalog/manifest.toml",
+            "src/buddyswitch/launcher/assets/roles/",
         ),
         REPO_ROOT / ACTOR_RUNTIME_DOC: (
             "src/buddyswitch/foundation/actor_runtime/",
