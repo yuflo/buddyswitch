@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6D ACCEPTED
-> Runtime authorization: none; remaining Web/Cli host source refresh only
+> Current state: S0–S4 ACCEPTED; S5 C1–C6D ACCEPTED; C6E READY
+> Runtime authorization: `BS-MM-S5-WEB-RUNTIME-R1-20260812-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6D ACCEPTED; remaining Web/Cli host refresh |
+| S5 | `05-foundation-convergence.md` | C1–C6D ACCEPTED; C6E READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -269,6 +269,18 @@ frozen FINAL `374bde20002b48cfaa40b6585298d66f`. C6D is accepted in
 `05-foundation-convergence-plan/host-control/S5-C6D-ACCEPTANCE.md`; both
 packets are consumed. Only remaining Web/Cli host source refresh and READY
 preparation are unlocked; C7 and S6 remain blocked.
+
+The remaining-host refresh found two real owner boundaries. Web Runtime is
+already product-neutral and independently runnable; CliHost still spans env,
+Browser, cleanup, Codex configuration and S6 Role-asset dependencies. D-070
+therefore admits C6E first: move Web contracts/runtime/assets plus the complete
+small machine-envelope contract to direct Foundation owners, then refresh the
+remaining CliHost from that clean checkpoint. Web preservation runs
+`05e68f98a675479d91013f53abcaa6fe`,
+`f74dd3efc6824a2f97a903b1a28aeea2` and real System
+`c9c8b863f4b14f22bea5d7b26f92eea3` pass; topology
+`S5C6EP-20260812-01` is acyclic. Only packet
+`BS-MM-S5-WEB-RUNTIME-R1-20260812-01` may execute.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

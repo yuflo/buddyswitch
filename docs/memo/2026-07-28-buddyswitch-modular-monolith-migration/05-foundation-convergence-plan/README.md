@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C6D ACCEPTED; remaining Web/Cli host source refresh`
-> Current execution authority: none; the next owner requires fresh READY review
+> Stage state: `C1–C6D ACCEPTED; C6E Web Runtime READY`
+> Current execution authority: `BS-MM-S5-WEB-RUNTIME-R1-20260812-01` only
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -32,10 +32,10 @@ C6B Actor Session/side runtime is accepted at
 Environment C6C is accepted at
 `actor-environment/S5-C6C-ACCEPTANCE.md`; its R1 packet is consumed. Host
 Control C6D is accepted at `host-control/S5-C6D-ACCEPTANCE.md`; R1 and R2 are
-consumed. The complete lifecycle, shared lock, application-input inversion,
-recursive shell proof and retired-path deletion are closed. Web/CLI
-convergence, RoleHost and final S5 acceptance remain distinct; only Web/CLI
-source refresh is currently authorized.
+consumed. The remaining-host source refresh separates independently runnable
+Web Runtime from the broader CliHost/shell/Role dependency cluster. C6E is
+READY at `web-runtime/S5-C6E-READY-REVIEW.md`; only its packet may execute.
+CliHost, RoleHost and final S5 acceptance remain unauthorized.
 
 ## Remaining checkpoints
 
@@ -51,7 +51,8 @@ source refresh is currently authorized.
 | C6B | Actor Session and side-thread runtime | ACCEPTED |
 | C6C | Actor Environment publication | ACCEPTED |
 | C6D | private Host Control lifecycle and shared runtime lock | ACCEPTED |
-| C6 remaining | Web and CLI physical convergence | SOURCE REFRESH ONLY |
+| C6E | Web runtime/contracts/assets plus shared machine contract | READY |
+| C6F | remaining CLI runtime and shell convergence | BLOCKED pending C6E acceptance |
 | C7 | final guidance, residue proof and frozen S5 acceptance | BLOCKED |
 
 Checkpoint labels are program navigation. A checkpoint is handed off only
