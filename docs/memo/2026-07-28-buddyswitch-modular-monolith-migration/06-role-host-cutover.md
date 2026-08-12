@@ -1,7 +1,7 @@
 # S6 RoleHost Cutover Charter
 
-> Initial state: BLOCKED
-> Blocked by: S5 acceptance and final component Skill exports
+> Current state: READY — S6 R1 ONLY
+> Packet: `BS-MM-S6-ROLE-HOST-R1-20260813-01`
 > Merge unit: one complete Role/Skill truth cutover
 
 ## Acceptance sentence
@@ -53,3 +53,7 @@ RoleHost:
 - no product discovery or generic PluginHost;
 - old catalog/profile/contract/Skill paths absent;
 - lifecycle and cleanup clean.
+
+The source-bound implementation pack is at
+`06-role-host-cutover-plan/README.md`. S6 remains one atomic cutover; its
+internal coherent blocks are not separately acceptable architectures.

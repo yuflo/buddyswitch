@@ -75,12 +75,13 @@ Statuses:
 
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
-| R-ROLE-001 | central Role/Skill catalog | S6 | RoleHost + assembled Skill exports only |
-| R-ROLE-002 | central Role profile/contract truth | S6 | Role package-owned descriptor/assets |
-| R-ROLE-003 | Role bootstrap `AGENTS` outside Role package | S6 | Role package projection |
+| R-ROLE-001 | REMOVING — central Role/Skill catalog | S6 | RoleHost + assembled Skill exports only |
+| R-ROLE-002 | REMOVING — central Role profile/contract truth | S6 | Role package-owned descriptor/assets |
+| R-ROLE-003 | REMOVING — Role bootstrap `AGENTS` outside Role package | S6 | Role package projection |
 | R-ROLE-004 | Demand Skill path rows CLOSED through typed module exports; other shared product Skills and central Role selection remain | S2–S6 | S2 acceptance for Demand; remaining module exports and final RoleHost selection |
-| R-ROLE-005 | Role authority/list/start/cleanup bound to central manifest | S6 | RoleHost contract |
-| R-ROLE-006 | Actor projection able to see non-selected Role/Skills | S1/S6 | exact workspace allowlist |
+| R-ROLE-005 | REMOVING — Role authority/list/start/cleanup and Broker/CLI/ToolContext bound to central manifest/path | S6 | RoleHost projections; no manifest/path argument |
+| R-ROLE-006 | REMOVING — Actor selection still resolved from central Role/Skill paths | S1/S6 | exact RoleHost workspace allowlist |
+| R-ROLE-007 | test runner lacks Role-local tier discovery and distribution proof | S6 | one runner discovers approved Role tiers once; wheel excludes tests |
 
 ## Documentation/migration residue
 

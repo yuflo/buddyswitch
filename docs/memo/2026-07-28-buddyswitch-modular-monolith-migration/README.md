@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S5 ACCEPTED; S6 source refresh and READY preparation unblocked
-> Runtime authorization: none; all S5 packets are consumed
+> Current state: S0–S5 ACCEPTED; S6 READY — R1 ONLY
+> Runtime authorization: `BS-MM-S6-ROLE-HOST-R1-20260813-01`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -25,7 +25,7 @@ Read:
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
 | S5 | `05-foundation-convergence.md` | ACCEPTED |
-| S6 | `06-role-host-cutover.md` | SOURCE REFRESH / READY PREPARATION UNBLOCKED |
+| S6 | `06-role-host-cutover.md` | READY — R1 ONLY |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
 ## Control surfaces
@@ -312,6 +312,17 @@ source and installed paths, and passed frozen FINAL
 `364f7e924501414a9ca48b3404645307`. C7 and S5 are accepted at
 `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md`; its
 packet is consumed. S6 source refresh and READY preparation are unblocked.
+
+The S6 refresh then traced 74 current Role-source files and 81 direct,
+literal, package, test and current-doc consumers. Preservation runs
+`e289d49da34a4e6c90adb9622a9bdcc3` and
+`dde21cf252224a7e86a2d36a0afe6323`, source-equivalent FINAL
+`364f7e924501414a9ca48b3404645307` and topology/runner preflight
+`S6P-22d21453397022fd` pass. D-074–D-076 select one atomic narrow RoleHost
+cutover, physically local Role packages and one runner that also discovers
+Role-local approved tiers. The structured plan is at
+`06-role-host-cutover-plan/README.md`; only packet
+`BS-MM-S6-ROLE-HOST-R1-20260813-01` is executable. S7 remains blocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,
