@@ -19,7 +19,7 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
-CODEX_CONFIG = ROOT / "src" / "buddyswitch" / "launcher" / "codex_config.py"
+CODEX_CONFIG = ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "config.py"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
 

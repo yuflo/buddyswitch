@@ -5,15 +5,120 @@ from __future__ import annotations
 import io
 import json
 import unittest
+from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
 
+from buddyswitch.application import cli_runtime as application_cli_runtime
+from buddyswitch.application.build import activate_application
 from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.actor_runtime import session as actor_session
 from buddyswitch.foundation.cli_runtime import contracts as cli_contract
 from buddyswitch.foundation.host_control import runtime as host_control
-from buddyswitch.launcher import cli
+from buddyswitch.foundation.cli_runtime import runtime as cli
 
 
 class CliRuntimeContractTests(unittest.TestCase):
+    def test_application_supplies_one_frozen_complete_cli_runtime_input(self) -> None:
+        application_input = application_cli_runtime.assemble_cli_runtime(
+            activate_application()
+        )
+
+        self.assertEqual(
+            application_input.web_module,
+            application_cli_runtime.WEB_MODULE,
+        )
+        self.assertEqual(
+            application_input.actor_build_module,
+            application_cli_runtime.ACTOR_BUILD_MODULE,
+        )
+        self.assertEqual(
+            application_input.browser_runtime_module,
+            application_cli_runtime.BROWSER_RUNTIME_MODULE,
+        )
+        self.assertEqual(
+            application_input.env_mcp_module,
+            application_cli_runtime.ENV_MCP_MODULE,
+        )
+        self.assertEqual(
+            application_input.browser_cockpit_proxy_module,
+            application_cli_runtime.BROWSER_COCKPIT_PROXY_MODULE,
+        )
+        self.assertEqual(
+            application_input.cleanup_module,
+            application_cli_runtime.CLEANUP_MODULE,
+        )
+        self.assertEqual(
+            application_input.diagnostics_module,
+            application_cli_runtime.DIAGNOSTICS_MODULE,
+        )
+        self.assertEqual(
+            application_input.manifest_path,
+            application_cli_runtime.env_manifest.DEFAULT_MANIFEST,
+        )
+        self.assertEqual(
+            application_input.parent_disabled_tools,
+            ("demand_sys__resolve_inbound",),
+        )
+        with self.assertRaises(FrozenInstanceError):
+            application_input.web_module = "replacement"  # type: ignore[misc]
+
+    def test_cli_runtime_application_input_fails_closed(self) -> None:
+        application_input = application_cli_runtime.assemble_cli_runtime(
+            activate_application()
+        )
+
+        with self.assertRaisesRegex(ValueError, "web module"):
+            replace(application_input, web_module="")
+        with self.assertRaisesRegex(ValueError, "manifest not found"):
+            replace(application_input, manifest_path=Path("/missing/manifest.toml"))
+        with self.assertRaisesRegex(ValueError, "resolver must be callable"):
+            replace(application_input, role_profile_resolver=None)  # type: ignore[arg-type]
+
+    def test_cli_runtime_shell_environment_projects_current_role_fact(self) -> None:
+        application_input = application_cli_runtime.assemble_cli_runtime(
+            activate_application()
+        )
+
+        environment = cli.application_environment(
+            application_input,
+            base={"PRESERVED": "yes"},
+            role_browser_capability=(
+                application_cli_runtime.resolve_role_browser_capability(
+                    application_input,
+                    "pm",
+                )
+            ),
+        )
+
+        self.assertEqual(environment["PRESERVED"], "yes")
+        self.assertEqual(
+            environment["BUDDYSWITCH_CLI_RUNTIME_ACTOR_BUILD_MODULE"],
+            application_cli_runtime.ACTOR_BUILD_MODULE,
+        )
+        self.assertEqual(
+            environment["BUDDYSWITCH_CLI_RUNTIME_BROWSER_MODULE"],
+            application_cli_runtime.BROWSER_RUNTIME_MODULE,
+        )
+        self.assertEqual(
+            environment["BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY"],
+            "available",
+        )
+
+    def test_cli_runtime_shell_environment_rejects_stale_role_fact(self) -> None:
+        application_input = application_cli_runtime.assemble_cli_runtime(
+            activate_application()
+        )
+
+        environment = cli.application_environment(
+            application_input,
+            base={"BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY": "required"},
+        )
+
+        self.assertNotIn(
+            "BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY",
+            environment,
+        )
+
     def test_success_envelope_has_stable_machine_keys(self) -> None:
         payload = cli_contract.success("task_result", {"task_id": "task-1"})
 

@@ -169,7 +169,7 @@ class RunlessRuntimeContractTests(unittest.TestCase):
                 "BUDDYSWITCH_CODEX_BIN=/bin/sh "
                 "BUDDYSWITCH_CODEX_VERSION=codex-cli-test-runtime "
                 "bash -lc '"
-                "source \"$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh\"; "
+                "source \"$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh\"; "
                 "buddyswitch_env_init; "
                 "buddyswitch_env_bind_instance act-pm-runless; "
                 "buddyswitch_instance_activate act-pm-runless pm active >/dev/null; "

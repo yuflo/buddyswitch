@@ -87,7 +87,7 @@ def test_every_live_host_imports_the_direct_foundation_runtime() -> None:
     for consumer in DIRECT_CONSUMERS:
         assert "buddyswitch.foundation.app_server.runtime" in _imports(consumer), consumer
 
-    cli_source = (PACKAGE_ROOT / "launcher" / "cli.py").read_text(encoding="utf-8")
+    cli_source = (PACKAGE_ROOT / "foundation" / "cli_runtime" / "runtime.py").read_text(encoding="utf-8")
     host_source = (PACKAGE_ROOT / "foundation" / "host_control" / "shell" / "host_control.sh").read_text(
         encoding="utf-8"
     )

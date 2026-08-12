@@ -104,17 +104,6 @@ buddyswitch_browser_validate_port_option() {
   fi
 }
 
-buddyswitch_browser_validate_env_or_default_port() {
-  local port="${BUDDYSWITCH_BROWSER_PORT:-9222}"
-
-  if buddyswitch_browser_validate_port_option "${port}" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  echo "Invalid value for BUDDYSWITCH_BROWSER_PORT: ${port} (expected 1..65535)" >&2
-  return 2
-}
-
 buddyswitch_browser_url() {
   printf 'http://127.0.0.1:%s' "${BUDDYSWITCH_BROWSER_PORT}"
 }
@@ -174,37 +163,6 @@ buddyswitch_browser_allocate_instance_port() {
   return 1
 }
 
-buddyswitch_browser_prepare_instance_ensure_port() {
-  local actor_id="$1"
-  local recorded_port ownership
-
-  recorded_port="$(_buddyswitch_browser_instance_recorded_port "${actor_id}")"
-  if [[ -n "${recorded_port}" ]]; then
-    export BUDDYSWITCH_BROWSER_PORT="${recorded_port}"
-    export BUDDYSWITCH_BROWSER_PORT_EXPLICIT=1
-    ownership="$(buddyswitch_browser_instance_endpoint_ownership_state "${actor_id}")"
-    case "${ownership}" in
-      owned)
-        return 0
-        ;;
-      inactive)
-        if buddyswitch_browser_port_is_available "${recorded_port}"; then
-          return 0
-        fi
-        ;;
-      foreign|unknown)
-        ;;
-      *)
-        ;;
-    esac
-  fi
-
-  unset BUDDYSWITCH_BROWSER_PORT
-  unset BUDDYSWITCH_BROWSER_PORT_EXPLICIT
-  unset BUDDYSWITCH_BROWSER_DEFAULTS_INITIALIZED
-  buddyswitch_browser_allocate_instance_port
-}
-
 buddyswitch_browser_check_endpoint() {
   buddyswitch_browser_cdp_curl "$(buddyswitch_browser_url)/json/version" >/dev/null
 }
@@ -248,12 +206,6 @@ for target in payload:
 
 raise SystemExit(1)
 PY
-}
-
-buddyswitch_browser_create_blank_page() {
-  "${BUDDYSWITCH_PYTHON}" -m buddyswitch.application.entrypoints.browser_runtime target \
-    --browser-url "$(buddyswitch_browser_url)" \
-    --url about:blank >/dev/null
 }
 
 buddyswitch_browser_find_chrome_bin() {
@@ -331,7 +283,7 @@ buddyswitch_browser_mcp_matches_cockpit_desired_state() {
     return 1
   fi
 
-  "${BUDDYSWITCH_PYTHON}" - "${config_path}" "${server_name}" "${expected_python}" "${upstream_command}" "${expected_broker_socket}" "${expected_instance_root}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${config_path}" "${server_name}" "${expected_python}" "${upstream_command}" "${expected_broker_socket}" "${expected_instance_root}" "${BUDDYSWITCH_CLI_RUNTIME_BROWSER_PROXY_MODULE:?}" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
@@ -342,6 +294,7 @@ expected_python = sys.argv[3]
 upstream_command = sys.argv[4]
 expected_broker_socket = sys.argv[5]
 expected_instance_root = sys.argv[6]
+browser_proxy_module = sys.argv[7]
 
 try:
     payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -360,7 +313,7 @@ if server.get("command") != expected_python or not isinstance(args, list):
 
 expected_args = [
     "-m",
-    "buddyswitch.application.entrypoints.browser_cockpit_proxy",
+    browser_proxy_module,
     "--upstream-command",
     upstream_command,
     "--broker-socket",
@@ -399,7 +352,7 @@ buddyswitch_browser_ensure_cockpit_mcp() {
   buddyswitch_browser_add_mcp_server \
     "${server_name}" \
     "${BUDDYSWITCH_PYTHON}" \
-    -m buddyswitch.application.entrypoints.browser_cockpit_proxy \
+    -m "${BUDDYSWITCH_CLI_RUNTIME_BROWSER_PROXY_MODULE:?}" \
     --upstream-command "${upstream_command}" \
     --broker-socket "${expected_broker_socket}" \
     --instance-root="${expected_instance_root}"
@@ -546,11 +499,6 @@ buddyswitch_browser_instance_endpoint_ownership_state() {
   echo "unknown"
 }
 
-buddyswitch_browser_instance_endpoint_is_owned_active() {
-  local actor_id="$1"
-  [[ "$(buddyswitch_browser_instance_endpoint_ownership_state "${actor_id}")" == "owned" ]]
-}
-
 buddyswitch_browser_any_recorded_instance_endpoint_is_active() {
   local instance_json browser_port
 
@@ -652,7 +600,7 @@ buddyswitch_browser_admin_status() {
 }
 
 buddyswitch_browser_manager_cli() {
-  "${BUDDYSWITCH_PYTHON}" -m buddyswitch.application.entrypoints.browser_runtime "$@"
+  "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_CLI_RUNTIME_BROWSER_MODULE:?}" "$@"
 }
 
 buddyswitch_browser_manager_stop_instance() {
@@ -700,22 +648,19 @@ buddyswitch_browser_profile_capability() {
   if [[ -z "${role_id}" ]]; then
     return 1
   fi
-  "${BUDDYSWITCH_PYTHON}" - "${role_id}" <<'PY'
-import sys
-from buddyswitch.application.build import activate_application
-from buddyswitch.runtime_support import env_profiles
-
-activate_application()
-profile = env_profiles.require_env_profile(
-    sys.argv[1],
-)
-capability = profile["tool_capability"]["browser_cockpit"]
-print(capability)
-PY
+  case "${BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY:-}" in
+    available|required)
+      printf '%s\n' "${BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY}"
+      ;;
+    *)
+      echo "Current Role Browser capability input is required." >&2
+      return 2
+      ;;
+  esac
 }
 
 buddyswitch_browser_requires_cockpit_for_active_role() {
-  local strict_mode active_role capability
+  local strict_mode active_role capability status
   strict_mode="${BUDDYSWITCH_BROWSER_ENSURE_STRICT:-0}"
   if [[ "${strict_mode}" == "1" ]]; then
     return 0
@@ -723,7 +668,10 @@ buddyswitch_browser_requires_cockpit_for_active_role() {
   if buddyswitch_browser_is_instance_mode; then
     active_role="$(buddyswitch_browser_active_role || true)"
     if [[ -n "${active_role}" ]]; then
-      capability="$(buddyswitch_browser_profile_capability "${active_role}" || true)"
+      capability="$(buddyswitch_browser_profile_capability "${active_role}")" || {
+        status=$?
+        return "${status}"
+      }
       if [[ "${capability}" == "available" ]]; then
         return 1
       fi
@@ -750,7 +698,7 @@ buddyswitch_browser_preflight_static() {
 }
 
 buddyswitch_browser_register_cockpit_mcp() {
-  local require_browser=1
+  local require_browser=1 capability_status
   buddyswitch_browser_init_defaults
   if buddyswitch_browser_is_instance_mode; then
     buddyswitch_ensure_browser_ttl_config
@@ -758,8 +706,15 @@ buddyswitch_browser_register_cockpit_mcp() {
     buddyswitch_ensure_shared_env
   fi
 
-  if ! buddyswitch_browser_requires_cockpit_for_active_role; then
-    require_browser=0
+  if buddyswitch_browser_requires_cockpit_for_active_role; then
+    require_browser=1
+  else
+    capability_status=$?
+    if [[ "${capability_status}" -eq 1 ]]; then
+      require_browser=0
+    else
+      return "${capability_status}"
+    fi
   fi
 
   if ! buddyswitch_browser_preflight_static; then

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 HOST_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOST_PACKAGE_ROOT="$(cd "${HOST_ENV_DIR}/../.." && pwd)"
+HOST_PACKAGE_ROOT="$(cd "${HOST_ENV_DIR}/../../.." && pwd)"
 source "${HOST_PACKAGE_ROOT}/foundation/host_control/shell/environment.sh"
 
 buddyswitch_patch_codex_config() {
@@ -44,13 +44,13 @@ buddyswitch_patch_codex_config() {
     fi
   fi
 
-  "${BUDDYSWITCH_PYTHON}" -m buddyswitch.application.entrypoints.actor_build patch-config \
+  "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_CLI_RUNTIME_ACTOR_BUILD_MODULE:?}" patch-config \
     "${patch_args[@]}" \
     "${temp_root_args[@]}"
 }
 
 buddyswitch_ensure_browser_ttl_config() {
-  "${BUDDYSWITCH_PYTHON}" -m buddyswitch.application.entrypoints.browser_runtime ttl-config \
+  "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_CLI_RUNTIME_BROWSER_MODULE:?}" ttl-config \
     ensure \
     --shared-root "${BUDDYSWITCH_SHARED_ROOT}" >/dev/null
 }
@@ -131,7 +131,7 @@ buddyswitch_env_mcp_matches_instance() {
     return 1
   fi
 
-  "${BUDDYSWITCH_PYTHON}" - "${config_path}" "${server_name}" "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_ACTOR_ID}" "${active_role}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" <<'PY'
+  "${BUDDYSWITCH_PYTHON}" - "${config_path}" "${server_name}" "${BUDDYSWITCH_PYTHON}" "${BUDDYSWITCH_ACTOR_ID}" "${active_role}" "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" "${BUDDYSWITCH_CLI_RUNTIME_ENV_MCP_MODULE:?}" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
@@ -142,6 +142,7 @@ expected_python = sys.argv[3]
 actor_id = sys.argv[4]
 role = sys.argv[5]
 broker_socket = sys.argv[6]
+env_mcp_module = sys.argv[7]
 
 try:
     payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -157,7 +158,7 @@ if server.get("command") != expected_python or not isinstance(args, list):
 
 expected_args = [
     "-m",
-    "buddyswitch.application.entrypoints.env_mcp",
+    env_mcp_module,
     "--actor-id",
     actor_id,
     "--role",
@@ -195,7 +196,7 @@ buddyswitch_env_mcp_add_server() {
 
   buddyswitch_run_codex mcp add "${server_name}" -- \
     "${BUDDYSWITCH_PYTHON}" \
-    -m buddyswitch.application.entrypoints.env_mcp \
+    -m "${BUDDYSWITCH_CLI_RUNTIME_ENV_MCP_MODULE:?}" \
     --actor-id "${BUDDYSWITCH_ACTOR_ID}" \
     --role "${active_role}" \
     --broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" || return $?
@@ -227,41 +228,6 @@ buddyswitch_validate_role_id() {
     echo "Invalid role id: ${role_id}" >&2
     return 2
   }
-}
-
-buddyswitch_require_env_profile() {
-  local role_id="$1"
-  buddyswitch_validate_role_id "${role_id}" || return $?
-  "${BUDDYSWITCH_PYTHON}" - "${role_id}" <<'PY'
-import sys
-
-from buddyswitch.runtime_support import env_manifest
-from buddyswitch.application.build import activate_application
-
-try:
-    activate_application()
-    env_manifest.require_role(env_manifest.load_manifest(), sys.argv[1])
-except env_manifest.ManifestError as exc:
-    print(str(exc), file=sys.stderr)
-    raise SystemExit(1) from None
-PY
-}
-
-buddyswitch_role_agents_template_path() {
-  local role_id="$1"
-  printf '%s/launcher/assets/roles/%s/AGENTS.md\n' "${BUDDYSWITCH_PACKAGE_ROOT}" "${role_id}"
-}
-
-buddyswitch_require_role_agents_template() {
-  local role_id="$1"
-  local template_path
-
-  template_path="$(buddyswitch_role_agents_template_path "${role_id}")"
-  if [[ ! -f "${template_path}" ]]; then
-    echo "Role AGENTS template not found: ${template_path}" >&2
-    return 1
-  fi
-  export BUDDYSWITCH_RUNTIME_AGENTS_TEMPLATE="${template_path}"
 }
 
 _buddyswitch_list_actor_ids_for_role() {
@@ -337,7 +303,7 @@ buddyswitch_print_native_search_rejection() {
   echo "Use chrome-devtools-cockpit.search_page for browser-native search page opening." >&2
   echo "Use search__request only for non-opening URL planning." >&2
   echo "Use search__status for search capability status." >&2
-  echo 'Diagnostic: "$BUDDYSWITCH_PYTHON" -m buddyswitch.application.entrypoints.diagnostics status' >&2
+  echo "Diagnostic: \"\$BUDDYSWITCH_PYTHON\" -m ${BUDDYSWITCH_CLI_RUNTIME_DIAGNOSTICS_MODULE:?} status" >&2
 }
 
 buddyswitch_reject_native_search_args() {

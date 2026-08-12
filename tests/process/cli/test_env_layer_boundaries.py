@@ -21,7 +21,7 @@ import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-CODEX_CONFIG = ROOT / "src" / "buddyswitch" / "launcher" / "codex_config.py"
+CODEX_CONFIG = ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "config.py"
 MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 PERMISSION_PROFILE = "buddyswitch-runtime"

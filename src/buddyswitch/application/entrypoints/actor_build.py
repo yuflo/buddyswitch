@@ -10,6 +10,7 @@ import re
 import sys
 
 from buddyswitch.application.build import ApplicationAssembly, activate_application
+from buddyswitch.application.cli_runtime import assemble_cli_runtime
 from buddyswitch.foundation.actor_runtime.environment import (
     ActorEnvironmentBuilder,
     ActorEnvironmentBuildError,
@@ -22,7 +23,7 @@ from buddyswitch.foundation.process_runtime.invocation import (
     current_runtime_identity,
     run_verified,
 )
-from buddyswitch.launcher import codex_config
+from buddyswitch.foundation.cli_runtime import config as codex_config
 from buddyswitch.runtime_support import runtime_skills
 from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST, ManifestError
 
@@ -106,9 +107,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     application = activate_application()
+    cli_runtime_input = assemble_cli_runtime(application)
     command_args = list(sys.argv[1:])
     if command_args[:1] == ["patch-config"]:
-        return codex_config.main(command_args[1:])
+        return codex_config.main(
+            command_args[1:],
+            application_input=cli_runtime_input,
+        )
     args = build_parser().parse_args(command_args)
     try:
         bootstrap = resolve_actor_bootstrap(

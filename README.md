@@ -110,7 +110,7 @@ package/build declaration.
 - `src/buddyswitch/foundation/process_runtime/runtime_lock.py` for the shared global lifecycle lock.
 - `src/buddyswitch/foundation/host_control/` for private instance lifecycle coordination and state.
 - `src/buddyswitch/foundation/web_runtime/` for the generic Web host, passive contribution contracts, and packaged Web UI assets.
-- `src/buddyswitch/foundation/cli_runtime/contracts.py` for the shared machine-first CLI envelope and passive CLI contribution contract.
+- `src/buddyswitch/foundation/cli_runtime/` for the generic public CLI host, Codex config and shell adapters, with `src/buddyswitch/foundation/cli_runtime/contracts.py` as the shared machine-first envelope and passive CLI contribution contract.
 - `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.
 - `src/buddyswitch/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
 - `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md` for Role bootstrap guidance.

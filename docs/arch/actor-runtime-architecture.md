@@ -25,7 +25,7 @@ runtime owner.
 ## Dependency direction
 
 ```text
-application / Demand / Foundation Host Control / current Launcher adapters
+application / Demand / Foundation Host Control / Foundation CLI Runtime
                      -> foundation Actor Runtime
 application Actor build -> resolved Role/Skill bootstrap -> Actor Runtime environment
 foundation Actor Runtime -> foundation App Server

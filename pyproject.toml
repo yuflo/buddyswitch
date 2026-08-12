@@ -27,6 +27,7 @@ namespaces = false
 "buddyswitch.contracts" = ["**/*.toml", "**/*.json", "**/*.md"]
 "buddyswitch.foundation.app_server" = ["shell/*.sh"]
 "buddyswitch.foundation.browser_runtime" = ["assets/**/*.json"]
+"buddyswitch.foundation.cli_runtime" = ["shell/*.sh"]
 "buddyswitch.foundation.host_control" = ["shell/*.sh"]
 "buddyswitch.foundation.web_runtime" = [
   "assets/**/*.md",
@@ -37,7 +38,6 @@ namespaces = false
 ]
 "buddyswitch.launcher" = [
   "assets/**/*.md",
-  "shell/*.sh",
 ]
 "buddyswitch.modules.demand" = ["skills/**/*.md"]
 "buddyswitch.modules.track" = ["skills/**/*.md"]

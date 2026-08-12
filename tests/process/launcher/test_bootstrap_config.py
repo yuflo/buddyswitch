@@ -16,12 +16,24 @@ from tests.support.python import PYTHON
 from tests.support.cli import write_executable
 
 from buddyswitch.application import build as application_build
+from buddyswitch.application import cli_runtime as application_cli_runtime
 from buddyswitch.application.entrypoints import actor_build
-from buddyswitch.launcher import codex_config
+from buddyswitch.foundation.cli_runtime import config as codex_config
+from buddyswitch.foundation.cli_runtime import runtime as cli_runtime
 from buddyswitch.runtime_support import env_manifest
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "buddyswitch-codex"
+
+
+def _cli_runtime_shell_environment(
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    application = application_build.activate_application()
+    return cli_runtime.application_environment(
+        application_cli_runtime.assemble_cli_runtime(application),
+        base=os.environ.copy() if base is None else base,
+    )
 
 
 class TestLauncherBootstrapConfig(ProcessLauncherHarness, unittest.TestCase):
@@ -57,6 +69,7 @@ args = ["/runtime/env_tool_mcp_server.py"]
         rendered = codex_config.patched_config_text(
             existing,
             [],
+            parent_disabled_tools=("demand_sys__resolve_inbound",),
             profile_mode=True,
             profile_filesystem_entries={"/": "read"},
         )
@@ -74,7 +87,7 @@ args = ["/runtime/env_tool_mcp_server.py"]
             shared_root = Path(temp_root) / ".codex-buddyswitch"
             command = r'''
 set -euo pipefail
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
 export BUDDYSWITCH_SHARED_ROOT="$1"
 buddyswitch_env_init
 buddyswitch_ensure_browser_ttl_config
@@ -83,7 +96,7 @@ buddyswitch_ensure_browser_ttl_config
             completed = run_process(
                 ["/bin/bash", "-c", command, "browser-ttl-bootstrap", str(shared_root)],
                 cwd=ROOT,
-                env=os.environ.copy(),
+                env=_cli_runtime_shell_environment(),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -103,7 +116,7 @@ buddyswitch_ensure_browser_ttl_config
             config_path.write_text("schema_version = 2\n", encoding="utf-8")
             command = r'''
 set -euo pipefail
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
 export BUDDYSWITCH_SHARED_ROOT="$1"
 buddyswitch_env_init
 buddyswitch_ensure_browser_ttl_config
@@ -112,7 +125,7 @@ buddyswitch_ensure_browser_ttl_config
             completed = run_process(
                 ["/bin/bash", "-c", command, "browser-ttl-bootstrap", str(shared_root)],
                 cwd=ROOT,
-                env=os.environ.copy(),
+                env=_cli_runtime_shell_environment(),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -171,7 +184,7 @@ buddyswitch_ensure_browser_ttl_config
 
             command = r'''
 set -euo pipefail
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
 printf '%s\n' "$BUDDYSWITCH_PYTHON"
@@ -179,7 +192,9 @@ printf '%s\n' "$BUDDYSWITCH_PYTHON"
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
                 cwd=ROOT,
-                env={**os.environ, "BUDDYSWITCH_PYTHON": PYTHON},
+                env=_cli_runtime_shell_environment(
+                    {**os.environ, "BUDDYSWITCH_PYTHON": PYTHON}
+                ),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -191,14 +206,20 @@ printf '%s\n' "$BUDDYSWITCH_PYTHON"
         with tempfile.TemporaryDirectory() as temp_root:
             command = r'''
 set -euo pipefail
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
 '''
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", temp_root],
                 cwd=ROOT,
-                env={name: value for name, value in os.environ.items() if name != "BUDDYSWITCH_PYTHON"},
+                env=_cli_runtime_shell_environment(
+                    {
+                        name: value
+                        for name, value in os.environ.items()
+                        if name != "BUDDYSWITCH_PYTHON"
+                    }
+                ),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -216,14 +237,16 @@ buddyswitch_resolve_python
 
             command = r'''
 set -euo pipefail
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
 '''
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
                 cwd=ROOT,
-                env={**os.environ, "BUDDYSWITCH_PYTHON": str(fake_python)},
+                env=_cli_runtime_shell_environment(
+                    {**os.environ, "BUDDYSWITCH_PYTHON": str(fake_python)}
+                ),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -247,7 +270,7 @@ buddyswitch_resolve_python
 
             command = r'''
 set -euo pipefail
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
 PATH="$1"
 buddyswitch_resolve_python
 printf '%s\n' "$BUDDYSWITCH_PYTHON"
@@ -255,7 +278,9 @@ printf '%s\n' "$BUDDYSWITCH_PYTHON"
             completed = run_process(
                 ["/bin/bash", "-c", command, "resolver-test", str(bin_dir)],
                 cwd=ROOT,
-                env={**os.environ, "BUDDYSWITCH_PYTHON": str(fake_python)},
+                env=_cli_runtime_shell_environment(
+                    {**os.environ, "BUDDYSWITCH_PYTHON": str(fake_python)}
+                ),
                 text=True,
                 capture_output=True,
                 check=False,
@@ -278,6 +303,7 @@ printf '%s\n' "$BUDDYSWITCH_PYTHON"
             env.pop("CODEX_HOME", None)
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+            env = _cli_runtime_shell_environment(env)
             expected_python = self._expected_python_for_env(env)
 
             command = r'''
@@ -285,7 +311,7 @@ set -euo pipefail
 temp_root="$1"
 source_home="$2"
 codex_home="$3"
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
 export BUDDYSWITCH_SOURCE_HOME="${source_home}"
 export BUDDYSWITCH_CODEX_HOME="${codex_home}"
 export BUDDYSWITCH_CODEX_BIN="${temp_root}/bin/codex"
@@ -347,6 +373,7 @@ buddyswitch_env_mcp_ensure
             env.pop("CODEX_HOME", None)
             env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
             env["BUDDYSWITCH_TEST_CALLS"] = str(calls_path)
+            env = _cli_runtime_shell_environment(env)
             expected_python = self._expected_python_for_env(env)
             broker_socket = f"{temp_root_path}/instance/runtime/runtime-broker.sock"
 
@@ -355,8 +382,8 @@ set -euo pipefail
 temp_root="$1"
 source_home="$2"
 codex_home="$3"
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/env.sh"
-source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/browser_cockpit.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/env.sh"
+source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/browser_cockpit.sh"
 export BUDDYSWITCH_SOURCE_HOME="${source_home}"
 export BUDDYSWITCH_CODEX_HOME="${codex_home}"
 export BUDDYSWITCH_CODEX_BIN="${temp_root}/bin/codex"
@@ -516,7 +543,9 @@ writable_roots = ["/old"]
                         *extra_args,
                     ],
                     cwd=ROOT,
-                    env={**os.environ, "HOME": str(source_home_path)},
+                    env=_cli_runtime_shell_environment(
+                        {**os.environ, "HOME": str(source_home_path)}
+                    ),
                     text=True,
                     capture_output=True,
                     check=False,
@@ -558,7 +587,9 @@ writable_roots = ["/old"]
                     str(ROOT / "projects" / "app" / ".runtime"),
                 ],
                 cwd=ROOT,
-                env={**os.environ, "HOME": str(source_home_path)},
+                env=_cli_runtime_shell_environment(
+                    {**os.environ, "HOME": str(source_home_path)}
+                ),
                 text=True,
                 capture_output=True,
                 check=False,

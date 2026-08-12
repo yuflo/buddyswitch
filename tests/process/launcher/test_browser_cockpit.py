@@ -1258,10 +1258,11 @@ args = ["chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
             )
 
     def test_browser_launcher_source_is_instance_only(self) -> None:
-        text = (ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "browser_cockpit.sh").read_text(encoding="utf-8")
+        text = (ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "shell" / "browser_cockpit.sh").read_text(encoding="utf-8")
         self.assertIn("chrome-devtools-cockpit", text)
-        self.assertIn("buddyswitch.application.entrypoints.browser_cockpit_proxy", text)
-        self.assertIn("buddyswitch.application.entrypoints.browser_runtime target", text)
+        self.assertIn("BUDDYSWITCH_CLI_RUNTIME_BROWSER_PROXY_MODULE", text)
+        self.assertIn("BUDDYSWITCH_CLI_RUNTIME_BROWSER_MODULE", text)
+        self.assertNotIn("buddyswitch.application", text)
         self.assertNotIn("cdp_background_page", text)
         self.assertNotIn("/json/new?about:blank", text)
         self.assertNotIn("chrome-devtools-mcp@latest", text)

@@ -17,6 +17,9 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/modules/artifact/assets/artifact-selection-v2.json",
     "buddyswitch/contracts/schemas/dev/dev-result.json",
     "buddyswitch/foundation/app_server/shell/app_server.sh",
+    "buddyswitch/foundation/cli_runtime/shell/env.sh",
+    "buddyswitch/foundation/cli_runtime/shell/cleanup.sh",
+    "buddyswitch/foundation/cli_runtime/shell/browser_cockpit.sh",
     "buddyswitch/foundation/host_control/shell/host_control.sh",
     "buddyswitch/foundation/host_control/shell/environment.sh",
     "buddyswitch/foundation/host_control/shell/services.sh",
@@ -48,7 +51,9 @@ REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/app_server/__init__.py",
     "buddyswitch/foundation/app_server/runtime.py",
     "buddyswitch/foundation/cli_runtime/__init__.py",
+    "buddyswitch/foundation/cli_runtime/config.py",
     "buddyswitch/foundation/cli_runtime/contracts.py",
+    "buddyswitch/foundation/cli_runtime/runtime.py",
     "buddyswitch/foundation/host_control/__init__.py",
     "buddyswitch/foundation/host_control/runtime.py",
     "buddyswitch/foundation/host_control/state.py",
@@ -103,6 +108,11 @@ def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path
     assert "buddyswitch/launcher/web_management.py" not in names
     assert "buddyswitch/launcher/web_contracts.py" not in names
     assert "buddyswitch/launcher/cli_contract.py" not in names
+    assert "buddyswitch/launcher/cli.py" not in names
+    assert "buddyswitch/launcher/codex_config.py" not in names
+    assert "buddyswitch/launcher/shell/env.sh" not in names
+    assert "buddyswitch/launcher/shell/cleanup.sh" not in names
+    assert "buddyswitch/launcher/shell/browser_cockpit.sh" not in names
     assert not any(
         name.startswith("buddyswitch/launcher/assets/web-management/")
         for name in names
@@ -144,6 +154,8 @@ current_modules = (
     "buddyswitch.foundation.actor_runtime.side_thread_registry",
     "buddyswitch.foundation.app_server.runtime",
     "buddyswitch.foundation.cli_runtime.contracts",
+    "buddyswitch.foundation.cli_runtime.config",
+    "buddyswitch.foundation.cli_runtime.runtime",
     "buddyswitch.foundation.host_control.runtime",
     "buddyswitch.foundation.host_control.state",
     "buddyswitch.foundation.identity.model",
@@ -188,6 +200,8 @@ print(json.dumps({
         "buddyswitch.launcher.web_management": importlib.util.find_spec("buddyswitch.launcher.web_management") is not None,
         "buddyswitch.launcher.web_contracts": importlib.util.find_spec("buddyswitch.launcher.web_contracts") is not None,
         "buddyswitch.launcher.cli_contract": importlib.util.find_spec("buddyswitch.launcher.cli_contract") is not None,
+        "buddyswitch.launcher.cli": importlib.util.find_spec("buddyswitch.launcher.cli") is not None,
+        "buddyswitch.launcher.codex_config": importlib.util.find_spec("buddyswitch.launcher.codex_config") is not None,
     },
 }, sort_keys=True))
 """
@@ -232,6 +246,8 @@ print(json.dumps({
         "buddyswitch.launcher.web_management": False,
         "buddyswitch.launcher.web_contracts": False,
         "buddyswitch.launcher.cli_contract": False,
+        "buddyswitch.launcher.cli": False,
+        "buddyswitch.launcher.codex_config": False,
     }
     assert set(payload["module_files"]) == {
         "buddyswitch.foundation.actor_runtime",
@@ -244,6 +260,8 @@ print(json.dumps({
         "buddyswitch.foundation.actor_runtime.side_thread_registry",
         "buddyswitch.foundation.app_server.runtime",
         "buddyswitch.foundation.cli_runtime.contracts",
+        "buddyswitch.foundation.cli_runtime.config",
+        "buddyswitch.foundation.cli_runtime.runtime",
         "buddyswitch.foundation.host_control.runtime",
         "buddyswitch.foundation.host_control.state",
         "buddyswitch.foundation.identity.model",

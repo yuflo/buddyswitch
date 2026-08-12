@@ -251,20 +251,20 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         self.assertEqual(str(raised.exception), "automation denied")
 
     def test_open_tui_task_does_not_expand_launcher_public_surface(self) -> None:
-        source = (ROOT / "src" / "buddyswitch" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "runtime.py").read_text(encoding="utf-8")
 
         self.assertNotIn("attach-open", source)
         self.assertIn("instance attach", source)
 
     def test_web_launcher_ensures_central_daemon_for_web_user_actor(self) -> None:
-        source = (ROOT / "src" / "buddyswitch" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "runtime.py").read_text(encoding="utf-8")
         start = source.index("def _run_web(")
         end = source.index("\ndef _actor_session(", start)
         block = source[start:end]
 
         ensure_index = block.index("central_process.start_central_daemon")
         run_index = block.index("subprocess.run")
-        helper_index = block.index("buddyswitch.application.entrypoints.web")
+        helper_index = block.index("application_input.web_module")
         stop_index = block.index("central_process.stop_if_idle")
         self.assertLess(ensure_index, run_index)
         self.assertLess(helper_index, run_index)

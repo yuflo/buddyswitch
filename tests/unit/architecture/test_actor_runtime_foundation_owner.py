@@ -196,7 +196,7 @@ def test_current_consumers_import_direct_actor_runtime_modules() -> None:
         PACKAGE_ROOT / "application" / "daemon_host.py": {
             "buddyswitch.foundation.actor_runtime.session",
         },
-        PACKAGE_ROOT / "launcher" / "cli.py": {
+        PACKAGE_ROOT / "foundation" / "cli_runtime" / "runtime.py": {
             "buddyswitch.foundation.actor_runtime.codex_runtime",
             "buddyswitch.foundation.actor_runtime.session",
         },

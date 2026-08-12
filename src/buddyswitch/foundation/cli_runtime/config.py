@@ -1,4 +1,4 @@
-"""Patch CODEX_HOME/config.toml with BuddySwitch-managed automation permissions."""
+"""Patch CODEX_HOME/config.toml with generic runtime permission inputs."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from buddyswitch.runtime_support import env_profiles
+if TYPE_CHECKING:
+    from buddyswitch.foundation.cli_runtime.contracts import CliRuntimeApplicationInput
 
 
 SANDBOX_TABLE = "sandbox_workspace_write"
@@ -19,26 +21,13 @@ MANAGED_COMMENT = "# BuddySwitch managed automation permissions"
 MCP_SERVER_PREFIX = "mcp_servers."
 ENV_MCP_SECTION = "mcp_servers.buddyswitch-env"
 MCP_TOOLS_APPROVAL_KEY = "default_tools_approval_mode"
-_PARENT_DISABLED_TOOLS: tuple[str, ...] = ()
 WEB_SEARCH_KEY = "web_search"
 
 
-def configure_parent_disabled_tools(tool_names: tuple[str, ...]) -> None:
-    if not isinstance(tool_names, tuple) or not all(
-        isinstance(name, str) and name.strip()
-        for name in tool_names
-    ):
-        raise ValueError("parent disabled tools must be a tuple of names")
-    if len(set(tool_names)) != len(tool_names):
-        raise ValueError("parent disabled tools must be unique")
-    global _PARENT_DISABLED_TOOLS
-    _PARENT_DISABLED_TOOLS = tuple(tool_names)
-
-
-def _parent_disabled_tools_row() -> str:
+def _parent_disabled_tools_row(tool_names: tuple[str, ...]) -> str:
     return (
         "disabled_tools = "
-        + json.dumps(list(_PARENT_DISABLED_TOOLS), ensure_ascii=False)
+        + json.dumps(list(tool_names), ensure_ascii=False)
         + "\n"
     )
 
@@ -324,7 +313,11 @@ def patch_mcp_server_approvals(config_text: str) -> str:
     return "".join(output)
 
 
-def patch_parent_tool_projection(config_text: str) -> str:
+def patch_parent_tool_projection(
+    config_text: str,
+    *,
+    parent_disabled_tools: tuple[str, ...],
+) -> str:
     lines = config_text.splitlines(keepends=True)
     output: list[str] = []
     in_env_mcp = False
@@ -334,7 +327,10 @@ def patch_parent_tool_projection(config_text: str) -> str:
     def finish_section() -> None:
         nonlocal filter_written
         if in_env_mcp and not filter_written:
-            append_mcp_projection(output)
+            append_mcp_projection(
+                output,
+                parent_disabled_tools=parent_disabled_tools,
+            )
             filter_written = True
 
     for line in lines:
@@ -349,7 +345,7 @@ def patch_parent_tool_projection(config_text: str) -> str:
             continue
         if in_env_mcp and top_level_key_assignment(line, "disabled_tools"):
             if not filter_written:
-                output.append(_parent_disabled_tools_row())
+                output.append(_parent_disabled_tools_row(parent_disabled_tools))
                 filter_written = True
             continue
         output.append(line)
@@ -360,13 +356,17 @@ def patch_parent_tool_projection(config_text: str) -> str:
     return "".join(output)
 
 
-def append_mcp_projection(output: list[str]) -> None:
+def append_mcp_projection(
+    output: list[str],
+    *,
+    parent_disabled_tools: tuple[str, ...],
+) -> None:
     if output and output[-1].strip() == "":
         trailing_blank = output.pop()
-        output.append(_parent_disabled_tools_row())
+        output.append(_parent_disabled_tools_row(parent_disabled_tools))
         output.append(trailing_blank)
         return
-    output.append(_parent_disabled_tools_row())
+    output.append(_parent_disabled_tools_row(parent_disabled_tools))
 
 
 def path_contains(container: Path, path: Path) -> bool:
@@ -435,7 +435,11 @@ def _safe_temp_roots(
     return allowed
 
 
-def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
+def _build_profile_mode_filesystem(
+    args: argparse.Namespace,
+    *,
+    application_input: CliRuntimeApplicationInput,
+) -> dict[str, str]:
     _require_profile_mode_args(args)
 
     canonical_source_root = canonical(args.source_root)
@@ -445,10 +449,14 @@ def _build_profile_mode_filesystem(args: argparse.Namespace) -> dict[str, str]:
         if args.source_codex_home
         else canonical(str(Path.home() / ".codex"))
     )
-    manifest_path = canonical(args.manifest) if args.manifest else env_profiles.DEFAULT_MANIFEST
+    manifest_path = (
+        canonical(args.manifest)
+        if args.manifest
+        else application_input.manifest_path
+    )
     role_id = str(args.role).strip()
 
-    profile = env_profiles.require_env_profile(
+    profile = application_input.resolve_role_profile(
         role_id,
         manifest_path=manifest_path,
     )
@@ -553,13 +561,17 @@ def patched_config_text(
     existing_text: str,
     roots: list[Path],
     *,
+    parent_disabled_tools: tuple[str, ...],
     profile_mode: bool = False,
     profile_filesystem_entries: dict[str, str] | None = None,
     unix_sockets: list[Path] | None = None,
 ) -> str:
     preserved = strip_managed_sections(existing_text)
     if profile_mode:
-        preserved = patch_parent_tool_projection(preserved)
+        preserved = patch_parent_tool_projection(
+            preserved,
+            parent_disabled_tools=parent_disabled_tools,
+        )
     preserved = patch_mcp_server_approvals(preserved).rstrip("\n")
     managed_top_level = render_managed_permission_top_level_block() if profile_mode else render_managed_top_level_block()
     if profile_mode:
@@ -573,7 +585,11 @@ def patched_config_text(
     return f"{managed_top_level}\n{permissions_block}"
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    application_input: CliRuntimeApplicationInput,
+) -> int:
     args = parse_args(argv)
     config_path = canonical(args.config)
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -583,7 +599,10 @@ def main(argv: list[str] | None = None) -> int:
     profile_filesystem_entries: dict[str, str] | None = None
     try:
         if profile_mode:
-            profile_filesystem_entries = _build_profile_mode_filesystem(args)
+            profile_filesystem_entries = _build_profile_mode_filesystem(
+                args,
+                application_input=application_input,
+            )
         else:
             roots = build_writable_roots(args)
     except Exception as exc:
@@ -597,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
         patched_config_text(
             existing_text,
             roots,
+            parent_disabled_tools=application_input.parent_disabled_tools,
             profile_mode=profile_mode,
             profile_filesystem_entries=profile_filesystem_entries,
             unix_sockets=unix_sockets,

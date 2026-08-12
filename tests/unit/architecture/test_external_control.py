@@ -159,14 +159,14 @@ class ExternalControlArchitectureTests(unittest.TestCase):
                 self.assertNotIn(token, source)
 
     def test_actor_environment_build_is_private_to_host_control(self) -> None:
-        cli_source = _source("src/buddyswitch/launcher/cli.py")
+        cli_source = _source("src/buddyswitch/foundation/cli_runtime/runtime.py")
         web_source = _source("src/buddyswitch/foundation/web_runtime/runtime.py")
         host_source = _source("src/buddyswitch/foundation/host_control/shell/host_control.sh")
         application_start_source = _source(
             "src/buddyswitch/application/entrypoints/host_control_start.py"
         )
-        env_source = _source("src/buddyswitch/launcher/shell/env.sh")
-        browser_source = _source("src/buddyswitch/launcher/shell/browser_cockpit.sh")
+        env_source = _source("src/buddyswitch/foundation/cli_runtime/shell/env.sh")
+        browser_source = _source("src/buddyswitch/foundation/cli_runtime/shell/browser_cockpit.sh")
         start_block = host_source.split("start_locked_bootstrap() {", 1)[1].split(
             "instance_set_inactive_locked() {",
             1,
@@ -228,7 +228,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         self.assertEqual([path for path in deleted if (ROOT / path).exists()], [])
 
     def test_public_cli_and_help_have_no_retired_command_families_or_output_tracks(self) -> None:
-        source = _source("src/buddyswitch/launcher/cli.py")
+        source = _source("src/buddyswitch/foundation/cli_runtime/runtime.py")
         tree = ast.parse(source)
         help_text = _constant_assignment(source, "_HELP_TEMPLATE")
         forbidden_source = (

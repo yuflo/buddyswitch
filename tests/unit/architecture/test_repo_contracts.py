@@ -68,7 +68,7 @@ def _call_count(path: Path, name: str) -> int:
 
 def test_public_launcher_is_a_thin_python_cli_bootstrap() -> None:
     launcher = (REPO_ROOT / "buddyswitch-codex").read_text(encoding="utf-8")
-    cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "launcher" / "cli.py"
+    cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "runtime.py"
 
     assert cli_adapter.is_file()
     assert 'activation.json' in launcher
@@ -79,7 +79,7 @@ def test_public_launcher_is_a_thin_python_cli_bootstrap() -> None:
 
 
 def test_public_cli_adapter_is_neutral_and_modules_own_product_projections() -> None:
-    cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "launcher" / "cli.py"
+    cli_adapter = REPO_ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "runtime.py"
     task_cli_adapter = (
         REPO_ROOT
         / "src/buddyswitch/modules/task/private/adapters/cli.py"

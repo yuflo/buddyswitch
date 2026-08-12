@@ -20,7 +20,7 @@ RETIRED_PATHS = (
 CLI_CONSUMERS = (
     PACKAGE_ROOT / "application" / "build.py",
     PACKAGE_ROOT / "foundation" / "composition" / "__init__.py",
-    PACKAGE_ROOT / "launcher" / "cli.py",
+    PACKAGE_ROOT / "foundation" / "cli_runtime" / "runtime.py",
     PACKAGE_ROOT / "modules" / "demand" / "private" / "adapters" / "cli.py",
     PACKAGE_ROOT / "modules" / "task" / "private" / "adapters" / "cli.py",
     PACKAGE_ROOT / "modules" / "track" / "private" / "adapters" / "cli.py",
@@ -108,7 +108,12 @@ def test_web_and_cli_runtimes_have_one_direct_foundation_owner() -> None:
     }
     assert actual_cli_files == {
         "__init__.py",
+        "config.py",
         "contracts.py",
+        "runtime.py",
+        "shell/browser_cockpit.sh",
+        "shell/cleanup.sh",
+        "shell/env.sh",
     }
     _assert_inert_package(WEB_ROOT / "__init__.py")
     _assert_inert_package(CLI_ROOT / "__init__.py")
@@ -188,5 +193,4 @@ def test_web_assets_have_owner_local_package_data() -> None:
     ]
     assert package_data["buddyswitch.launcher"] == [
         "assets/**/*.md",
-        "shell/*.sh",
     ]

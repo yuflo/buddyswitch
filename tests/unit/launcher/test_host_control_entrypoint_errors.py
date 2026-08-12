@@ -30,6 +30,40 @@ EMPTY_APPLICATION = ApplicationAssembly(
 
 
 class HostControlEntrypointErrorTests(unittest.TestCase):
+    def test_cli_entrypoint_supplies_one_application_input_to_foundation(self) -> None:
+        host_control = mock.sentinel.host_control
+        application_input = mock.sentinel.application_input
+        with (
+            mock.patch.object(
+                cli_entrypoint,
+                "activate_application",
+                return_value=EMPTY_APPLICATION,
+            ),
+            mock.patch.object(
+                cli_entrypoint,
+                "assemble_host_control",
+                return_value=host_control,
+            ),
+            mock.patch.object(
+                cli_entrypoint,
+                "assemble_cli_runtime",
+                return_value=application_input,
+            ),
+            mock.patch.object(
+                cli_entrypoint.cli_runtime,
+                "main",
+                return_value=0,
+            ) as generic_main,
+        ):
+            status = cli_entrypoint.main()
+
+        self.assertEqual(status, 0)
+        generic_main.assert_called_once_with(
+            application_input=application_input,
+            host_control=host_control,
+            command_registrations=EMPTY_APPLICATION.cli_commands,
+        )
+
     def test_web_entrypoint_supplies_public_attach_module_to_foundation(self) -> None:
         host_control = mock.sentinel.host_control
         with (
@@ -66,7 +100,7 @@ class HostControlEntrypointErrorTests(unittest.TestCase):
                 "load_manifest",
                 side_effect=env_manifest.ManifestError("roles[0].id must be a non-empty string"),
             ),
-            mock.patch.object(cli_entrypoint.cli, "main") as generic_main,
+            mock.patch.object(cli_entrypoint.cli_runtime, "main") as generic_main,
             contextlib.redirect_stdout(stdout),
         ):
             status = cli_entrypoint.main()

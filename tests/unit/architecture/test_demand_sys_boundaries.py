@@ -16,7 +16,7 @@ READ_MODEL = Path("src/buddyswitch/env/domain/demand_read.py")
 REPOSITORY = Path("src/buddyswitch/env/repos/demands.py")
 TOOL_ROOT = Path("src/buddyswitch/env/tools/demand_sys")
 CONTEXT = Path("src/buddyswitch/foundation/tool_runtime/context.py")
-CLI = Path("src/buddyswitch/launcher/cli.py")
+CLI = Path("src/buddyswitch/foundation/cli_runtime/runtime.py")
 ROLE_AUTH = Path("src/buddyswitch/runtime_support/role_auth.py")
 CONTEXT_IMPL = Path(
     "src/buddyswitch/modules/context/private/adapters/tool/_impl.py"
@@ -49,7 +49,7 @@ APPLICATION_BUILD = Path("src/buddyswitch/application/build.py")
 MODULE_ASSEMBLY = Path("src/buddyswitch/foundation/composition/__init__.py")
 DEMAND_PUBLIC = Path("src/buddyswitch/modules/demand/public/operations.py")
 COMPOSED_HOST_IMPLEMENTATIONS = (
-    Path("src/buddyswitch/launcher/cli.py"),
+    Path("src/buddyswitch/foundation/cli_runtime/runtime.py"),
     Path("src/buddyswitch/foundation/daemon/instance_process.py"),
     Path("src/buddyswitch/foundation/tool_runtime/mcp_server.py"),
     Path("src/buddyswitch/foundation/runtime_broker/broker.py"),
@@ -60,7 +60,7 @@ COMPOSED_HOST_IMPLEMENTATIONS = (
     Path("src/buddyswitch/runtime_support/turn_runtime.py"),
     Path("src/buddyswitch/foundation/app_server/runtime.py"),
     Path("src/buddyswitch/foundation/web_runtime/runtime.py"),
-    Path("src/buddyswitch/launcher/codex_config.py"),
+    Path("src/buddyswitch/foundation/cli_runtime/config.py"),
 )
 
 
@@ -218,9 +218,9 @@ def test_hosts_receive_typed_contributions_and_consumers_use_demand_public() -> 
         Path("src/buddyswitch/foundation/tool_runtime/registry.py"),
         Path("src/buddyswitch/foundation/runtime_broker/dispatcher.py"),
         Path("src/buddyswitch/foundation/daemon/instance_process.py"),
-        Path("src/buddyswitch/launcher/cli.py"),
+        Path("src/buddyswitch/foundation/cli_runtime/runtime.py"),
         Path("src/buddyswitch/foundation/tool_runtime/mcp_server.py"),
-        Path("src/buddyswitch/launcher/codex_config.py"),
+        Path("src/buddyswitch/foundation/cli_runtime/config.py"),
         Path("src/buddyswitch/foundation/actor_runtime/environment.py"),
         Path("src/buddyswitch/runtime_support/env_cleanup.py"),
         Path("src/buddyswitch/runtime_support/env_manifest.py"),

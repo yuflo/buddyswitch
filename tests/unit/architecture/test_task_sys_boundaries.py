@@ -31,7 +31,7 @@ WEB_CONTRACTS = Path("src/buddyswitch/foundation/web_runtime/contracts.py")
 GENERIC_HOSTS = (
     Path("src/buddyswitch/foundation/tool_runtime/context.py"),
     Path("src/buddyswitch/foundation/tool_runtime/registry.py"),
-    Path("src/buddyswitch/launcher/cli.py"),
+    Path("src/buddyswitch/foundation/cli_runtime/runtime.py"),
     Path("src/buddyswitch/foundation/daemon/instance_process.py"),
     Path("src/buddyswitch/foundation/web_runtime/runtime.py"),
 )

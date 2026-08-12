@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUDDYSWITCH_CLEANUP_MANIFEST="${BUDDYSWITCH_PACKAGE_ROOT}/catalog/manifest.toml"
-
 buddyswitch_cleanup_usage_hint() {
   echo "Use: buddyswitch-codex data cleanup --role <role>|--all-data [--yes]" >&2
-}
-
-buddyswitch_cleanup_requests_execute() {
-  local arg
-  for arg in "$@"; do
-    if [[ "${arg}" == "--yes" ]]; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 BUDDYSWITCH_CLEANUP_SCOPE=""
@@ -95,10 +83,10 @@ buddyswitch_cleanup_run_env_cleanup() {
   if [[ "${BUDDYSWITCH_CLEANUP_YES}" -eq 1 ]]; then
     execute_args=(--yes)
   fi
-  "${BUDDYSWITCH_PYTHON}" -m buddyswitch.application.entrypoints.cleanup \
+  "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_CLI_RUNTIME_CLEANUP_MODULE:?}" \
     --state-root "${repo_root}" \
     --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
-    --manifest "${BUDDYSWITCH_CLEANUP_MANIFEST}" \
+    --manifest "${BUDDYSWITCH_CLI_RUNTIME_MANIFEST_PATH:?}" \
     "${target_args[@]}" \
     "${execute_args[@]}"
 }
@@ -166,11 +154,6 @@ PY
   done
 
   echo "0"
-}
-
-buddyswitch_cleanup_trim_state_skeleton() {
-  local state_root="$1"
-  rm -rf "${state_root}/runs" "${state_root}/projects"
 }
 
 buddyswitch_cleanup_validate_shared_root() {

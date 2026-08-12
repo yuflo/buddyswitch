@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6E ACCEPTED; C6F READY
-> Runtime authorization: `BS-MM-S5-CLI-RUNTIME-R1-20260812-01` only
+> Current state: S0–S4 ACCEPTED; S5 C1–C6F ACCEPTED; C7 PREPARATION
+> Runtime authorization: none; C7 source refresh only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6E ACCEPTED; C6F READY |
+| S5 | `05-foundation-convergence.md` | C1–C6F ACCEPTED; C7 PREPARATION |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -288,11 +288,14 @@ C6E is accepted in
 `05-foundation-convergence-plan/web-runtime/S5-C6E-ACCEPTANCE.md`; both packets
 are consumed. The committed C6F refresh then classified the remaining
 CLI/config/shell cluster, its Application/Role executable facts, live
-consumers and eight zero-production-consumer helpers. Direct Unit/Architecture,
-Process, Integration and real System baselines pass; projected topology
-`S5C6FP-20260812-01` adds no cycle or upward Foundation edge. One atomic C6F
-is READY at `05-foundation-convergence-plan/cli-runtime/README.md`; C7 and S6
-remain blocked.
+consumers and eight zero-production-consumer helpers. The atomic cutover moved
+the complete host to `foundation/cli_runtime/**`, supplied all concrete facts
+through one required Application input, deleted the five Launcher owners and
+unused helpers, and passed direct, affected, package, real System and frozen
+FINAL `f9dea78e158e473db2a89081e60cb595`. C6F is accepted at
+`05-foundation-convergence-plan/cli-runtime/S5-C6F-ACCEPTANCE.md`; its packet
+is consumed. C7 source refresh and READY preparation are unblocked; S6 remains
+blocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

@@ -11,6 +11,10 @@ import subprocess
 import sys
 
 from buddyswitch.application.build import activate_application
+from buddyswitch.application.cli_runtime import (
+    assemble_cli_runtime,
+    resolve_role_browser_capability,
+)
 from buddyswitch.application.entrypoints.actor_build import resolve_actor_bootstrap
 from buddyswitch.foundation.actor_runtime.environment import (
     ActorEnvironmentBuilder,
@@ -21,10 +25,11 @@ from buddyswitch.foundation.process_runtime.invocation import (
     current_runtime_identity,
     run_verified,
 )
+from buddyswitch.foundation.cli_runtime import runtime as cli_runtime
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-LAUNCHER_SHELL = PACKAGE_ROOT / "launcher" / "shell"
+CLI_RUNTIME_SHELL = cli_runtime.SHELL_ROOT
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -78,9 +83,16 @@ def _build(args: argparse.Namespace) -> int:
 
 
 def _configure(args: argparse.Namespace) -> int:
+    application = activate_application()
+    application_input = assemble_cli_runtime(application)
+    role_browser_capability = (
+        resolve_role_browser_capability(application_input, args.role_id)
+        if args.phase == "browser-register"
+        else None
+    )
     script = f'''\
-source "{LAUNCHER_SHELL / "env.sh"}"
-source "{LAUNCHER_SHELL / "browser_cockpit.sh"}"
+source "{CLI_RUNTIME_SHELL / "env.sh"}"
+source "{CLI_RUNTIME_SHELL / "browser_cockpit.sh"}"
 buddyswitch_env_init
 buddyswitch_env_bind_instance "$1"
 export BUDDYSWITCH_START_ROLE="$2"
@@ -102,7 +114,11 @@ esac
             args.broker_socket,
             args.phase,
         ],
-        env=os.environ.copy(),
+        env=cli_runtime.application_environment(
+            application_input,
+            base=os.environ.copy(),
+            role_browser_capability=role_browser_capability,
+        ),
         text=True,
         check=False,
     )

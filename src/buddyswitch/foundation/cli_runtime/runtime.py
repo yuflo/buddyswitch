@@ -1,4 +1,4 @@
-"""Public BuddySwitch CLI adapter."""
+"""Product-neutral public BuddySwitch CLI runtime."""
 
 from __future__ import annotations
 
@@ -8,13 +8,44 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 
 HELPER_DIR = Path(__file__).resolve().parent
 SHELL_ROOT = HELPER_DIR / "shell"
-PACKAGE_ROOT = HELPER_DIR.parent
+PACKAGE_ROOT = HELPER_DIR.parents[1]
 APP_SERVER_SHELL = PACKAGE_ROOT / "foundation" / "app_server" / "shell" / "app_server.sh"
+
+def application_environment(
+    application_input: CliRuntimeApplicationInput,
+    *,
+    base: Mapping[str, str] | None = None,
+    role_browser_capability: str | None = None,
+) -> dict[str, str]:
+    """Project the required application facts into owner-local shell input."""
+
+    if not isinstance(application_input, CliRuntimeApplicationInput):
+        raise ValueError("CLI Runtime application input is required")
+    environment = dict(os.environ if base is None else base)
+    environment.pop("BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY", None)
+    environment.update(
+        {
+            "BUDDYSWITCH_CLI_RUNTIME_ACTOR_BUILD_MODULE": application_input.actor_build_module,
+            "BUDDYSWITCH_CLI_RUNTIME_BROWSER_MODULE": application_input.browser_runtime_module,
+            "BUDDYSWITCH_CLI_RUNTIME_ENV_MCP_MODULE": application_input.env_mcp_module,
+            "BUDDYSWITCH_CLI_RUNTIME_BROWSER_PROXY_MODULE": application_input.browser_cockpit_proxy_module,
+            "BUDDYSWITCH_CLI_RUNTIME_CLEANUP_MODULE": application_input.cleanup_module,
+            "BUDDYSWITCH_CLI_RUNTIME_DIAGNOSTICS_MODULE": application_input.diagnostics_module,
+            "BUDDYSWITCH_CLI_RUNTIME_MANIFEST_PATH": str(application_input.manifest_path),
+        }
+    )
+    if role_browser_capability is not None:
+        if role_browser_capability not in {"available", "required"}:
+            raise ValueError("CLI Runtime Role Browser capability is invalid")
+        environment["BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY"] = (
+            role_browser_capability
+        )
+    return environment
 
 
 def _shared_root_from_env() -> Path:
@@ -55,6 +86,7 @@ os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_SHARED_ROOT / "state"))
 from buddyswitch.foundation.actor_runtime import codex_runtime  # noqa: E402
 from buddyswitch.foundation.actor_runtime import session as actor_session  # noqa: E402
 from buddyswitch.foundation.cli_runtime import contracts as cli_contract  # noqa: E402
+from buddyswitch.foundation.cli_runtime.contracts import CliRuntimeApplicationInput  # noqa: E402
 from buddyswitch.foundation.host_control import runtime as host_control  # noqa: E402
 from buddyswitch.foundation.process_runtime import runtime_lock  # noqa: E402
 from buddyswitch.foundation.daemon import central_process, central_service  # noqa: E402
@@ -166,6 +198,7 @@ HELP_TEXT = render_help(())
 def main(
     argv: Sequence[str] | None = None,
     *,
+    application_input: CliRuntimeApplicationInput,
     host_control: host_control.HostControl,
     command_registrations: tuple[
         cli_contract.CliCommandRegistration, ...
@@ -179,6 +212,7 @@ def main(
             raise HelpRequested(help_text)
         result = _dispatch(
             args,
+            application_input=application_input,
             host_control=host_control,
             commands=commands,
             help_text=help_text,
@@ -210,6 +244,7 @@ def _is_help(args: list[str]) -> bool:
 def _dispatch(
     args: list[str],
     *,
+    application_input: CliRuntimeApplicationInput,
     host_control: host_control.HostControl,
     commands: dict[str, cli_contract.CliCommandRegistration],
     help_text: str,
@@ -222,11 +257,15 @@ def _dispatch(
     if command in commands:
         return commands[command].handler(rest)
     if command == "data":
-        return _dispatch_data(rest)
+        return _dispatch_data(rest, application_input=application_input)
     if command == "env":
-        return _dispatch_env(rest, host_control=host_control)
+        return _dispatch_env(
+            rest,
+            application_input=application_input,
+            host_control=host_control,
+        )
     if command == "web":
-        raise WebProcessExited(_run_web(rest))
+        raise WebProcessExited(_run_web(rest, application_input=application_input))
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown top-level command: {command}")
 
 
@@ -305,19 +344,32 @@ def _dispatch_capabilities(args: list[str], control: host_control.HostControl) -
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown instance capabilities command: {action}")
 
 
-def _dispatch_data(args: list[str]) -> CommandResult:
+def _dispatch_data(
+    args: list[str],
+    *,
+    application_input: CliRuntimeApplicationInput,
+) -> CommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "data command is required")
     command, rest = args[0], args[1:]
     if command != "cleanup":
         raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown data command: {command}")
     cleanup_args = _parse_cleanup_args(rest)
-    completed = _run_locked_shell_owner(_cleanup_locked_script(), cleanup_args)
+    completed = _run_locked_shell_owner(
+        application_input,
+        _cleanup_locked_script(),
+        cleanup_args,
+    )
     data = _owner_json_data(completed)
     return CommandResult("data.cleanup", data)
 
 
-def _dispatch_env(args: list[str], *, host_control: host_control.HostControl) -> CommandResult:
+def _dispatch_env(
+    args: list[str],
+    *,
+    application_input: CliRuntimeApplicationInput,
+    host_control: host_control.HostControl,
+) -> CommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "env command is required")
     command, rest = args[0], args[1:]
@@ -328,7 +380,11 @@ def _dispatch_env(args: list[str], *, host_control: host_control.HostControl) ->
         instances_root = shared_root / "instances"
         if instances_root.is_dir():
             instance_count = sum(1 for row in instances_root.iterdir() if row.is_dir())
-        browser_state = "active" if _browser_is_active() else "inactive"
+        browser_state = (
+            "active"
+            if _browser_is_active(application_input)
+            else "inactive"
+        )
         return CommandResult(
             "env.status",
             {
@@ -344,16 +400,21 @@ def _dispatch_env(args: list[str], *, host_control: host_control.HostControl) ->
         existed = shared_root.is_dir()
         if not existed:
             return CommandResult("env.reset", {"shared_root": str(shared_root), "removed": False})
-        _run_locked_shell_owner(_reset_locked_script(), [])
+        _run_locked_shell_owner(application_input, _reset_locked_script(), [])
         return CommandResult("env.reset", {"shared_root": str(shared_root), "removed": existed and not shared_root.exists()})
     if command == "browser":
-        return _dispatch_env_browser(rest, host_control=host_control)
+        return _dispatch_env_browser(
+            rest,
+            application_input=application_input,
+            host_control=host_control,
+        )
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown env command: {command}")
 
 
 def _dispatch_env_browser(
     args: list[str],
     *,
+    application_input: CliRuntimeApplicationInput,
     host_control: host_control.HostControl,
 ) -> CommandResult:
     if not args:
@@ -373,21 +434,33 @@ def _dispatch_env_browser(
             raise cli_contract.CliError("INVALID_ARGUMENT", f"env browser {command} requires --instance <actor-id>")
         _validate_actor_id(actor_id)
         _require_known_actor(actor_id, host_control=host_control)
-        completed = _run_locked_shell_owner(_browser_locked_script(actor_id), shell_args)
+        completed = _run_locked_shell_owner(
+            application_input,
+            _browser_locked_script(actor_id),
+            shell_args,
+        )
     else:
         if actor_id is not None:
             _require_known_actor(actor_id, host_control=host_control)
-        completed = _run_shell_owner(_browser_script(actor_id), shell_args)
+        completed = _run_shell_owner(
+            application_input,
+            _browser_script(actor_id),
+            shell_args,
+        )
     return CommandResult(f"env.browser.{command}", _owner_json_data(completed))
 
 
-def _run_web(args: list[str]) -> int:
+def _run_web(
+    args: list[str],
+    *,
+    application_input: CliRuntimeApplicationInput,
+) -> int:
     parsed = _parse_web_args(args)
     paths = central_service.central_daemon_paths(_shared_root_from_env())
     daemon_result = central_process.start_central_daemon(paths)
     env = os.environ.copy()
     env["BUDDYSWITCH_CENTRAL_DAEMON_SOCKET"] = str(daemon_result.get("socket_path") or paths.socket_path)
-    argv = [str(_python()), "-m", "buddyswitch.application.entrypoints.web"]
+    argv = [str(_python()), "-m", application_input.web_module]
     if parsed.get("host") is not None:
         argv.extend([DASH + "host", str(parsed["host"])])
     if parsed.get("port") is not None:
@@ -577,11 +650,15 @@ def _python() -> Path:
     return Path(raw.strip())
 
 
-def _run_shell_owner(script: str, args: list[str]) -> subprocess.CompletedProcess[str]:
+def _run_shell_owner(
+    application_input: CliRuntimeApplicationInput,
+    script: str,
+    args: list[str],
+) -> subprocess.CompletedProcess[str]:
     completed = subprocess.run(
         ["bash", "-c", script, "buddyswitch-owner", *args],
         cwd=SHELL_ROOT,
-        env=os.environ.copy(),
+        env=application_environment(application_input),
         text=True,
         capture_output=True,
         check=False,
@@ -591,8 +668,12 @@ def _run_shell_owner(script: str, args: list[str]) -> subprocess.CompletedProces
     return completed
 
 
-def _run_locked_shell_owner(script: str, args: list[str]) -> subprocess.CompletedProcess[str]:
-    environment = os.environ.copy()
+def _run_locked_shell_owner(
+    application_input: CliRuntimeApplicationInput,
+    script: str,
+    args: list[str],
+) -> subprocess.CompletedProcess[str]:
+    environment = application_environment(application_input)
     try:
         with runtime_lock.hold_runtime_lock(
             str(_shared_root_from_env()),
@@ -634,7 +715,7 @@ def _owner_error(completed: subprocess.CompletedProcess[str]) -> cli_contract.Cl
     return cli_contract.CliError("EXECUTION_FAILED", message)
 
 
-def _browser_is_active() -> bool:
+def _browser_is_active(application_input: CliRuntimeApplicationInput) -> bool:
     completed = subprocess.run(
         [
             "bash",
@@ -653,7 +734,7 @@ exit 1
             "buddyswitch-browser-status",
         ],
         cwd=SHELL_ROOT,
-        env=os.environ.copy(),
+        env=application_environment(application_input),
         text=True,
         capture_output=True,
         check=False,

@@ -3,8 +3,73 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Mapping, Sequence, TextIO
+
+
+RoleProfileResolver = Callable[[str, Path], Mapping[str, object]]
+
+
+@dataclass(frozen=True)
+class CliRuntimeApplicationInput:
+    """Concrete executable and Role facts supplied by application."""
+
+    web_module: str
+    actor_build_module: str
+    browser_runtime_module: str
+    env_mcp_module: str
+    browser_cockpit_proxy_module: str
+    cleanup_module: str
+    diagnostics_module: str
+    manifest_path: Path
+    role_profile_resolver: RoleProfileResolver
+    parent_disabled_tools: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        modules = (
+            ("web module", self.web_module),
+            ("Actor-build module", self.actor_build_module),
+            ("Browser runtime module", self.browser_runtime_module),
+            ("environment MCP module", self.env_mcp_module),
+            ("Browser cockpit proxy module", self.browser_cockpit_proxy_module),
+            ("cleanup module", self.cleanup_module),
+            ("diagnostics module", self.diagnostics_module),
+        )
+        for label, module in modules:
+            if not isinstance(module, str) or not re.fullmatch(
+                r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*",
+                module,
+            ):
+                raise ValueError(f"CLI Runtime {label} must be a Python module")
+        if not isinstance(self.manifest_path, Path) or not self.manifest_path.is_absolute():
+            raise ValueError("CLI Runtime manifest path must be an absolute Path")
+        if not self.manifest_path.is_file():
+            raise ValueError(f"CLI Runtime manifest not found: {self.manifest_path}")
+        if not callable(self.role_profile_resolver):
+            raise ValueError("CLI Runtime Role profile resolver must be callable")
+        if not isinstance(self.parent_disabled_tools, tuple) or not all(
+            isinstance(name, str) and name.strip()
+            for name in self.parent_disabled_tools
+        ):
+            raise ValueError("CLI Runtime parent disabled tools must be a tuple of names")
+        if len(self.parent_disabled_tools) != len(set(self.parent_disabled_tools)):
+            raise ValueError("CLI Runtime parent disabled tools must be unique")
+
+    def resolve_role_profile(
+        self,
+        role_id: str,
+        *,
+        manifest_path: Path | None = None,
+    ) -> Mapping[str, object]:
+        profile = self.role_profile_resolver(
+            role_id,
+            self.manifest_path if manifest_path is None else manifest_path,
+        )
+        if not isinstance(profile, Mapping):
+            raise ValueError("CLI Runtime Role profile resolver must return a mapping")
+        return profile
 
 
 @dataclass(frozen=True)

@@ -68,7 +68,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve\n")
 
     def test_reset_owner_removes_owned_filesystem_without_workspace_or_git_path(self) -> None:
-        source = (ROOT / "src" / "buddyswitch" / "launcher" / "cli.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "runtime.py").read_text(encoding="utf-8")
         helper_block = source.split("def _source_helpers_script(", 1)[1].split(
             "def _reset_locked_script()",
             1,
@@ -322,7 +322,7 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                     [
                         "/bin/bash",
                         "-c",
-                        'source "$BUDDYSWITCH_PACKAGE_ROOT/launcher/shell/cleanup.sh"; buddyswitch_cleanup_parse_args "$@"',
+                        'source "$BUDDYSWITCH_PACKAGE_ROOT/foundation/cli_runtime/shell/cleanup.sh"; buddyswitch_cleanup_parse_args "$@"',
                         "cleanup-parse-test",
                         option,
                     ],

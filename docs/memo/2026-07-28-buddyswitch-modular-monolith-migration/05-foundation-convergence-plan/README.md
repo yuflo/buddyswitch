@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C6E ACCEPTED; C6F READY`
-> Current execution authority: `BS-MM-S5-CLI-RUNTIME-R1-20260812-01` only
+> Stage state: `C1–C6F ACCEPTED; C7 PREPARATION`
+> Current execution authority: none
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -34,9 +34,10 @@ Environment C6C is accepted at
 Control C6D is accepted at `host-control/S5-C6D-ACCEPTANCE.md`; R1 and R2 are
 consumed. Web Runtime C6E is accepted at
 `web-runtime/S5-C6E-ACCEPTANCE.md`; its R1 and R2 packets are consumed. The
-remaining CliHost/shell/config source is classified and C6F is READY at
-`cli-runtime/S5-C6F-READY-REVIEW.md`. Only its packet may execute. RoleHost and
-final S5 acceptance remain unauthorized.
+remaining CliHost/shell/config owner is accepted at
+`cli-runtime/S5-C6F-ACCEPTANCE.md`; its R1 packet is consumed. C7 source
+refresh and READY preparation are now the only active work. RoleHost remains
+unauthorized until final S5 acceptance.
 
 ## Remaining checkpoints
 
@@ -53,8 +54,8 @@ final S5 acceptance remain unauthorized.
 | C6C | Actor Environment publication | ACCEPTED |
 | C6D | private Host Control lifecycle and shared runtime lock | ACCEPTED |
 | C6E | Web runtime/contracts/assets plus shared machine contract | ACCEPTED |
-| C6F | remaining CLI runtime and shell convergence | READY |
-| C7 | final guidance, residue proof and frozen S5 acceptance | BLOCKED |
+| C6F | remaining CLI runtime and shell convergence | ACCEPTED |
+| C7 | final guidance, residue proof and frozen S5 acceptance | PREPARATION |
 
 Checkpoint labels are program navigation. A checkpoint is handed off only
 after its own source refresh, consumer manifest, affected baseline, topology

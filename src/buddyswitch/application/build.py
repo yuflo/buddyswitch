@@ -235,9 +235,8 @@ def activate_application(
     daemon_handler_order: tuple[str, ...] = DAEMON_HANDLER_ORDER,
     active_task_probe=ACTIVE_TASK_PROBE,
 ) -> ApplicationAssembly:
-    from buddyswitch.foundation.tool_runtime import native_mcp, registry
+    from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.web_runtime import runtime as web_runtime
-    from buddyswitch.launcher import codex_config
     from buddyswitch.runtime_support import env_manifest, role_auth
 
     application = build_application(
@@ -248,17 +247,6 @@ def activate_application(
     registry.configure_tool_registrations(application.tools)
     registry.configure_active_task_probe(active_task_probe)
     env_manifest.configure_skill_exports(application.skills)
-    codex_config.configure_parent_disabled_tools(
-        tuple(
-            native_mcp.encode_native_tool_name(
-                registration.definition.id,
-                action.name,
-            )
-            for registration in application.tools
-            for action in registration.definition.actions
-            if action.bound_capability_env is not None
-        )
-    )
     web_runtime.configure_actor_console_sections(
         application.actor_console_sections
     )

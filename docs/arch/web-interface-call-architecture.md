@@ -17,9 +17,10 @@ packaged UI is owner-local at
 
 `src/buddyswitch/foundation/cli_runtime/contracts.py` owns the one shared
 machine-first success/failure envelope, exit-code mapping, option parsing, and
-passive CLI contribution contract. The current CLI host consumes that contract
-but remains outside this Web Runtime owner. Both Foundation package roots are
-inert; application composition imports their concrete modules directly.
+passive CLI contribution contract. `foundation/cli_runtime/runtime.py` owns the
+generic CLI host and its direct config/shell adapters. Both Foundation package
+roots are inert; application composition imports their concrete modules
+directly and supplies their required immutable executable facts.
 
 `src/buddyswitch/application/entrypoints/web.py` owns the concrete public CLI
 module used by Web attach. It supplies that immutable module fact through the
