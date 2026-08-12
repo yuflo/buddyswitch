@@ -54,9 +54,9 @@ os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_SHARED_ROOT / "state"))
 
 from buddyswitch.foundation.actor_runtime import codex_runtime  # noqa: E402
 from buddyswitch.foundation.actor_runtime import session as actor_session  # noqa: E402
+from buddyswitch.foundation.cli_runtime import contracts as cli_contract  # noqa: E402
 from buddyswitch.foundation.host_control import runtime as host_control  # noqa: E402
 from buddyswitch.foundation.process_runtime import runtime_lock  # noqa: E402
-from buddyswitch.launcher import cli_contract  # noqa: E402
 from buddyswitch.foundation.daemon import central_process, central_service  # noqa: E402
 
 

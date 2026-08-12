@@ -13,8 +13,9 @@ from tests.support.runtime import RuntimeWorkspaceTestCase
 
 
 ROOT = REPO_ROOT
-WEB_MANAGEMENT_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py"
-WEB_MANAGEMENT = importlib.import_module("buddyswitch.launcher.web_management")
+WEB_MANAGEMENT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "web_runtime" / "runtime.py"
+WEB_MANAGEMENT = importlib.import_module("buddyswitch.foundation.web_runtime.runtime")
+ATTACH_CLI_MODULE = "example.public_cli"
 
 
 def _restore_env_value(name: str, value: str | None) -> None:
@@ -125,7 +126,10 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
                 self.assertNotIn(marker, source)
 
     def test_build_attach_cli_command_is_short_shell_safe_and_paste_ready(self) -> None:
-        command = WEB_MANAGEMENT.build_attach_cli_command("act-pm.demo")
+        command = WEB_MANAGEMENT.build_attach_cli_command(
+            "act-pm.demo",
+            attach_cli_module=ATTACH_CLI_MODULE,
+        )
 
         self.assertEqual(
             command,
@@ -133,11 +137,32 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
                 [
                     WEB_MANAGEMENT.current_runtime_identity().python_executable,
                     "-m",
-                    "buddyswitch.application.entrypoints.cli",
+                    ATTACH_CLI_MODULE,
                     "instance",
                     "attach",
                     "act-pm.demo",
                 ]
+            ),
+        )
+
+    def test_attach_command_route_uses_required_application_module_input(self) -> None:
+        service = WEB_MANAGEMENT.WebManagementService(
+            host_control=RecordingHostControl(),
+            attach_cli_module=ATTACH_CLI_MODULE,
+        )
+
+        status, payload = service.handle_api(
+            "GET",
+            "/api/instances/act-pm-demo/attach-command",
+            b"",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            payload["command"],
+            WEB_MANAGEMENT.build_attach_cli_command(
+                "act-pm-demo",
+                attach_cli_module=ATTACH_CLI_MODULE,
             ),
         )
 
@@ -354,6 +379,7 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
 
             service = WEB_MANAGEMENT.WebManagementService(
                 host_control=RecordingHostControl(),
+                attach_cli_module=ATTACH_CLI_MODULE,
                 web_routes=build_application().web_routes,
             )
             status, payload = service.handle_api("GET", "/api/im/session", b"", {})
@@ -442,6 +468,7 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
             result = WEB_MANAGEMENT.main(
                 ["--host", "0.0.0.0"],
                 host_control=RecordingHostControl(),
+                attach_cli_module=ATTACH_CLI_MODULE,
             )
 
         self.assertEqual(result, 2)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from buddyswitch.foundation.identity.model import ActorIdentityProfile
-from buddyswitch.launcher.web_contracts import ActorConsoleSectionRegistration
+from buddyswitch.foundation.web_runtime.contracts import ActorConsoleSectionRegistration
 from buddyswitch.modules.task.private import read_model
 
 

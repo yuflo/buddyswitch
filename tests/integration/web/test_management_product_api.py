@@ -26,6 +26,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
     def _service(self, host_control: RecordingHostControl | None = None) -> WEB_MANAGEMENT.WebManagementService:
         return WEB_MANAGEMENT.WebManagementService(
             host_control=host_control or RecordingHostControl(),
+            attach_cli_module=ATTACH_CLI_MODULE,
             web_routes=WEB_ROUTES,
             actor_console_sections=ACTOR_CONSOLE_SECTIONS,
         )
@@ -661,7 +662,10 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
                 )
 
         host_control = RejectingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
+        service = WEB_MANAGEMENT.WebManagementService(
+            host_control=host_control,
+            attach_cli_module=ATTACH_CLI_MODULE,
+        )
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/actors/not-an-actor/console", b"")

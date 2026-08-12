@@ -8,11 +8,12 @@ import unittest
 
 from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.actor_runtime import session as actor_session
+from buddyswitch.foundation.cli_runtime import contracts as cli_contract
 from buddyswitch.foundation.host_control import runtime as host_control
-from buddyswitch.launcher import cli, cli_contract
+from buddyswitch.launcher import cli
 
 
-class CliContractTests(unittest.TestCase):
+class CliRuntimeContractTests(unittest.TestCase):
     def test_success_envelope_has_stable_machine_keys(self) -> None:
         payload = cli_contract.success("task_result", {"task_id": "task-1"})
 

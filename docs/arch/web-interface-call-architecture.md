@@ -5,6 +5,29 @@
 BuddySwitch external interfaces call the owner of requested behavior directly.
 Web and the public CLI are peer adapters; neither is the other's internal API.
 
+## Physical owners
+
+`src/buddyswitch/foundation/web_runtime/contracts.py` owns the passive route,
+worker, host-access, Actor Console, and HTTP-error contracts.
+`src/buddyswitch/foundation/web_runtime/runtime.py` owns the generic HTTP host,
+built-in instance routes, lifecycle-operation projection, local binding,
+static-file safety, worker lifecycle, ready output, and signal teardown. Its
+packaged UI is owner-local at
+`src/buddyswitch/foundation/web_runtime/assets/web-management/`.
+
+`src/buddyswitch/foundation/cli_runtime/contracts.py` owns the one shared
+machine-first success/failure envelope, exit-code mapping, option parsing, and
+passive CLI contribution contract. The current CLI host consumes that contract
+but remains outside this Web Runtime owner. Both Foundation package roots are
+inert; application composition imports their concrete modules directly.
+
+`src/buddyswitch/application/entrypoints/web.py` owns the concrete public CLI
+module used by Web attach. It supplies that immutable module fact through the
+required Web Runtime assembly input. Foundation owns runtime-executable
+selection, shell quoting, attach argument construction, Copy-command projection,
+and Terminal invocation; it embeds no Application or Launcher implementation
+path.
+
 ## Public CLI
 
 The public CLI delegates:
@@ -15,8 +38,8 @@ The public CLI delegates:
 - Web startup to the Web process launcher.
 
 Web does not run the CLI as a subprocess or parse CLI output. Open TUI is the
-explicit user-visible exception: Web hands Terminal.app the same public
-`buddyswitch-codex instance attach` command shown by Copy command.
+explicit user-visible exception: Application supplies the public attach module
+and Web hands Terminal.app the resulting exact command shown by Copy command.
 
 ## Web interface
 
@@ -120,6 +143,11 @@ Browser -> Web Open TUI -> Terminal -> public CLI attach -> Actor Session
 Browser -> Web -> typed Actor Console section projectors
 Browser -> generic Web host -> contributed Track read route -> Track Public
 Browser -> generic Web host -> contributed Communication route
+
+Application -> Foundation Web Runtime -> injected private Host Control
+Application -> required Web Runtime attach-module input -> public CLI attach
+Application and component adapters -> Foundation Web Runtime contracts
+Current CLI host and component CLI adapters -> Foundation CLI Runtime contract
 
 Public CLI -> private Host Control
 Public CLI -> Foundation Actor Session

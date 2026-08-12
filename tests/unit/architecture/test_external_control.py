@@ -122,7 +122,7 @@ CANONICAL_LAUNCHER_STATEMENTS = (
 
 class ExternalControlArchitectureTests(unittest.TestCase):
     def test_web_uses_private_owners_and_terminal_handoff_without_cli_execution(self) -> None:
-        source = _source("src/buddyswitch/launcher/web_management.py")
+        source = _source("src/buddyswitch/foundation/web_runtime/runtime.py")
         forbidden = (
             "Launcher" + "CommandRunner",
             "--" + "json",
@@ -160,7 +160,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
 
     def test_actor_environment_build_is_private_to_host_control(self) -> None:
         cli_source = _source("src/buddyswitch/launcher/cli.py")
-        web_source = _source("src/buddyswitch/launcher/web_management.py")
+        web_source = _source("src/buddyswitch/foundation/web_runtime/runtime.py")
         host_source = _source("src/buddyswitch/foundation/host_control/shell/host_control.sh")
         application_start_source = _source(
             "src/buddyswitch/application/entrypoints/host_control_start.py"
@@ -468,7 +468,7 @@ class ExternalControlArchitectureTests(unittest.TestCase):
             for private_key in ("secret", "repo_path"):
                 self.assertFalse(_contains_mapping_key(payload, private_key))
 
-        web_source = _source("src/buddyswitch/launcher/web_management.py")
+        web_source = _source("src/buddyswitch/foundation/web_runtime/runtime.py")
         task_web_source = _source(
             "src/buddyswitch/modules/task/private/adapters/web.py"
         )

@@ -206,7 +206,7 @@ def test_track_dependency_direction_and_stable_storage_are_exact() -> None:
 
 
 def test_generic_web_host_has_no_track_or_product_route_knowledge() -> None:
-    host_path = REPO_ROOT / "src/buddyswitch/launcher/web_management.py"
+    host_path = REPO_ROOT / "src/buddyswitch/foundation/web_runtime/runtime.py"
     source = host_path.read_text(encoding="utf-8")
 
     assert not [

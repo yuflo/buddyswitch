@@ -48,6 +48,10 @@ owns readiness, identity creation, routing, Actor contact projection, and
 delivery. The worker factory receives only the bound server URL and owns the
 iMessage channel controller and worker.
 
+The passive Web types come directly from
+`src/buddyswitch/foundation/web_runtime/contracts.py`; Communication does not
+own, copy, or discover a host contract.
+
 The generic Web host prepares routes before publishing readiness, dispatches
 by the shared validated exact/prefix matcher contract, starts workers
 fail-soft, stops only started workers in reverse order, and closes the server

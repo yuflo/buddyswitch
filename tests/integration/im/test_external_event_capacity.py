@@ -9,10 +9,10 @@ import time
 from typing import Any
 
 import buddyswitch.foundation.identity.profiles as identity_profiles
+from buddyswitch.foundation.web_runtime import runtime as web_management
 from buddyswitch.modules.communication.private.domain import messages as message_service
 from tests.support.cli import wait_until
 from tests.support.runtime import RuntimeWorkspaceTestCase
-from buddyswitch.launcher import web_management
 from buddyswitch.modules.communication.private.adapters.web import (
     im_http_router,
     imessage_channel,

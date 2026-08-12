@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..', '..', '..');
-const assetDir = path.join(root, 'src', 'buddyswitch', 'launcher', 'assets', 'web-management');
+const assetDir = path.join(root, 'src', 'buddyswitch', 'foundation', 'web_runtime', 'assets', 'web-management');
 const indexHtml = fs.readFileSync(path.join(assetDir, 'index.html'), 'utf8');
 const appJs = fs.readFileSync(path.join(assetDir, 'app.js'), 'utf8');
 const markdownRendererPath = path.join(assetDir, 'markdown-renderer.js');

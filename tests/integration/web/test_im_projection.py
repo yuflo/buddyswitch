@@ -11,8 +11,10 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.launcher import web_management  # noqa: E402
+from buddyswitch.foundation.web_runtime import runtime as web_management  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.web import registration as communication_web  # noqa: E402
+
+ATTACH_CLI_MODULE = "buddyswitch.application.entrypoints.cli"
 
 
 def _web_service_with_im(
@@ -26,6 +28,7 @@ def _web_service_with_im(
     )
     return web_management.WebManagementService(
         host_control=mock.Mock(),
+        attach_cli_module=ATTACH_CLI_MODULE,
         web_routes=(
             web_management.WebRouteRegistration(
                 name="communication-im-test",
@@ -195,7 +198,10 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         )
 
     def test_web_management_does_not_expose_retired_web_im_route_family(self) -> None:
-        service = web_management.WebManagementService(host_control=mock.Mock())
+        service = web_management.WebManagementService(
+            host_control=mock.Mock(),
+            attach_cli_module=ATTACH_CLI_MODULE,
+        )
         retired_prefix = "/api/web/" + "im"
 
         for method, path, body in (
@@ -210,7 +216,10 @@ class ImWebManagementProjectionTests(unittest.TestCase):
                 self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_removes_old_message_send_route(self) -> None:
-        service = web_management.WebManagementService(host_control=mock.Mock())
+        service = web_management.WebManagementService(
+            host_control=mock.Mock(),
+            attach_cli_module=ATTACH_CLI_MODULE,
+        )
 
         with self.assertRaises(web_management.HttpError) as raised:
             old_route = "/api/messages" + "/send"
@@ -218,7 +227,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_no_longer_imports_fake_web_user_actor(self) -> None:
-        source = (ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "foundation" / "web_runtime" / "runtime.py").read_text(encoding="utf-8")
 
         self.assertNotIn("import web_user_actor", source)
         self.assertNotIn("WebUser" + "ActorRuntime", source)
@@ -227,7 +236,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
     def test_http_and_web_projections_do_not_own_external_im_session_semantics(self) -> None:
         surfaces = (
             ROOT / "src/buddyswitch/modules/communication/private/adapters/web/im_http_router.py",
-            ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py",
+            ROOT / "src" / "buddyswitch" / "foundation" / "web_runtime" / "runtime.py",
             ROOT / "src/buddyswitch/modules/communication/private/adapters/web/web_im_identity.py",
         )
         forbidden_fragments = (

@@ -91,7 +91,7 @@ def test_application_assembles_one_host_control_for_generic_cli_and_web() -> Non
         assert "host_control=" in source
 
     generic_cli = (SRC / "launcher" / "cli.py").read_text(encoding="utf-8")
-    generic_web = (SRC / "launcher" / "web_management.py").read_text(encoding="utf-8")
+    generic_web = (SRC / "foundation" / "web_runtime" / "runtime.py").read_text(encoding="utf-8")
     for source in (generic_cli, generic_web):
         assert "HostControl()" not in source
         assert "launcher import host_control" not in source

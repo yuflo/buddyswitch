@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from buddyswitch.launcher import cli_contract
+from buddyswitch.foundation.cli_runtime import contracts as cli_contract
 from buddyswitch.modules.track import public as track_public
 
 

@@ -25,7 +25,7 @@ def test_module_assembly_exposes_only_the_two_approved_web_host_seams() -> None:
 
 
 def test_web_contribution_contracts_are_passive_immutable_data() -> None:
-    from buddyswitch.launcher import web_contracts
+    from buddyswitch.foundation.web_runtime import contracts as web_contracts
 
     route_type = getattr(web_contracts, "WebRouteRegistration", None)
     worker_type = getattr(web_contracts, "WebWorkerRegistration", None)
@@ -57,7 +57,7 @@ def test_web_contribution_contracts_are_passive_immutable_data() -> None:
 def test_application_validates_web_contributions_without_calling_factories() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.foundation.composition import ModuleAssembly
-    from buddyswitch.launcher import web_contracts
+    from buddyswitch.foundation.web_runtime import contracts as web_contracts
 
     route_type = getattr(web_contracts, "WebRouteRegistration", None)
     worker_type = getattr(web_contracts, "WebWorkerRegistration", None)
@@ -102,7 +102,7 @@ def test_application_validates_web_contributions_without_calling_factories() -> 
 def test_application_rejects_invalid_and_duplicate_web_contributions() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.foundation.composition import ModuleAssembly
-    from buddyswitch.launcher import web_contracts
+    from buddyswitch.foundation.web_runtime import contracts as web_contracts
 
     route_type = getattr(web_contracts, "WebRouteRegistration", None)
     worker_type = getattr(web_contracts, "WebWorkerRegistration", None)

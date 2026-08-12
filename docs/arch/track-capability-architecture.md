@@ -51,3 +51,9 @@ declares exact `/api/tracks` and prefix `/api/tracks/` matchers and translates
 list/detail reads through Track Public. Application composition selects Track
 exactly once; the generic Web host validates and dispatches the passive route
 without importing Track or branching on Track paths.
+
+Track imports its passive Web registration types from
+`src/buddyswitch/foundation/web_runtime/contracts.py` and its machine-first CLI
+result/contribution types from
+`src/buddyswitch/foundation/cli_runtime/contracts.py`. It does not copy either
+host contract.

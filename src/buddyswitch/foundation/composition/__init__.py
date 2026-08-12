@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from buddyswitch.foundation.tool_runtime.definition import ToolRegistration
-    from buddyswitch.launcher.cli_contract import CliCommandRegistration
+    from buddyswitch.foundation.cli_runtime.contracts import CliCommandRegistration
     from buddyswitch.foundation.daemon.contracts import DaemonHandlerRegistration
     from buddyswitch.foundation.daemon.inbound import InboundSourceRegistration
-    from buddyswitch.launcher.web_contracts import (
+    from buddyswitch.foundation.web_runtime.contracts import (
         ActorConsoleSectionRegistration,
         WebRouteRegistration,
         WebWorkerRegistration,

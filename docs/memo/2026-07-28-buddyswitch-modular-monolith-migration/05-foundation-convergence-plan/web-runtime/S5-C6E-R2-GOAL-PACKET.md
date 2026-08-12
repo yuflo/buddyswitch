@@ -1,5 +1,7 @@
 # S5 C6E R2 Goal Packet
 
+> Status: `CONSUMED — ACCEPTED in S5-C6E-ACCEPTANCE.md`
+
 ## Copy-paste request
 
 ```text

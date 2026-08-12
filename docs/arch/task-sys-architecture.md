@@ -169,6 +169,11 @@ registration. The generic Web host invokes the projector without importing
 Task private code or copying Task lifecycle rules. Task also contributes its
 read-only public CLI command through the typed CLI registration.
 
+Those passive host types come directly from
+`src/buddyswitch/foundation/web_runtime/contracts.py` and
+`src/buddyswitch/foundation/cli_runtime/contracts.py`; Task owns only its
+projectors and command behavior.
+
 ## Physical module and application composition
 
 Task has one live physical root:

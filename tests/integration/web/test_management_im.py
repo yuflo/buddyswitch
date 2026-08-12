@@ -5,6 +5,7 @@ class WebManagementStableImIdentityTests(RuntimeWorkspaceTestCase):
     def _service(self, host_control: RecordingHostControl | None = None) -> WEB_MANAGEMENT.WebManagementService:
         return WEB_MANAGEMENT.WebManagementService(
             host_control=host_control or RecordingHostControl(),
+            attach_cli_module=ATTACH_CLI_MODULE,
             web_routes=WEB_ROUTES,
         )
 

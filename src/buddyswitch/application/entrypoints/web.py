@@ -4,7 +4,10 @@ from buddyswitch.application.build import activate_application
 from buddyswitch.application.host_control import assemble_host_control
 from buddyswitch.foundation.host_control.runtime import HostControlError
 from buddyswitch.foundation.process_runtime.invocation import run_verified
-from buddyswitch.launcher import web_management
+from buddyswitch.foundation.web_runtime import runtime as web_runtime
+
+
+PUBLIC_ATTACH_CLI_MODULE = "buddyswitch.application.entrypoints.cli"
 
 
 def main() -> int:
@@ -12,9 +15,10 @@ def main() -> int:
     try:
         host_control = assemble_host_control(application)
     except HostControlError as exc:
-        return web_management.emit_startup_failure(exc)
-    return web_management.main(
+        return web_runtime.emit_startup_failure(exc)
+    return web_runtime.main(
         host_control=host_control,
+        attach_cli_module=PUBLIC_ATTACH_CLI_MODULE,
     )
 
 

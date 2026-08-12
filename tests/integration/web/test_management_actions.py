@@ -217,7 +217,7 @@ class WebManagementHTTPActionTests(WebManagementServerTestCase):
             method="GET",
             path="/static/vendor/highlightjs/github.min.css",
         )
-        blocked_status, blocked = self._request_text(base_url, method="GET", path="/static/../web_management.py")
+        blocked_status, blocked = self._request_text(base_url, method="GET", path="/static/../../runtime.py")
         self.assertEqual(html_status, 200)
         self.assertIn("BuddySwitch Web Management", html)
         self.assertIn("webui-root", html)

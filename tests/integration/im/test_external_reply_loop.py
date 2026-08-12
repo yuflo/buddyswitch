@@ -547,8 +547,8 @@ class ImExternalReplyLoopTests(RuntimeWorkspaceTestCase):
     def test_no_external_reply_loop_shortcuts_in_active_surfaces(self) -> None:
         active_surface = "\n".join(
             (
-                (ROOT / "src/buddyswitch/launcher/web_management.py").read_text(encoding="utf-8"),
-                (ROOT / "src/buddyswitch/launcher/assets/web-management/app.js").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/foundation/web_runtime/runtime.py").read_text(encoding="utf-8"),
+                (ROOT / "src/buddyswitch/foundation/web_runtime/assets/web-management/app.js").read_text(encoding="utf-8"),
                 (ROOT / "src/buddyswitch/modules/communication/private/adapters/actor/im_client.py").read_text(encoding="utf-8"),
                 (ROOT / "src/buddyswitch/modules/communication/private/adapters/tool/_impl.py").read_text(encoding="utf-8"),
             )

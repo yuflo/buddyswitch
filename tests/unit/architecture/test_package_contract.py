@@ -40,8 +40,10 @@ PACKAGE_OWNER_FILES = (
     "config/__init__.py",
     "contracts/__init__.py",
     "launcher/__init__.py",
+    "foundation/cli_runtime/__init__.py",
     "foundation/host_control/__init__.py",
     "foundation/runtime_broker/__init__.py",
+    "foundation/web_runtime/__init__.py",
     "runtime_support/__init__.py",
     "skills/__init__.py",
 )
@@ -60,6 +62,7 @@ FOUNDATION_PRIMITIVE_DOC = "docs/arch/foundation-primitives-architecture.md"
 RUNTIME_BROKER_DOC = "docs/arch/runtime-broker-architecture.md"
 ACTOR_RUNTIME_DOC = "docs/arch/actor-runtime-architecture.md"
 HOST_CONTROL_DOC = "docs/arch/host-control-architecture.md"
+WEB_RUNTIME_DOC = "docs/arch/web-interface-call-architecture.md"
 ACTOR_RUNTIME_FILES = (
     "foundation/actor_runtime/__init__.py",
     "foundation/actor_runtime/capability.py",
@@ -70,9 +73,23 @@ ACTOR_RUNTIME_FILES = (
     "foundation/actor_runtime/side_thread_lifecycle.py",
     "foundation/actor_runtime/side_thread_registry.py",
 )
+WEB_RUNTIME_FILES = (
+    "foundation/cli_runtime/__init__.py",
+    "foundation/cli_runtime/contracts.py",
+    "foundation/web_runtime/__init__.py",
+    "foundation/web_runtime/contracts.py",
+    "foundation/web_runtime/runtime.py",
+    "foundation/web_runtime/assets/web-management/index.html",
+)
 RETIRED_FOUNDATION_PATHS = (
     "src/buddyswitch/env",
     "src/buddyswitch/runtime_kernel",
+)
+RETIRED_WEB_RUNTIME_PATHS = (
+    "src/buddyswitch/launcher/web_management.py",
+    "src/buddyswitch/launcher/web_contracts.py",
+    "src/buddyswitch/launcher/cli_contract.py",
+    "src/buddyswitch/launcher/assets/web-management",
 )
 PACKAGE_ENTRYPOINTS = (
     "runtime_activation",
@@ -136,12 +153,24 @@ def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -
         "buddyswitch.foundation.app_server",
         "buddyswitch.foundation.browser_runtime",
         "buddyswitch.foundation.host_control",
+        "buddyswitch.foundation.web_runtime",
         "buddyswitch.launcher",
         "buddyswitch.modules.artifact",
         "buddyswitch.modules.demand",
         "buddyswitch.modules.track",
         "buddyswitch.skills",
     }
+    assert package_data["buddyswitch.foundation.web_runtime"] == [
+        "assets/**/*.md",
+        "assets/**/*.html",
+        "assets/**/*.css",
+        "assets/**/*.js",
+        "assets/**/LICENSE*",
+    ]
+    assert package_data["buddyswitch.launcher"] == [
+        "assets/**/*.md",
+        "shell/*.sh",
+    ]
     patterns = {
         pattern
         for rows in package_data.values()
@@ -166,8 +195,10 @@ def test_minimal_package_and_activation_entrypoint_exist_under_src_only() -> Non
         PACKAGE_ROOT / "foundation" / "process_runtime" / "activation.py",
         *(PACKAGE_ROOT / relative for relative in ACTOR_RUNTIME_FILES),
         *(PACKAGE_ROOT / relative for relative in FOUNDATION_PRIMITIVE_FILES),
+        *(PACKAGE_ROOT / relative for relative in WEB_RUNTIME_FILES),
         REPO_ROOT / ACTOR_RUNTIME_DOC,
         REPO_ROOT / FOUNDATION_PRIMITIVE_DOC,
+        REPO_ROOT / WEB_RUNTIME_DOC,
     )
     assert [path.relative_to(REPO_ROOT).as_posix() for path in expected if not path.is_file()] == []
 
@@ -198,11 +229,17 @@ def test_atomic_cutover_has_one_source_and_entrypoint_topology() -> None:
         for relative in RETIRED_FOUNDATION_PATHS
         if (REPO_ROOT / relative).exists()
     ]
+    retired_web_runtime_paths = [
+        relative
+        for relative in RETIRED_WEB_RUNTIME_PATHS
+        if (REPO_ROOT / relative).exists()
+    ]
 
     assert old_paths == []
     assert missing_owners == []
     assert missing_entrypoints == []
     assert retired_foundation_paths == []
+    assert retired_web_runtime_paths == []
 
 
 def test_current_guidance_names_only_current_installed_package_owners() -> None:
@@ -220,6 +257,10 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         "PYTHONPATH",
         "src/buddyswitch/runtime_kernel",
         "buddyswitch.runtime_kernel",
+        "src/buddyswitch/launcher/web_management.py",
+        "src/buddyswitch/launcher/web_contracts.py",
+        "src/buddyswitch/launcher/cli_contract.py",
+        "src/buddyswitch/launcher/assets/web-management",
     )
     guidance_paths = (
         REPO_ROOT / "README.md",
@@ -264,6 +305,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
             "src/buddyswitch/foundation/process_runtime/json_framing.py",
             "src/buddyswitch/foundation/process_runtime/runtime_lock.py",
+            "src/buddyswitch/foundation/web_runtime/",
+            "src/buddyswitch/foundation/cli_runtime/contracts.py",
             "src/buddyswitch/contracts/prepare-turn-context.json",
             "src/buddyswitch/contracts/{pm,design,dev,market,test}.md",
             "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
@@ -293,6 +336,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         REPO_ROOT / "docs" / "arch" / "task-sys-architecture.md": (
             "src/buddyswitch/modules/task/private/domain/task_sys.py",
             "src/buddyswitch/modules/task/private/adapters/goal/handler.py",
+            "src/buddyswitch/foundation/web_runtime/contracts.py",
+            "src/buddyswitch/foundation/cli_runtime/contracts.py",
         ),
         REPO_ROOT / "docs" / "arch" / "search-capability-architecture.md": (
             "src/buddyswitch/modules/search/module.py",
@@ -302,6 +347,8 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         ),
         REPO_ROOT / "docs" / "arch" / "track-capability-architecture.md": (
             "src/buddyswitch/modules/track/",
+            "src/buddyswitch/foundation/web_runtime/contracts.py",
+            "src/buddyswitch/foundation/cli_runtime/contracts.py",
             "buddyswitch/objects/tracks",
             "buddyswitch/objects/track-comments",
         ),
@@ -318,8 +365,15 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
         ),
         REPO_ROOT / "docs" / "arch" / "communication-capability-architecture.md": (
             "src/buddyswitch/modules/communication/",
+            "src/buddyswitch/foundation/web_runtime/contracts.py",
             "WebRouteRegistration",
             "WebWorkerRegistration",
+        ),
+        REPO_ROOT / WEB_RUNTIME_DOC: (
+            "src/buddyswitch/foundation/web_runtime/contracts.py",
+            "src/buddyswitch/foundation/web_runtime/runtime.py",
+            "src/buddyswitch/foundation/web_runtime/assets/web-management/",
+            "src/buddyswitch/foundation/cli_runtime/contracts.py",
         ),
         REPO_ROOT / FOUNDATION_PRIMITIVE_DOC: (
             "src/buddyswitch/foundation/identity/model.py",

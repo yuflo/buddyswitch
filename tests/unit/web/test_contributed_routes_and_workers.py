@@ -6,9 +6,11 @@ from unittest import mock
 
 import pytest
 
+ATTACH_CLI_MODULE = "example.public_cli"
+
 
 def _contracts():
-    from buddyswitch.launcher import web_contracts
+    from buddyswitch.foundation.web_runtime import contracts as web_contracts
 
     route_type = getattr(web_contracts, "WebRouteRegistration", None)
     worker_type = getattr(web_contracts, "WebWorkerRegistration", None)
@@ -18,7 +20,7 @@ def _contracts():
 
 
 def test_contributed_route_is_instantiated_prepared_and_dispatched() -> None:
-    from buddyswitch.launcher import web_management
+    from buddyswitch.foundation.web_runtime import runtime as web_management
 
     route_type, _worker_type = _contracts()
     calls: list[tuple[str, object]] = []
@@ -37,6 +39,7 @@ def test_contributed_route_is_instantiated_prepared_and_dispatched() -> None:
 
     service = web_management.WebManagementService(
         host_control=mock.Mock(),
+        attach_cli_module=ATTACH_CLI_MODULE,
         web_routes=(
             route_type(
                 name="example",
@@ -78,7 +81,7 @@ def test_contributed_route_is_instantiated_prepared_and_dispatched() -> None:
 
 
 def test_route_preparation_failure_is_not_published_as_ready() -> None:
-    from buddyswitch.launcher import web_management
+    from buddyswitch.foundation.web_runtime import runtime as web_management
 
     route_type, _worker_type = _contracts()
 
@@ -91,6 +94,7 @@ def test_route_preparation_failure_is_not_published_as_ready() -> None:
 
     service = web_management.WebManagementService(
         host_control=mock.Mock(),
+        attach_cli_module=ATTACH_CLI_MODULE,
         web_routes=(
             route_type(
                 name="unavailable",
@@ -105,7 +109,7 @@ def test_route_preparation_failure_is_not_published_as_ready() -> None:
 
 
 def test_workers_start_fail_soft_stop_in_reverse_and_close_server_last() -> None:
-    from buddyswitch.launcher import web_management
+    from buddyswitch.foundation.web_runtime import runtime as web_management
 
     events: list[str] = []
 
@@ -152,7 +156,7 @@ def test_workers_start_fail_soft_stop_in_reverse_and_close_server_last() -> None
 
 
 def test_worker_factories_receive_bound_server_url_only_when_instantiated() -> None:
-    from buddyswitch.launcher import web_management
+    from buddyswitch.foundation.web_runtime import runtime as web_management
 
     _route_type, worker_type = _contracts()
     calls: list[str] = []

@@ -30,6 +30,33 @@ EMPTY_APPLICATION = ApplicationAssembly(
 
 
 class HostControlEntrypointErrorTests(unittest.TestCase):
+    def test_web_entrypoint_supplies_public_attach_module_to_foundation(self) -> None:
+        host_control = mock.sentinel.host_control
+        with (
+            mock.patch.object(
+                web_entrypoint,
+                "activate_application",
+                return_value=EMPTY_APPLICATION,
+            ),
+            mock.patch.object(
+                web_entrypoint,
+                "assemble_host_control",
+                return_value=host_control,
+            ),
+            mock.patch.object(
+                web_entrypoint.web_runtime,
+                "main",
+                return_value=0,
+            ) as generic_main,
+        ):
+            status = web_entrypoint.main()
+
+        self.assertEqual(status, 0)
+        generic_main.assert_called_once_with(
+            host_control=host_control,
+            attach_cli_module=web_entrypoint.PUBLIC_ATTACH_CLI_MODULE,
+        )
+
     def test_cli_malformed_role_catalog_uses_public_failure_envelope(self) -> None:
         stdout = io.StringIO()
         with (
@@ -67,7 +94,7 @@ class HostControlEntrypointErrorTests(unittest.TestCase):
                 "load_manifest",
                 side_effect=env_manifest.ManifestError("roles[0].id must be a non-empty string"),
             ),
-            mock.patch.object(web_entrypoint.web_management, "main") as generic_main,
+            mock.patch.object(web_entrypoint.web_runtime, "main") as generic_main,
             contextlib.redirect_stderr(stderr),
         ):
             status = web_entrypoint.main()

@@ -26,8 +26,9 @@ from tests.support.runtime import RuntimeWorkspaceTestCase
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-WEB_MANAGEMENT_PATH = ROOT / "src" / "buddyswitch" / "launcher" / "web_management.py"
-WEB_MANAGEMENT = importlib.import_module("buddyswitch.launcher.web_management")
+WEB_MANAGEMENT_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "web_runtime" / "runtime.py"
+WEB_MANAGEMENT = importlib.import_module("buddyswitch.foundation.web_runtime.runtime")
+ATTACH_CLI_MODULE = "buddyswitch.application.entrypoints.cli"
 NO_PROXY_OPENER = build_opener(ProxyHandler({}))
 
 from buddyswitch.modules.communication.private.domain import messages as message_service  # noqa: E402
@@ -40,6 +41,18 @@ from buddyswitch.foundation.actor_runtime import capability as actor_capability 
 APPLICATION = build_application()
 WEB_ROUTES = APPLICATION.web_routes
 ACTOR_CONSOLE_SECTIONS = APPLICATION.actor_console_sections
+
+
+def build_web_management_service(
+    *,
+    host_control: object,
+    **kwargs: object,
+) -> WEB_MANAGEMENT.WebManagementService:
+    return WEB_MANAGEMENT.WebManagementService(
+        host_control=host_control,
+        attach_cli_module=ATTACH_CLI_MODULE,
+        **kwargs,
+    )
 
 
 def direct_host_control() -> WEB_MANAGEMENT.host_control_module.HostControl:
@@ -376,7 +389,7 @@ class WebManagementServerTestCase(unittest.TestCase):
             service_kwargs["terminal_opener"] = terminal_opener
         if platform_name is not None:
             service_kwargs["platform_name"] = platform_name
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=control,
             **service_kwargs,
         )

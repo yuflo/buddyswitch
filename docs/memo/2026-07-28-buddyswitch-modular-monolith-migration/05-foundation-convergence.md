@@ -1,8 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Current state: C1–C6D ACCEPTED; C6E Web Runtime READY
+> Current state: C1–C6E ACCEPTED; C6F source refresh unblocked
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: `BS-MM-S5-WEB-RUNTIME-R1-20260812-01` only
+> Execution authority: none; C6F preparation only
 > Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
 
 The executable blueprint and current handoff live at

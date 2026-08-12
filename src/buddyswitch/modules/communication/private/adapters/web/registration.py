@@ -7,7 +7,7 @@ from typing import Any
 
 from buddyswitch.foundation.identity.model import ActorIdentityProfile
 from buddyswitch.foundation.daemon import client as daemon_client
-from buddyswitch.launcher.web_contracts import (
+from buddyswitch.foundation.web_runtime.contracts import (
     ActorConsoleSectionRegistration,
     WebHostAccess,
     WebRouteRegistration,

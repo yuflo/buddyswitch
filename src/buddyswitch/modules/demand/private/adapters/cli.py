@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from buddyswitch.foundation.cli_runtime import contracts as cli_contract
 from buddyswitch.foundation.host_control import runtime as host_control
-from buddyswitch.launcher import cli_contract
 from buddyswitch.modules.demand.private import read_model
 
 

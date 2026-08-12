@@ -27,13 +27,13 @@ TASK_MODULE = TASK_ROOT / "module.py"
 APPLICATION_COMPOSITION = Path("src/buddyswitch/application/composition.py")
 APPLICATION_BUILD = Path("src/buddyswitch/application/build.py")
 MODULE_ASSEMBLY = Path("src/buddyswitch/foundation/composition/__init__.py")
-WEB_CONTRACTS = Path("src/buddyswitch/launcher/web_contracts.py")
+WEB_CONTRACTS = Path("src/buddyswitch/foundation/web_runtime/contracts.py")
 GENERIC_HOSTS = (
     Path("src/buddyswitch/foundation/tool_runtime/context.py"),
     Path("src/buddyswitch/foundation/tool_runtime/registry.py"),
     Path("src/buddyswitch/launcher/cli.py"),
     Path("src/buddyswitch/foundation/daemon/instance_process.py"),
-    Path("src/buddyswitch/launcher/web_management.py"),
+    Path("src/buddyswitch/foundation/web_runtime/runtime.py"),
 )
 RETIRED_OWNER_PATHS = (
     DOMAIN,

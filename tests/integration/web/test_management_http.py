@@ -126,7 +126,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner.block("start", ("market", "act-market-demo"), release_start)
         runner.set_response("start", ("market", "act-market-demo"), {"actor_id": "act-market-demo"})
         runner.set_response("status", ("act-market-demo",), active_status("act-market-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
         result: dict[str, object] = {}
 
         def call_start() -> None:
@@ -166,7 +166,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner.set_response("start", ("pm", "act-pm-demo"), {"actor_id": "act-pm-demo"})
         runner.set_response("status", ("act-market-demo",), active_status("act-market-demo", "thread-market", "idle"))
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-pm", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         first_status, first_payload = service.handle_api("POST", "/api/instances", b'{"role":"market"}')
         first_operation_id = first_payload["operation"]["id"]
@@ -203,7 +203,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         runner.set_response("start", ("pm", "act-pm-demo"), {"actor_id": "act-pm-demo"})
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -232,7 +232,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             ("pm", "act-pm-demo"),
             host_control_error("COMMAND_FAILED", "Thread bootstrap failed for thread-1."),
         )
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -271,7 +271,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             active_status(replacement_actor_id, "thread-replacement", "idle"),
         )
         runner.block("retry", (failed_actor_id, replacement_actor_id), release_retry)
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api(
             "POST",
@@ -320,7 +320,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 returncode=3,
             ),
         )
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("POST", "/api/instances/act-pm-stopped/retry", b"")
@@ -348,7 +348,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             (failed_actor_id, replacement_actor_id),
             host_control_error("COMMAND_FAILED", "Replacement start failed."),
         )
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", f"/api/instances/{failed_actor_id}/retry", b"")
 
@@ -371,7 +371,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             },
         )
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-new", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
@@ -388,7 +388,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_clear_route_returns_command_failure_when_host_control_clear_fails(self) -> None:
         runner = RecordingHostControl()
         runner.set_error("clear", ("act-pm-demo",), host_control_error("COMMAND_FAILED", "Daemon start failed for act-pm-demo."))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/clear", b"")
 
@@ -399,7 +399,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertEqual(runner.calls, [("clear", ("act-pm-demo",))])
 
     def test_unknown_lifecycle_operation_returns_404(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
+        service = build_web_management_service(host_control=RecordingHostControl())
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/operations/op-missing", b"")
@@ -409,7 +409,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
     def test_initialize_route_is_removed(self) -> None:
         runner = RecordingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("POST", "/api/instances/act-pm-demo/" + "initialize", b"")
@@ -422,7 +422,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner = RecordingHostControl()
         runner.set_response("resume", ("act-pm-demo",), {"actor_id": "act-pm-demo", "thread_id": "thread-1", "status": "active"})
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
 
@@ -436,7 +436,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_resume_operation_records_command_failure_after_acceptance(self) -> None:
         runner = RecordingHostControl()
         runner.set_error("resume", ("act-pm-demo",), host_control_error("COMMAND_FAILED", "thread/resume failed for thread-1"))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/resume", b"")
 
@@ -451,7 +451,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         runner.block("stop", ("act-pm-demo",), release_stop)
         runner.set_response("stop", ("act-pm-demo",), {"actor_id": "act-pm-demo", "status": "inactive"})
         runner.set_response("status", ("act-pm-demo",), active_status("act-pm-demo", "thread-1", "idle"))
-        service = WEB_MANAGEMENT.WebManagementService(host_control=runner)
+        service = build_web_management_service(host_control=runner)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/stop", b"")
         self.assertEqual(status, 202)
@@ -473,7 +473,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             with self.subTest(headers=headers):
                 runner = RecordingHostControl()
                 opener = FakeTerminalOpener()
-                service = WEB_MANAGEMENT.WebManagementService(
+                service = build_web_management_service(
                     host_control=runner,
                     terminal_opener=opener.open,
                     platform_name="darwin",
@@ -490,7 +490,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_attach_command_route_returns_short_public_cli_without_opening_terminal(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -508,7 +508,10 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             {
                 "ok": True,
                 "actor_id": "act-pm-demo",
-                "command": WEB_MANAGEMENT.build_attach_cli_command("act-pm-demo"),
+                "command": WEB_MANAGEMENT.build_attach_cli_command(
+                    "act-pm-demo",
+                    attach_cli_module=ATTACH_CLI_MODULE,
+                ),
             },
         )
         self.assertEqual(runner.calls, [])
@@ -517,7 +520,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_attach_command_route_rejects_invalid_actor_id_without_side_effects(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -541,7 +544,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
             with self.subTest(headers=headers):
                 runner = RecordingHostControl()
                 opener = FakeTerminalOpener()
-                service = WEB_MANAGEMENT.WebManagementService(
+                service = build_web_management_service(
                     host_control=runner,
                     terminal_opener=opener.open,
                     platform_name="darwin",
@@ -558,7 +561,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_open_tui_route_rejects_arbitrary_request_fields_before_status_lookup(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -580,7 +583,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_open_tui_route_rejects_invalid_actor_id_before_terminal_handoff(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -597,7 +600,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_open_tui_route_rejects_unsupported_os_without_copy_command(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener()
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="linux",
@@ -638,14 +641,19 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         )
         self.assertEqual(
             opener.commands,
-            [WEB_MANAGEMENT.build_attach_cli_command("act-pm-demo")],
+            [
+                WEB_MANAGEMENT.build_attach_cli_command(
+                    "act-pm-demo",
+                    attach_cli_module=ATTACH_CLI_MODULE,
+                )
+            ],
         )
         self.assertEqual(runner.calls, [])
 
     def test_open_tui_route_maps_terminal_launch_failure(self) -> None:
         runner = RecordingHostControl()
         opener = FakeTerminalOpener(WEB_MANAGEMENT.TerminalOpenError("automation denied"))
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=runner,
             terminal_opener=opener.open,
             platform_name="darwin",
@@ -660,7 +668,12 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertIsNone(raised.exception.details)
         self.assertEqual(
             opener.commands,
-            [WEB_MANAGEMENT.build_attach_cli_command("act-pm-demo")],
+            [
+                WEB_MANAGEMENT.build_attach_cli_command(
+                    "act-pm-demo",
+                    attach_cli_module=ATTACH_CLI_MODULE,
+                )
+            ],
         )
         self.assertEqual(runner.calls, [])
 
@@ -731,7 +744,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
     def test_web_lifecycle_routes_call_injected_host_control_not_shell_commands(self) -> None:
         host_control = RecordingHostControl()
         host_control.status_response = active_status("act-pm-demo", "thread-main", "stopped")
-        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
+        service = build_web_management_service(host_control=host_control)
 
         status, payload = service.handle_api("POST", "/api/instances/act-pm-demo/stop", b"")
 
@@ -760,7 +773,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
         host_control = RecordingHostControl()
         router = RecordingImRouter()
-        service = WEB_MANAGEMENT.WebManagementService(
+        service = build_web_management_service(
             host_control=host_control,
             web_routes=(
                 WEB_MANAGEMENT.WebRouteRegistration(
@@ -785,7 +798,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
 
     def test_create_route_delegates_role_validation_to_injected_host_control(self) -> None:
         host_control = RecordingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
+        service = build_web_management_service(host_control=host_control)
 
         status, payload = service.handle_api("POST", "/api/instances", b'{"role":"pm"}')
 
@@ -813,7 +826,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 )
 
         host_control = RejectingHostControl()
-        service = WEB_MANAGEMENT.WebManagementService(host_control=host_control)
+        service = build_web_management_service(host_control=host_control)
 
         with self.assertRaises(WEB_MANAGEMENT.HttpError) as raised:
             service.handle_api("GET", "/api/instances/not-an-actor/status", b"")
@@ -831,7 +844,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
         self.assertNotIn('subprocess.Popen(["./buddyswitch-codex"', source)
 
     def test_web_management_product_api_does_not_split_first_cut_subpanel_routes(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
+        service = build_web_management_service(host_control=RecordingHostControl())
 
         for path in (
             "/api/actors/act-pm-demo/tasks",
@@ -844,7 +857,7 @@ class WebManagementHTTPTests(WebManagementServerTestCase):
                 self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_has_no_task_or_track_mutation_routes(self) -> None:
-        service = WEB_MANAGEMENT.WebManagementService(host_control=RecordingHostControl())
+        service = build_web_management_service(host_control=RecordingHostControl())
 
         for method, path in (
             ("POST", "/api/tasks"),

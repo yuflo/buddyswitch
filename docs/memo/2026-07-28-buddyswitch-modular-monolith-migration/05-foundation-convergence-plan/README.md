@@ -1,7 +1,7 @@
 # S5 Foundation Convergence Plan
 
-> Stage state: `C1–C6D ACCEPTED; C6E Web Runtime R2 READY`
-> Current execution authority: `BS-MM-S5-WEB-RUNTIME-R2-20260812-01` only
+> Stage state: `C1–C6E ACCEPTED; C6F source refresh unblocked`
+> Current execution authority: none; C6F preparation only
 > Entry source: commit `a61951fe63ecc4dd8cf03b8c0256fbfb11d12227`
 > Entry runtime source digest: `0f9c35e6a6431bd43974026ec41ea541babce6a63809e49fb78b108b1099af9b`
 
@@ -32,12 +32,11 @@ C6B Actor Session/side runtime is accepted at
 Environment C6C is accepted at
 `actor-environment/S5-C6C-ACCEPTANCE.md`; its R1 packet is consumed. Host
 Control C6D is accepted at `host-control/S5-C6D-ACCEPTANCE.md`; R1 and R2 are
-consumed. The remaining-host source refresh separates independently runnable
-Web Runtime from the broader CliHost/shell/Role dependency cluster. C6E R1 is
-consumed after hub review found one embedded Foundation-to-Application attach
-entrypoint. Its candidate is preserved; bounded R2 is READY at
-`web-runtime/S5-C6E-R2-READY-REVIEW.md`, and only its packet may execute.
-CliHost, RoleHost and final S5 acceptance remain unauthorized.
+consumed. Web Runtime C6E is accepted at
+`web-runtime/S5-C6E-ACCEPTANCE.md`; its R1 and R2 packets are consumed. The
+remaining CliHost/shell/config/Role-dependent source may now be refreshed for
+C6F planning. CliHost implementation, RoleHost and final S5 acceptance remain
+unauthorized.
 
 ## Remaining checkpoints
 
@@ -53,8 +52,8 @@ CliHost, RoleHost and final S5 acceptance remain unauthorized.
 | C6B | Actor Session and side-thread runtime | ACCEPTED |
 | C6C | Actor Environment publication | ACCEPTED |
 | C6D | private Host Control lifecycle and shared runtime lock | ACCEPTED |
-| C6E | Web runtime/contracts/assets plus shared machine contract | R2 READY |
-| C6F | remaining CLI runtime and shell convergence | BLOCKED pending C6E acceptance |
+| C6E | Web runtime/contracts/assets plus shared machine contract | ACCEPTED |
+| C6F | remaining CLI runtime and shell convergence | PREPARATION ONLY |
 | C7 | final guidance, residue proof and frozen S5 acceptance | BLOCKED |
 
 Checkpoint labels are program navigation. A checkpoint is handed off only

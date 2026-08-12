@@ -174,7 +174,7 @@ def test_dependency_direction_uses_public_edges_and_generic_hosts() -> None:
     assert "buddyswitch.modules.communication" in context_imports
 
     for relative in (
-        Path("src/buddyswitch/launcher/web_management.py"),
+        Path("src/buddyswitch/foundation/web_runtime/runtime.py"),
         Path("src/buddyswitch/foundation/daemon/instance_process.py"),
     ):
         source = (REPO_ROOT / relative).read_text(encoding="utf-8")

@@ -1,6 +1,6 @@
 # S5 C6E R2 READY Review
 
-> Decision: `READY`
+> Decision: `CONSUMED — ACCEPTED in S5-C6E-ACCEPTANCE.md`
 > Packet: `BS-MM-S5-WEB-RUNTIME-R2-20260812-01`
 > Entry: exact preserved R1 dirty candidate
 

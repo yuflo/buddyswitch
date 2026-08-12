@@ -15,7 +15,9 @@ ROOT = REPO_ROOT
 
 from buddyswitch.modules.communication.private.adapters.web import im_http_router  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.web import registration as communication_web  # noqa: E402
-from buddyswitch.launcher import web_management  # noqa: E402
+from buddyswitch.foundation.web_runtime import runtime as web_management  # noqa: E402
+
+ATTACH_CLI_MODULE = "buddyswitch.application.entrypoints.cli"
 
 
 def _web_service_with_im(
@@ -29,6 +31,7 @@ def _web_service_with_im(
     )
     return web_management.WebManagementService(
         host_control=mock.Mock(),
+        attach_cli_module=ATTACH_CLI_MODULE,
         web_routes=(
             web_management.WebRouteRegistration(
                 name="communication-im-test",

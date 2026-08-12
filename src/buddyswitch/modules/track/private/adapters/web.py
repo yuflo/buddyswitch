@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from buddyswitch.foundation.identity.model import ActorIdentityProfile
-from buddyswitch.launcher.web_contracts import (
+from buddyswitch.foundation.web_runtime.contracts import (
     ActorConsoleSectionRegistration,
     HttpError,
     WebHostAccess,

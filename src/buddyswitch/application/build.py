@@ -13,12 +13,12 @@ from buddyswitch.foundation.tool_runtime.definition import (
     ToolRegistration,
     validate_registration,
 )
+from buddyswitch.foundation.cli_runtime.contracts import CliCommandRegistration
 from buddyswitch.foundation.composition import ModuleAssembly
-from buddyswitch.launcher.cli_contract import CliCommandRegistration
 from buddyswitch.foundation.daemon.contracts import DaemonHandlerRegistration
 from buddyswitch.foundation.daemon import inbound
 from buddyswitch.foundation.daemon.inbound import InboundSourceRegistration
-from buddyswitch.launcher.web_contracts import (
+from buddyswitch.foundation.web_runtime.contracts import (
     ActorConsoleSectionRegistration,
     WebRouteRegistration,
     WebWorkerRegistration,
@@ -236,7 +236,8 @@ def activate_application(
     active_task_probe=ACTIVE_TASK_PROBE,
 ) -> ApplicationAssembly:
     from buddyswitch.foundation.tool_runtime import native_mcp, registry
-    from buddyswitch.launcher import codex_config, web_management
+    from buddyswitch.foundation.web_runtime import runtime as web_runtime
+    from buddyswitch.launcher import codex_config
     from buddyswitch.runtime_support import env_manifest, role_auth
 
     application = build_application(
@@ -258,10 +259,10 @@ def activate_application(
             if action.bound_capability_env is not None
         )
     )
-    web_management.configure_actor_console_sections(
+    web_runtime.configure_actor_console_sections(
         application.actor_console_sections
     )
-    web_management.configure_web_contributions(
+    web_runtime.configure_web_contributions(
         application.web_routes,
         application.web_workers,
     )

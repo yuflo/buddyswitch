@@ -726,7 +726,7 @@ def test_serialized_cleanup_action_removes_exact_git_worktree() -> None:
 
 def test_focused_runner_executes_only_the_explicit_python_nodeid() -> None:
     target = (
-        "tests/unit/launcher/test_cli_contract.py::CliContractTests::"
+        "tests/unit/runtime_protocol/test_cli_runtime_contract.py::CliRuntimeContractTests::"
         "test_success_envelope_has_stable_machine_keys"
     )
 

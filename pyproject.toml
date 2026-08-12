@@ -28,14 +28,15 @@ namespaces = false
 "buddyswitch.foundation.app_server" = ["shell/*.sh"]
 "buddyswitch.foundation.browser_runtime" = ["assets/**/*.json"]
 "buddyswitch.foundation.host_control" = ["shell/*.sh"]
-"buddyswitch.launcher" = [
-  "assets/**/*.toml",
-  "assets/**/*.json",
+"buddyswitch.foundation.web_runtime" = [
   "assets/**/*.md",
   "assets/**/*.html",
   "assets/**/*.css",
   "assets/**/*.js",
   "assets/**/LICENSE*",
+]
+"buddyswitch.launcher" = [
+  "assets/**/*.md",
   "shell/*.sh",
 ]
 "buddyswitch.modules.demand" = ["skills/**/*.md"]
