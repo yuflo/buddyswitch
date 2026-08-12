@@ -1,5 +1,8 @@
 # S5 C6D Host Control Goal Packet
 
+> Status: `CONSUMED — DO NOT EXECUTE`
+> Successor: `S5-C6D-R2-GOAL-PACKET.md`
+
 ## Copy-paste request
 
 ```text

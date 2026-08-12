@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6C ACCEPTED; C6D READY
-> Runtime authorization: `BS-MM-S5-HOST-CONTROL-R1-20260812-01` only
+> Current state: S0–S4 ACCEPTED; S5 C1–C6C ACCEPTED; C6D R2 READY
+> Runtime authorization: `BS-MM-S5-HOST-CONTROL-R2-20260812-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6C ACCEPTED; C6D READY |
+| S5 | `05-foundation-convergence.md` | C1–C6C ACCEPTED; C6D R2 READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -261,8 +261,10 @@ Host Control shell, mixed environment helpers, current Role input and a
 Launcher-owned runtime lock. Focused baseline `2a202fd6...` and topology
 `S5C6DP-20260812-01` pass. D-068 admits one complete lifecycle cutover with
 application-supplied current Role input and one Process Runtime lock owner.
-Only `BS-MM-S5-HOST-CONTROL-R1-20260812-01` may execute; Web/CLI physical
-convergence, C7 and S6 remain blocked.
+R1 completed the lifecycle/lock cutover but hub review found concrete
+Application module invocations in Foundation helper shells. R1 is consumed;
+only bounded continuation `BS-MM-S5-HOST-CONTROL-R2-20260812-01` may execute.
+Web/CLI physical convergence, C7 and S6 remain blocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

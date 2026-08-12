@@ -1,6 +1,6 @@
 # S5 C6D READY Review
 
-> Decision: `READY — R1 ONLY`
+> Decision: `CONSUMED — R1 RETURNED; R2 READY REVIEW SUPERSEDES`
 > Packet: `BS-MM-S5-HOST-CONTROL-R1-20260812-01`
 > Source: `d3dc9fa14b50e4d5f2030149eda2e62d5edf93af` plus preparation-only docs
 
@@ -41,7 +41,8 @@ Foundation dependency.
 
 ## Disposition
 
-The boundary is independently runnable and narrower than Web/CliHost physical
+The boundary was independently runnable and narrower than Web/CliHost physical
 convergence. It closes a real lifecycle owner and does not require S6 RoleHost.
-C6D R1 may execute from the exact clean READY commit supplied by the hub. No
-other remaining C6, C7 or S6 authority is granted.
+C6D R1 returned and is consumed. Its incomplete executable-dependency proof is
+reviewed in `S5-C6D-R1-RETURN-REVIEW.md`; only the bounded R2 successor may
+execute. No other remaining C6, C7 or S6 authority is granted.
