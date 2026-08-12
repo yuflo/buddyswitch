@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6C ACCEPTED; remaining C6 preparation only
-> Runtime authorization: none until the next remaining C6 owner passes READY review
+> Current state: S0–S4 ACCEPTED; S5 C1–C6C ACCEPTED; C6D READY
+> Runtime authorization: `BS-MM-S5-HOST-CONTROL-R1-20260812-01` only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6C ACCEPTED; remaining C6 preparation only |
+| S5 | `05-foundation-convergence.md` | C1–C6C ACCEPTED; C6D READY |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -252,8 +252,17 @@ Role implementation. R1 completed that owner, consumer, package and retired
 Launcher cutover. Direct/affected/package/System proof and frozen FINAL
 `c9211e36639740738eca7fe0cbda96ca` passed. C6C is accepted in
 `05-foundation-convergence-plan/actor-environment/S5-C6C-ACCEPTANCE.md`; its
-packet is consumed. Only remaining C6 source refresh and READY preparation are
-unlocked; later C6 implementation, C7 and S6 remain unauthorized.
+packet is consumed. That checkpoint unlocked only remaining C6 source refresh
+and READY preparation; it did not authorize later implementation, C7 or S6.
+
+C6D source refresh then identified the real remaining dependency bottleneck:
+private Host Control lifecycle is split across a Launcher facade, the actual
+Host Control shell, mixed environment helpers, current Role input and a
+Launcher-owned runtime lock. Focused baseline `2a202fd6...` and topology
+`S5C6DP-20260812-01` pass. D-068 admits one complete lifecycle cutover with
+application-supplied current Role input and one Process Runtime lock owner.
+Only `BS-MM-S5-HOST-CONTROL-R1-20260812-01` may execute; Web/CLI physical
+convergence, C7 and S6 remain blocked.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

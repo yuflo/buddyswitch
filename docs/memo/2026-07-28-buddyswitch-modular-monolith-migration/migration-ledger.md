@@ -17,12 +17,12 @@
 | S5 C6B acceptance | `05-foundation-convergence-plan/actor-runtime/S5-C6B-ACCEPTANCE.md`; patch `6548db01…`; FINAL `7678be695ad14ba1b3cfdf2780a9670a` |
 | S5 C6C acceptance | `05-foundation-convergence-plan/actor-environment/S5-C6C-ACCEPTANCE.md`; patch `3d651bce…`; FINAL `c9211e36639740738eca7fe0cbda96ca` |
 | Active stage | S5 — Foundation Convergence |
-| State | C1–C6C ACCEPTED; remaining C6 preparation only |
-| Runtime migration authorized | none until the next remaining C6 owner passes READY review |
+| State | C1–C6C ACCEPTED; C6D READY |
+| Runtime migration authorized | C6D R1 only |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | commit/push C6C, then refresh remaining C6 owners and admit one next owner only after READY review |
+| Next gate | execute C6D R1 from the exact clean READY commit, then hub acceptance |
 | Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State, Process, Runtime Broker, Daemon, App Server and Actor Runtime owners |
 
 ## Stage ledger
@@ -34,7 +34,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C6C ACCEPTED; remaining C6 preparation only | S4 | coordinating hub | refresh remaining C6; later implementation/C7 blocked |
+| S5 Foundation | C1–C6C ACCEPTED; C6D READY | S4 | coordinating hub | execute C6D R1 only; Web/CLI/C7 blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -536,6 +536,7 @@ source refresh and READY preparation are unblocked.
 | 2026-08-11 | S5 C6B Actor Runtime acceptance | ACCEPTED | `05-foundation-convergence-plan/actor-runtime/S5-C6B-ACCEPTANCE.md`; patch `6548db01…`; direct/affected `60bf541659eb496f98ad600ae4a584b4`, `aaefa823fe4b4fe3bf5e618f09a8ce14`; System `c666068cbbfe467c8e1b2ad925ffcda5`; FINAL `7678be695ad14ba1b3cfdf2780a9670a` | commit/push C6B checkpoint, then refresh the next remaining C6 owner; never resume C6B R1 |
 | 2026-08-11 | S5 C6C Actor Environment handoff | READY | `05-foundation-convergence-plan/actor-environment/S5-C6C-READY-REVIEW.md`; direct `7e3800b10a9e4dbaa69c019ad52eb9c0`; private boundary `f70f9357f31c4507863974942352895b`; System `d743845fca5847a7822f10c293cb5961`; topology `S5C6CP-20260811-01`; packet `BS-MM-S5-ACTOR-ENVIRONMENT-R1-20260811-01`; D-067 | execute C6C only from the exact clean READY commit; later C6/C7/S6 remain blocked |
 | 2026-08-12 | S5 C6C Actor Environment acceptance | ACCEPTED | `05-foundation-convergence-plan/actor-environment/S5-C6C-ACCEPTANCE.md`; patch `3d651bce…`; direct/affected `3902d35aa42645d1b5b9c8cf57a7fec9`, `838a1b2dc6ac43909084b6710e37141c`; package `c6e121186e8f41acaf0ee358538d4824`; System `efa982a0d1854898af51244396a6b4e5`; FINAL `c9211e36639740738eca7fe0cbda96ca` | commit/push C6C checkpoint, then refresh remaining C6 from committed source; never resume C6C R1 |
+| 2026-08-12 | S5 C6D Host Control handoff | READY | `05-foundation-convergence-plan/host-control/S5-C6D-READY-REVIEW.md`; focused `2a202fd6bf464799a6cb02b212730597`; source-equivalent FINAL `c9211e36…`; topology `S5C6DP-20260812-01`; packet `BS-MM-S5-HOST-CONTROL-R1-20260812-01`; D-068 | execute C6D only from exact clean READY commit; Web/CLI/C7/S6 remain blocked |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -557,11 +558,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / remaining C6 preparation
-Master state: C1–C6C ACCEPTED; remaining C6 preparation only
-Goal Packet: none; C6C R1 consumed
+Stage: S5 / Foundation / C6D Host Control
+Master state: C1–C6C ACCEPTED; C6D READY
+Goal Packet: BS-MM-S5-HOST-CONTROL-R1-20260812-01
 Execution session: none
 Last hub checkpoint: C6C ACCEPTED; patch `3d651bce...`, FINAL `c9211e36639740738eca7fe0cbda96ca`
-Next action: commit/push C6C, then refresh remaining C6 owners and prepare one next READY boundary
+Next action: execute C6D R1 from exact clean READY commit and return Result Packet
 No-polling state: inactive during hub preparation
 ```

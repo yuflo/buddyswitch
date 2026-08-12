@@ -155,9 +155,18 @@ order, not arbitrary file counts.
 - preserve the stable application build entrypoint and leave central Role
   selection as the single S6-owned input, not a Foundation dependency.
 
-### C6 remaining — Host Control, Web and CLI hosts
+### C6D — Host Control
 
-- refresh each remaining independently runnable owner after C6C acceptance;
+- converge the complete private instance-lifecycle execution under one
+  product-neutral Foundation owner, not a facade-only move;
+- move the shared runtime lock to direct Process Runtime ownership;
+- keep current Role selection/list/validation as one application-supplied input;
+- make CLI and Web consume the same explicitly assembled control capability;
+- delete the retired Launcher Host Control Python/shell and lock owners.
+
+### C6 remaining — Web and CLI hosts
+
+- refresh each remaining independently runnable owner after C6D acceptance;
 - converge remaining host and packaged asset ownership without inheriting C6A
   execution authority;
 - keep interface ownership separate from product semantics;
