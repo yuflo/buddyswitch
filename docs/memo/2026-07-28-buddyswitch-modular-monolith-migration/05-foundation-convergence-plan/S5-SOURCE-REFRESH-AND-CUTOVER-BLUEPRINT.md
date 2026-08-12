@@ -175,6 +175,10 @@ order, not arbitrary file counts.
 
 ### C7 — S5 acceptance
 
+- move the remaining generic cleanup, diagnostics and passive contribution
+  owners out of historical `runtime_support` into direct Foundation ownership;
+- replace the final Foundation-to-current-Role implementation edge with
+  explicit Application-supplied inputs while leaving Role semantics to S6;
 - replace current architecture guidance with final Foundation truth;
 - close all S5-owned residue with source-bound absence proof;
 - run exact/affected acceptance and one frozen full candidate;
