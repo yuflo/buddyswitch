@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
 
+from buddyswitch.foundation.actor_runtime import environment as actor_environment
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
-from buddyswitch.launcher import actor_environment
-from buddyswitch.runtime_support import runtime_skills
 
 
 class ActorEnvironmentBuilderTests(unittest.TestCase):
@@ -42,24 +42,52 @@ class ActorEnvironmentBuilderTests(unittest.TestCase):
             project_source=project_source,
             shared_root=shared_root,
             actor_id=actor_id,
-            role_id="pm",
             source_codex_home=source_codex_home,
             runtime_identity=current_runtime_identity(),
+            bootstrap=ActorEnvironmentBuilderTests._bootstrap(project_source),
+        )
+
+    @staticmethod
+    def _bootstrap(project_source: Path) -> actor_environment.ResolvedActorBootstrap:
+        source_root = project_source.parents[1] / "bootstrap"
+        role_agents = source_root / "roles" / "pm" / "AGENTS.md"
+        role_agents.parent.mkdir(parents=True, exist_ok=True)
+        role_agents.write_text("# Selected PM Role\n", encoding="utf-8")
+        skills: list[actor_environment.ResolvedActorSkill] = []
+        for skill_id in ActorEnvironmentBuilderTests._expected_skills():
+            source = source_root / "skills" / skill_id
+            source.mkdir(parents=True, exist_ok=True)
+            (source / "SKILL.md").write_text(
+                f"# {skill_id}\n",
+                encoding="utf-8",
+            )
+            skills.append(
+                actor_environment.ResolvedActorSkill(
+                    skill_id=skill_id,
+                    source=source,
+                )
+            )
+        return actor_environment.ResolvedActorBootstrap(
+            source_root=source_root,
+            agents_source=role_agents,
+            skills=tuple(skills),
+            codex_config=(
+                "[skills.bundled]\n"
+                "enabled = false\n\n"
+                "[features]\n"
+                "plugins = false\n"
+                "goals = true\n"
+            ),
         )
 
     @staticmethod
     def _expected_skills() -> tuple[str, ...]:
-        return runtime_skills.validate_runtime_skills(
-            manifest_path=actor_environment.DEFAULT_MANIFEST,
-            role_id="pm",
-            package_root=actor_environment.PACKAGE_ROOT,
-        )
+        return ("selected-one", "selected-two")
 
     def test_build_materializes_typed_git_free_actor_environment(self) -> None:
         _temporary, project_source, shared_root, source_codex_home = self._roots()
-        result = actor_environment.ActorEnvironmentBuilder().build(
-            self._spec(project_source, shared_root, source_codex_home)
-        )
+        spec = self._spec(project_source, shared_root, source_codex_home)
+        result = actor_environment.ActorEnvironmentBuilder().build(spec)
 
         actor_root = shared_root / "instances" / "act-pm-one"
         project_workspace = shared_root / "project" / "workspace"
@@ -70,6 +98,29 @@ class ActorEnvironmentBuilderTests(unittest.TestCase):
         self.assertEqual(list(actor_root.rglob(".git")), [])
         self.assertEqual(list(project_workspace.rglob(".git")), [])
         self.assertTrue((result.codex_home_dir / "auth.json").is_symlink())
+        self.assertEqual(
+            (result.codex_home_dir / "auth.json").resolve(),
+            (shared_root / "codex-home" / "auth.json").resolve(),
+        )
+        self.assertEqual(
+            (result.codex_home_dir / "auth.json").read_text(encoding="utf-8"),
+            '{"auth_mode":"apikey"}\n',
+        )
+        self.assertEqual(
+            (result.codex_home_dir / "config.toml").read_text(encoding="utf-8"),
+            spec.bootstrap.codex_config,
+        )
+        for skill_id in self._expected_skills():
+            self.assertEqual(
+                (
+                    result.workspace_dir
+                    / ".agents"
+                    / "skills"
+                    / skill_id
+                    / "SKILL.md"
+                ).read_text(encoding="utf-8"),
+                f"# {skill_id}\n",
+            )
         self.assertEqual(
             (result.workspace_dir / "projects" / "app").resolve(),
             (project_workspace / "projects" / "app").resolve(),
@@ -110,6 +161,10 @@ class ActorEnvironmentBuilderTests(unittest.TestCase):
         self.assertFalse(hasattr(actor_environment, "RUNTIME_COPY_PATHS"))
         self.assertEqual(workspace_entries, {".agents", "AGENTS.md", "private", "projects"})
         self.assertEqual(selected_skills, set(self._expected_skills()))
+        self.assertEqual(
+            (result.workspace_dir / "AGENTS.md").read_text(encoding="utf-8"),
+            "# Selected PM Role\n",
+        )
         self.assertEqual(forbidden, [])
 
     def test_build_seeds_shared_project_once_without_refresh(self) -> None:
@@ -132,7 +187,13 @@ class ActorEnvironmentBuilderTests(unittest.TestCase):
         self.assertEqual((project_app / "sentinel.txt").read_text(encoding="utf-8"), "preserve\n")
 
     def test_preflight_failures_publish_nothing(self) -> None:
-        for case in ("invalid-actor", "symlink-shared-root", "symlink-source-auth", "nested-project-symlink"):
+        for case in (
+            "invalid-actor",
+            "symlink-shared-root",
+            "symlink-source-auth",
+            "nested-project-symlink",
+            "nested-skill-symlink",
+        ):
             with self.subTest(case=case):
                 _temporary, project_source, shared_root, source_codex_home = self._roots()
                 actor_id = "act-pm-preflight"
@@ -149,13 +210,22 @@ class ActorEnvironmentBuilderTests(unittest.TestCase):
                     external_auth = source_codex_home.parent / "external-auth.json"
                     external_auth.write_text("{}\n", encoding="utf-8")
                     source_auth.symlink_to(external_auth)
-                else:
+                elif case == "nested-project-symlink":
                     (project_source / "escape").symlink_to(source_codex_home)
+                spec = self._spec(
+                    project_source,
+                    shared_root,
+                    source_codex_home,
+                    actor_id,
+                )
+                if case == "nested-skill-symlink":
+                    (spec.bootstrap.skills[0].source / "escape").symlink_to(
+                        source_codex_home,
+                        target_is_directory=True,
+                    )
 
                 with self.assertRaises(actor_environment.ActorEnvironmentBuildError):
-                    actor_environment.ActorEnvironmentBuilder().build(
-                        self._spec(project_source, shared_root, source_codex_home, actor_id)
-                    )
+                    actor_environment.ActorEnvironmentBuilder().build(spec)
 
                 if case == "symlink-shared-root":
                     self.assertEqual(list((shared_root.parent / "external").iterdir()), [])
@@ -176,6 +246,73 @@ class ActorEnvironmentBuilderTests(unittest.TestCase):
 
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve\n")
         self.assertFalse((shared_root / "project").exists())
+
+    def test_concurrent_project_appearance_is_preserved_and_stage_is_cleaned(self) -> None:
+        _temporary, project_source, shared_root, source_codex_home = self._roots()
+        project_workspace = shared_root / "project" / "workspace"
+        original_replace = os.replace
+
+        def publish_with_concurrent_project(source: Path, target: Path) -> None:
+            if Path(target) == project_workspace:
+                project_workspace.mkdir(parents=True)
+                (project_workspace / "sentinel.txt").write_text(
+                    "preserve\n",
+                    encoding="utf-8",
+                )
+            original_replace(source, target)
+
+        with mock.patch.object(
+            actor_environment.os,
+            "replace",
+            side_effect=publish_with_concurrent_project,
+        ):
+            with self.assertRaises(actor_environment.ActorEnvironmentBuildError):
+                actor_environment.ActorEnvironmentBuilder().build(
+                    self._spec(project_source, shared_root, source_codex_home)
+                )
+
+        self.assertEqual(
+            (project_workspace / "sentinel.txt").read_text(encoding="utf-8"),
+            "preserve\n",
+        )
+        self.assertEqual(
+            list((shared_root / "project").glob(".workspace.staging-*")),
+            [],
+        )
+        self.assertFalse((shared_root / "instances" / "act-pm-one").exists())
+
+    def test_concurrent_actor_appearance_is_preserved_and_stage_is_cleaned(self) -> None:
+        _temporary, project_source, shared_root, source_codex_home = self._roots()
+        actor_root = shared_root / "instances" / "act-pm-one"
+        original_replace = os.replace
+
+        def publish_with_concurrent_actor(source: Path, target: Path) -> None:
+            if Path(target) == actor_root:
+                actor_root.mkdir(parents=True)
+                (actor_root / "sentinel.txt").write_text(
+                    "preserve\n",
+                    encoding="utf-8",
+                )
+            original_replace(source, target)
+
+        with mock.patch.object(
+            actor_environment.os,
+            "replace",
+            side_effect=publish_with_concurrent_actor,
+        ):
+            with self.assertRaises(actor_environment.ActorEnvironmentBuildError):
+                actor_environment.ActorEnvironmentBuilder().build(
+                    self._spec(project_source, shared_root, source_codex_home)
+                )
+
+        self.assertEqual(
+            (actor_root / "sentinel.txt").read_text(encoding="utf-8"),
+            "preserve\n",
+        )
+        self.assertEqual(
+            list((shared_root / "instances").glob(".act-pm-one.staging-*")),
+            [],
+        )
 
     def test_validation_failure_cleans_staging_and_does_not_publish(self) -> None:
         _temporary, project_source, shared_root, source_codex_home = self._roots()

@@ -1,32 +1,22 @@
-"""Build one complete, Git-free Actor environment through atomic publication."""
+"""Publish one complete, Git-free Actor environment from resolved inputs."""
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import re
 import shutil
 import stat
-import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
-
-HELPER_DIR = Path(__file__).resolve().parent
-PACKAGE_ROOT = HELPER_DIR.parent
-
-from buddyswitch.runtime_support import runtime_skills
-from buddyswitch.launcher import codex_config
 from buddyswitch.foundation.process_runtime.invocation import (
     RuntimeIdentity,
     current_runtime_identity,
 )
-from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST, ManifestError
 
 _ACTOR_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
-_ROLE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_SKILL_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9-]*$")
 _FORBIDDEN_WORKSPACE_ENTRIES = (
     "buddyswitch",
     "framework",
@@ -39,28 +29,6 @@ _FORBIDDEN_WORKSPACE_ENTRIES = (
     "buddyswitch-codex",
     "runs",
 )
-def base_codex_config() -> str:
-    disabled_skills = [
-        export.id
-        for export in runtime_skills.configured_skill_exports()
-        if not export.enabled_by_default
-    ]
-    skill_rows = "".join(
-        (
-            "\n[[skills.config]]\n"
-            f'name = "{skill_id}"\n'
-            "enabled = false\n"
-        )
-        for skill_id in disabled_skills
-    )
-    return (
-        "[skills.bundled]\n"
-        "enabled = false\n"
-        f"{skill_rows}\n"
-        "[features]\n"
-        "plugins = false\n"
-        "goals = true\n"
-    )
 
 
 class ActorEnvironmentBuildError(RuntimeError):
@@ -68,13 +36,31 @@ class ActorEnvironmentBuildError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ResolvedActorSkill:
+    """One application-selected Skill source for Actor publication."""
+
+    skill_id: str
+    source: Path
+
+
+@dataclass(frozen=True)
+class ResolvedActorBootstrap:
+    """Explicit application-selected bootstrap projection."""
+
+    source_root: Path
+    agents_source: Path
+    skills: tuple[ResolvedActorSkill, ...]
+    codex_config: str
+
+
+@dataclass(frozen=True)
 class ActorEnvironmentSpec:
     project_source: Path
     shared_root: Path
     actor_id: str
-    role_id: str
     source_codex_home: Path
     runtime_identity: RuntimeIdentity
+    bootstrap: ResolvedActorBootstrap
 
 
 @dataclass(frozen=True)
@@ -95,12 +81,11 @@ class ActorEnvironmentResult:
 class _BuildPaths:
     shared_root: Path
     source_codex_home: Path
-    manifest_path: Path
-    role_agents_path: Path
     source_project_app: Path
     project_workspace: Path
     actor_root: Path
     runtime_identity: RuntimeIdentity
+    bootstrap: ResolvedActorBootstrap
 
 
 class ActorEnvironmentBuilder:
@@ -146,8 +131,7 @@ class ActorEnvironmentBuilder:
             raise ActorEnvironmentBuildError("build spec must be ActorEnvironmentSpec")
         if not _ACTOR_ID_RE.fullmatch(spec.actor_id):
             raise ActorEnvironmentBuildError(f"invalid actor id: {spec.actor_id}")
-        if not _ROLE_ID_RE.fullmatch(spec.role_id):
-            raise ActorEnvironmentBuildError(f"invalid role id: {spec.role_id}")
+        bootstrap = self._validate_bootstrap(spec.bootstrap)
 
         project_source = _normalize_existing_directory(
             spec.project_source,
@@ -186,43 +170,90 @@ class ActorEnvironmentBuilder:
         if actor_root.exists():
             raise ActorEnvironmentBuildError(f"actor environment already exists: {actor_root}")
 
-        manifest_path = DEFAULT_MANIFEST
-        role_agents_path = (
-            HELPER_DIR
-            / "assets"
-            / "roles"
-            / spec.role_id
-            / "AGENTS.md"
-        )
-        _require_source_file(role_agents_path, PACKAGE_ROOT, "role AGENTS")
         source_project_app = project_source
         _reject_unexpected_symlinks(
             source_project_app,
             "source projects/app",
             ignored_names={".git"},
         )
-        try:
-            planned_skills = runtime_skills.validate_runtime_skills(
-                manifest_path=manifest_path,
-                role_id=spec.role_id,
-                package_root=PACKAGE_ROOT,
-            )
-        except (ManifestError, runtime_skills.RuntimeSkillsError) as exc:
-            raise ActorEnvironmentBuildError(f"invalid runtime role surface: {exc}") from exc
+        planned_skills = tuple(skill.skill_id for skill in bootstrap.skills)
 
         paths = _BuildPaths(
             shared_root=shared_root,
             source_codex_home=source_codex_home,
-            manifest_path=manifest_path,
-            role_agents_path=role_agents_path,
             source_project_app=source_project_app,
             project_workspace=project_workspace,
             actor_root=actor_root,
             runtime_identity=spec.runtime_identity,
+            bootstrap=bootstrap,
         )
         if project_workspace.exists():
             self._validate_project_environment(project_workspace, shared_root)
         return paths, planned_skills
+
+    @staticmethod
+    def _validate_bootstrap(
+        bootstrap: ResolvedActorBootstrap,
+    ) -> ResolvedActorBootstrap:
+        if not isinstance(bootstrap, ResolvedActorBootstrap):
+            raise ActorEnvironmentBuildError(
+                "build bootstrap must be ResolvedActorBootstrap"
+            )
+        source_root = _normalize_existing_directory(
+            bootstrap.source_root,
+            "bootstrap source root",
+        )
+        agents_source = _normalized_source_file(
+            bootstrap.agents_source,
+            source_root,
+            "role AGENTS",
+        )
+        if not isinstance(bootstrap.skills, tuple) or not bootstrap.skills:
+            raise ActorEnvironmentBuildError(
+                "resolved bootstrap must include at least one Skill"
+            )
+        resolved_skills: list[ResolvedActorSkill] = []
+        seen_skill_ids: set[str] = set()
+        for skill in bootstrap.skills:
+            if not isinstance(skill, ResolvedActorSkill):
+                raise ActorEnvironmentBuildError(
+                    "resolved bootstrap Skills must be ResolvedActorSkill"
+                )
+            if not _SKILL_ID_RE.fullmatch(skill.skill_id):
+                raise ActorEnvironmentBuildError(
+                    f"invalid resolved Skill id: {skill.skill_id}"
+                )
+            if skill.skill_id in seen_skill_ids:
+                raise ActorEnvironmentBuildError(
+                    f"duplicate resolved Skill id: {skill.skill_id}"
+                )
+            seen_skill_ids.add(skill.skill_id)
+            source = _normalized_source_directory(
+                skill.source,
+                source_root,
+                f"runtime Skill '{skill.skill_id}'",
+            )
+            _reject_unexpected_symlinks(
+                source,
+                f"runtime Skill '{skill.skill_id}'",
+                ignored_names={".git"},
+            )
+            resolved_skills.append(
+                ResolvedActorSkill(skill_id=skill.skill_id, source=source)
+            )
+        if (
+            not isinstance(bootstrap.codex_config, str)
+            or not bootstrap.codex_config.strip()
+        ):
+            raise ActorEnvironmentBuildError(
+                "resolved bootstrap Codex config must be non-empty text"
+            )
+        return ResolvedActorBootstrap(
+            source_root=source_root,
+            agents_source=agents_source,
+            skills=tuple(resolved_skills),
+            codex_config=bootstrap.codex_config,
+        )
 
     def _ensure_project_environment(self, paths: _BuildPaths) -> Path:
         if paths.project_workspace.exists():
@@ -294,21 +325,24 @@ class ActorEnvironmentBuilder:
             directory.mkdir(parents=True, exist_ok=False)
 
         (codex_home_dir / "config.toml").write_text(
-            base_codex_config(),
+            paths.bootstrap.codex_config,
             encoding="utf-8",
         )
         self._install_auth_surface(paths, codex_home_dir)
-        shutil.copy2(paths.role_agents_path, workspace / "AGENTS.md", follow_symlinks=False)
+        shutil.copy2(
+            paths.bootstrap.agents_source,
+            workspace / "AGENTS.md",
+            follow_symlinks=False,
+        )
         try:
-            installed_skills = tuple(
-                runtime_skills.install_runtime_skills(
-                    manifest_path=paths.manifest_path,
-                    role_id=paths.role_agents_path.parent.name,
-                    workspace=workspace,
-                    package_root=PACKAGE_ROOT,
-                )
-            )
-        except (ManifestError, runtime_skills.RuntimeSkillsError, OSError) as exc:
+            skills_dir = workspace / ".agents" / "skills"
+            skills_dir.mkdir(parents=True)
+            installed_skill_ids: list[str] = []
+            for skill in paths.bootstrap.skills:
+                _copy_git_free(skill.source, skills_dir / skill.skill_id)
+                installed_skill_ids.append(skill.skill_id)
+            installed_skills = tuple(installed_skill_ids)
+        except OSError as exc:
             raise ActorEnvironmentBuildError(f"runtime skill installation failed: {exc}") from exc
 
         project_link = workspace / "projects" / "app"
@@ -511,6 +545,16 @@ def _require_source_directory(path: Path, package_root: Path, label: str) -> Non
         raise ActorEnvironmentBuildError(f"{label} must be a directory: {path}")
 
 
+def _normalized_source_file(path: Path, source_root: Path, label: str) -> Path:
+    _require_source_file(path, source_root, label)
+    return path.resolve(strict=True)
+
+
+def _normalized_source_directory(path: Path, source_root: Path, label: str) -> Path:
+    _require_source_directory(path, source_root, label)
+    return path.resolve(strict=True)
+
+
 def _copy_git_free(source: Path, target: Path) -> None:
     if source.name == ".git":
         return
@@ -585,46 +629,3 @@ def _remove_owned_tree(path: Path) -> None:
             except OSError:
                 pass
     shutil.rmtree(path)
-
-
-def _result_payload(result: ActorEnvironmentResult) -> dict[str, object]:
-    payload = asdict(result)
-    for key, value in tuple(payload.items()):
-        if isinstance(value, Path):
-            payload[key] = str(value)
-        elif isinstance(value, tuple):
-            payload[key] = list(value)
-    return payload
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build one Actor environment.")
-    parser.add_argument("--project-source", type=Path, required=True)
-    parser.add_argument("--shared-root", type=Path, required=True)
-    parser.add_argument("--actor-id", required=True)
-    parser.add_argument("--role-id", required=True)
-    parser.add_argument("--source-codex-home", type=Path, required=True)
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    command_args = list(sys.argv[1:] if argv is None else argv)
-    if command_args[:1] == ["patch-config"]:
-        return codex_config.main(command_args[1:])
-    args = build_parser().parse_args(command_args)
-    try:
-        spec = ActorEnvironmentSpec(
-            project_source=args.project_source,
-            shared_root=args.shared_root,
-            actor_id=args.actor_id,
-            role_id=args.role_id,
-            source_codex_home=args.source_codex_home,
-            runtime_identity=current_runtime_identity(),
-        )
-        builder = ActorEnvironmentBuilder()
-        result = builder.build(spec)
-    except ActorEnvironmentBuildError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    print(json.dumps(_result_payload(result), ensure_ascii=True))
-    return 0

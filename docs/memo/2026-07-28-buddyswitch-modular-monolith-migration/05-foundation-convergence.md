@@ -1,8 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Current state: C1–C6B ACCEPTED; C6C READY
+> Current state: C1–C6C ACCEPTED; remaining C6 preparation only
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: C6C Actor Environment only
+> Execution authority: none until the next remaining C6 owner passes READY review
 > Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
 
 The executable blueprint and current handoff live at

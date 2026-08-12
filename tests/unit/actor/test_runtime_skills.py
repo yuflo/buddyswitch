@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -171,6 +170,13 @@ class RuntimeSkillsTests(unittest.TestCase):
                 files.append(skill_file)
         return files
 
+    @staticmethod
+    def _resolved_skills(role_id: str) -> tuple[runtime_skills.ResolvedSkill, ...]:
+        return runtime_skills.resolve_runtime_skills(
+            manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
+            role_id=role_id,
+        )
+
     def test_handoff_tool_skill_is_removed(self) -> None:
         self.assertFalse((ROOT / "src/buddyswitch/skills/shared/handoff-tool/SKILL.md").exists())
         all_skill_ids = [row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)]
@@ -202,16 +208,12 @@ class RuntimeSkillsTests(unittest.TestCase):
                 if isinstance(row, dict) and row.get("id") == role
             )
             self.assertNotIn(self.RETIRED_MESSAGE_TOOL_ID, set(role_row.get("skills", [])), msg=role)
-            with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-                workspace = Path(temp_dir) / f"{role}-workspace"
-                workspace.mkdir()
-                installed = runtime_skills.install_runtime_skills(
-                    manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
-                    role_id=role,
-                    workspace=workspace,
-                )
-                self.assertNotIn(self.RETIRED_MESSAGE_TOOL_ID, set(installed), msg=role)
-                self.assertFalse((workspace / ".agents" / "skills" / self.RETIRED_MESSAGE_TOOL_ID).exists(), msg=role)
+            resolved = self._resolved_skills(role)
+            self.assertNotIn(
+                self.RETIRED_MESSAGE_TOOL_ID,
+                {skill.skill_id for skill in resolved},
+                msg=role,
+            )
 
     def test_manifest_and_runtime_skill_materialization_exclude_actor_private_tool(self) -> None:
         all_skill_ids = {row.get("id") for row in self.manifest.get("skills", []) if isinstance(row, dict)}
@@ -224,16 +226,12 @@ class RuntimeSkillsTests(unittest.TestCase):
                 if isinstance(row, dict) and row.get("id") == role
             )
             self.assertNotIn("actor_private-tool", set(role_row.get("skills", [])), msg=role)
-            with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-                workspace = Path(temp_dir) / f"{role}-workspace"
-                workspace.mkdir()
-                installed = runtime_skills.install_runtime_skills(
-                    manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
-                    role_id=role,
-                    workspace=workspace,
-                )
-                self.assertNotIn("actor_private-tool", set(installed), msg=role)
-                self.assertFalse((workspace / ".agents" / "skills" / "actor_private-tool").exists(), msg=role)
+            resolved = self._resolved_skills(role)
+            self.assertNotIn(
+                "actor_private-tool",
+                {skill.skill_id for skill in resolved},
+                msg=role,
+            )
 
     def test_shared_tool_skills_do_not_teach_next_role_or_track_advance(self) -> None:
         shared_skill_files = list(self.SHARED_TOOL_SKILLS.values())
@@ -339,31 +337,20 @@ class RuntimeSkillsTests(unittest.TestCase):
                 self.assertIn("## verification", lowered)
                 self.assertIn("## guardrails", lowered)
 
-    def test_runtime_skill_installer_materializes_market_p0_skill_set(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            workspace = Path(temp_dir) / "workspace"
-            workspace.mkdir()
-            installed = runtime_skills.install_runtime_skills(
-                manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
-                role_id="market",
-                workspace=workspace,
-            )
-            installed_set = set(installed)
-            expected = set(self.MARKET_P0_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS
-            self.assertTrue(expected.issubset(installed_set), msg=sorted(expected - installed_set))
-            self.assertTrue(set(self.OLD_MARKET_SKILLS).isdisjoint(installed_set))
-            for skill_id in self.MARKET_P0_SKILLS:
-                self.assertTrue((workspace / ".agents" / "skills" / skill_id / "SKILL.md").exists(), msg=skill_id)
+    def test_runtime_skill_resolver_selects_market_p0_skill_sources(self) -> None:
+        resolved = self._resolved_skills("market")
+        resolved_by_id = {skill.skill_id: skill.source for skill in resolved}
+        expected = set(self.MARKET_P0_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS
+        self.assertTrue(
+            expected.issubset(resolved_by_id),
+            msg=sorted(expected - resolved_by_id.keys()),
+        )
+        self.assertTrue(set(self.OLD_MARKET_SKILLS).isdisjoint(resolved_by_id))
+        for skill_id in self.MARKET_P0_SKILLS:
+            self.assertTrue((resolved_by_id[skill_id] / "SKILL.md").exists(), msg=skill_id)
 
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            workspace = Path(temp_dir) / "pm-workspace"
-            workspace.mkdir()
-            installed = runtime_skills.install_runtime_skills(
-                manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
-                role_id="pm",
-                workspace=workspace,
-            )
-            self.assertTrue(set(self.MARKET_P0_SKILLS).isdisjoint(set(installed)))
+        pm_ids = {skill.skill_id for skill in self._resolved_skills("pm")}
+        self.assertTrue(set(self.MARKET_P0_SKILLS).isdisjoint(pm_ids))
 
     def test_design_shape_prototype_guidance_uses_direct_actor_private_files_and_explicit_attachments(self) -> None:
         skill_text = (ROOT / "src/buddyswitch/skills/design/shape-prototype/SKILL.md").read_text(encoding="utf-8").lower()
@@ -656,31 +643,18 @@ class RuntimeSkillsTests(unittest.TestCase):
                 for token in forbidden_description_tokens:
                     self.assertNotIn(token, description)
 
-    def test_runtime_skill_installer_materializes_expanded_dev_skill_set(self) -> None:
+    def test_runtime_skill_resolver_selects_expanded_dev_skill_sources(self) -> None:
         expected = set(self.DEV_PRODUCT_SKILLS) | self.SHARED_RUNTIME_TOOL_SKILLS
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            workspace = Path(temp_dir) / "workspace"
-            workspace.mkdir()
-            installed = runtime_skills.install_runtime_skills(
-                manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
-                role_id="dev",
-                workspace=workspace,
-            )
-            installed_set = set(installed)
-            self.assertTrue(expected.issubset(installed_set))
-            for skill_id in self.DEV_STARTUP_SKILLS:
-                skill_file = workspace / ".agents" / "skills" / skill_id / "SKILL.md"
-                self.assertTrue(skill_file.exists(), msg=skill_id)
+        resolved_by_id = {
+            skill.skill_id: skill.source
+            for skill in self._resolved_skills("dev")
+        }
+        self.assertTrue(expected.issubset(resolved_by_id))
+        for skill_id in self.DEV_STARTUP_SKILLS:
+            self.assertTrue((resolved_by_id[skill_id] / "SKILL.md").exists(), msg=skill_id)
 
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
-            workspace = Path(temp_dir) / "pm-workspace"
-            workspace.mkdir()
-            installed = runtime_skills.install_runtime_skills(
-                manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
-                role_id="pm",
-                workspace=workspace,
-            )
-            self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(set(installed)))
+        pm_ids = {skill.skill_id for skill in self._resolved_skills("pm")}
+        self.assertTrue(self.DEV_STARTUP_SKILLS.isdisjoint(pm_ids))
 
     def test_dev_skills_do_not_copy_runtime_schema_or_action_catalogs(self) -> None:
         forbidden = (

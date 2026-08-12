@@ -15,6 +15,7 @@ OWNER_FILES = {
     "__init__.py",
     "capability.py",
     "codex_runtime.py",
+    "environment.py",
     "session.py",
     "side_thread.py",
     "side_thread_lifecycle.py",

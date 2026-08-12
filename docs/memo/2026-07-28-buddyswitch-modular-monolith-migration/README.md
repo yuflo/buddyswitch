@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S4 ACCEPTED; S5 C1–C6B ACCEPTED; C6C READY
-> Runtime authorization: C6C Actor Environment only
+> Current state: S0–S4 ACCEPTED; S5 C1–C6C ACCEPTED; remaining C6 preparation only
+> Runtime authorization: none until the next remaining C6 owner passes READY review
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -24,7 +24,7 @@ Read:
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
-| S5 | `05-foundation-convergence.md` | C1–C6B ACCEPTED; C6C READY |
+| S5 | `05-foundation-convergence.md` | C1–C6C ACCEPTED; remaining C6 preparation only |
 | S6 | `06-role-host-cutover.md` | BLOCKED |
 | S7 | `07-final-acceptance.md` | BLOCKED |
 
@@ -248,8 +248,12 @@ private invocation `f70f9357...`, consumer System `d743845f...` and topology
 `S5C6CP-20260811-01` passed. D-067 selects one resolved bootstrap projection:
 the current application produces it from existing Role/Skill truth, while the
 Foundation publisher performs one code-free atomic write path and imports no
-Role implementation. Packet `BS-MM-S5-ACTOR-ENVIRONMENT-R1-20260811-01` is
-READY. Only C6C is authorized; later C6, C7 and S6 remain unauthorized.
+Role implementation. R1 completed that owner, consumer, package and retired
+Launcher cutover. Direct/affected/package/System proof and frozen FINAL
+`c9211e36639740738eca7fe0cbda96ca` passed. C6C is accepted in
+`05-foundation-convergence-plan/actor-environment/S5-C6C-ACCEPTANCE.md`; its
+packet is consumed. Only remaining C6 source refresh and READY preparation are
+unlocked; later C6 implementation, C7 and S6 remain unauthorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

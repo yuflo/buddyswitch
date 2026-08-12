@@ -35,6 +35,7 @@ REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/actor_runtime/__init__.py",
     "buddyswitch/foundation/actor_runtime/capability.py",
     "buddyswitch/foundation/actor_runtime/codex_runtime.py",
+    "buddyswitch/foundation/actor_runtime/environment.py",
     "buddyswitch/foundation/actor_runtime/session.py",
     "buddyswitch/foundation/actor_runtime/side_thread.py",
     "buddyswitch/foundation/actor_runtime/side_thread_lifecycle.py",
@@ -105,6 +106,7 @@ current_modules = (
     "buddyswitch.foundation.actor_runtime",
     "buddyswitch.foundation.actor_runtime.capability",
     "buddyswitch.foundation.actor_runtime.codex_runtime",
+    "buddyswitch.foundation.actor_runtime.environment",
     "buddyswitch.foundation.actor_runtime.session",
     "buddyswitch.foundation.actor_runtime.side_thread",
     "buddyswitch.foundation.actor_runtime.side_thread_lifecycle",
@@ -143,6 +145,7 @@ print(json.dumps({
         "buddyswitch.launcher.actor_side_thread": importlib.util.find_spec("buddyswitch.launcher.actor_side_thread") is not None,
         "buddyswitch.launcher.side_thread_lifecycle": importlib.util.find_spec("buddyswitch.launcher.side_thread_lifecycle") is not None,
         "buddyswitch.launcher.side_thread_registry": importlib.util.find_spec("buddyswitch.launcher.side_thread_registry") is not None,
+        "buddyswitch.launcher.actor_environment": importlib.util.find_spec("buddyswitch.launcher.actor_environment") is not None,
     },
 }, sort_keys=True))
 """
@@ -181,11 +184,13 @@ print(json.dumps({
         "buddyswitch.launcher.actor_side_thread": False,
         "buddyswitch.launcher.side_thread_lifecycle": False,
         "buddyswitch.launcher.side_thread_registry": False,
+        "buddyswitch.launcher.actor_environment": False,
     }
     assert set(payload["module_files"]) == {
         "buddyswitch.foundation.actor_runtime",
         "buddyswitch.foundation.actor_runtime.capability",
         "buddyswitch.foundation.actor_runtime.codex_runtime",
+        "buddyswitch.foundation.actor_runtime.environment",
         "buddyswitch.foundation.actor_runtime.session",
         "buddyswitch.foundation.actor_runtime.side_thread",
         "buddyswitch.foundation.actor_runtime.side_thread_lifecycle",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import stat
@@ -16,16 +15,37 @@ from tests.support.processes import run_process
 from tests.support.python import PYTHON
 from tests.support.cli import write_executable
 
+from buddyswitch.application import build as application_build
+from buddyswitch.application.entrypoints import actor_build
+from buddyswitch.launcher import codex_config
+from buddyswitch.runtime_support import env_manifest
+
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "buddyswitch-codex"
 
 
 class TestLauncherBootstrapConfig(ProcessLauncherHarness, unittest.TestCase):
-    def test_parent_codex_config_projects_demand_tools_and_skills_once(self) -> None:
-        actor_environment = importlib.import_module("buddyswitch.launcher.actor_environment")
-        codex_config = importlib.import_module("buddyswitch.launcher.codex_config")
+    def test_actor_bootstrap_projects_selected_role_skills_and_config_once(self) -> None:
+        application = application_build.activate_application()
+        projection = actor_build.resolve_actor_bootstrap(
+            "pm",
+            application=application,
+        )
+        manifest = env_manifest.load_manifest()
+        role = env_manifest.require_role(manifest, "pm")
+        package_root = Path(actor_build.__file__).resolve().parents[2]
+        self.assertEqual(projection.source_root, package_root)
+        self.assertEqual(
+            projection.agents_source,
+            package_root / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md",
+        )
+        self.assertEqual(
+            tuple(skill.skill_id for skill in projection.skills),
+            tuple(role["skills"]),
+        )
+        self.assertTrue(all(skill.source.is_dir() for skill in projection.skills))
         existing = (
-            actor_environment.base_codex_config()
+            projection.codex_config
             + """
 
 [mcp_servers.buddyswitch-env]

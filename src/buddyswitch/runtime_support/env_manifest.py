@@ -88,10 +88,6 @@ def configure_skill_exports(exports: tuple[SkillExport, ...]) -> None:
     _COMPONENT_SKILL_EXPORTS = tuple(validated)
 
 
-def configured_skill_exports() -> tuple[SkillExport, ...]:
-    return _COMPONENT_SKILL_EXPORTS
-
-
 def _load_toml(path: Path) -> dict[str, Any]:
     try:
         return tomllib.loads(path.read_text(encoding="utf-8"))
