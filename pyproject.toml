@@ -27,6 +27,7 @@ namespaces = false
 "buddyswitch.contracts" = ["**/*.toml", "**/*.json", "**/*.md"]
 "buddyswitch.foundation.app_server" = ["shell/*.sh"]
 "buddyswitch.foundation.browser_runtime" = ["assets/**/*.json"]
+"buddyswitch.foundation.host_control" = ["shell/*.sh"]
 "buddyswitch.launcher" = [
   "assets/**/*.toml",
   "assets/**/*.json",

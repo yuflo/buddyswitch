@@ -14,8 +14,7 @@ from unittest import mock
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
 from buddyswitch.foundation.actor_runtime import capability as actor_capability
 from buddyswitch.foundation.actor_runtime import codex_runtime
-from buddyswitch.launcher import host_control as HOST_CONTROL
-from buddyswitch.runtime_support import env_manifest
+from buddyswitch.foundation.host_control import runtime as HOST_CONTROL
 
 
 from tests.support.paths import REPO_ROOT
@@ -24,13 +23,22 @@ from tests.support.processes import run_process
 ROOT = REPO_ROOT
 HOST_CONTROL_SCRIPT = (
     Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"])
-    / "launcher"
+    / "foundation" / "host_control"
     / "shell"
     / "host_control.sh"
 )
 TEST_RUNTIME = codex_runtime.CodexRuntime(
     executable=Path("/opt/buddyswitch/codex"),
     version="codex-cli test-runtime",
+)
+TEST_INPUT = HOST_CONTROL.HostControlApplicationInput(
+    roles=(
+        HOST_CONTROL.HostControlRole(id="pm", label="PM", scope="product"),
+    ),
+    start_module="buddyswitch.application.entrypoints.host_control_start",
+    central_daemon_module="buddyswitch.application.entrypoints.central_daemon",
+    instance_daemon_module="buddyswitch.application.entrypoints.instance_daemon",
+    runtime_broker_module="buddyswitch.application.entrypoints.runtime_broker",
 )
 
 
@@ -175,7 +183,7 @@ class HostControlTests(unittest.TestCase):
             executable=Path("/opt/buddyswitch/codex"),
             version="codex-cli test-runtime",
         )
-        control = HOST_CONTROL.HostControl(
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT,
             runner=runner,
             runtime_resolver=lambda: runtime,
         )
@@ -222,7 +230,7 @@ class HostControlTests(unittest.TestCase):
             executable=Path("/opt/buddyswitch/codex"),
             version="codex-cli test-runtime",
         )
-        control = HOST_CONTROL.HostControl(
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT,
             runner=runner,
             runtime_resolver=lambda: runtime,
         )
@@ -257,7 +265,7 @@ class HostControlTests(unittest.TestCase):
     def test_prepare_retry_requires_inactive_start_failure_and_allocates_same_role_replacement(self) -> None:
         accepted_runner = FakePrivateRunner()
         accepted_runner.add("status", ["act-pm-failed"], self._failed_status())
-        control = HOST_CONTROL.HostControl(runner=accepted_runner)
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=accepted_runner)
         self.assertTrue(hasattr(control, "prepare_retry"), "Host Control must own Retry preparation.")
         with mock.patch.object(
             HOST_CONTROL,
@@ -286,7 +294,7 @@ class HostControlTests(unittest.TestCase):
                     ["act-pm-failed"],
                     dict(self._failed_status(), status=status, last_failure=failure),
                 )
-                control = HOST_CONTROL.HostControl(runner=runner)
+                control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
                 with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
                     with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
                         control.prepare_retry("act-pm-failed")
@@ -298,7 +306,7 @@ class HostControlTests(unittest.TestCase):
             ["act-pm-missing"],
             HOST_CONTROL.HostControlError("NOT_FOUND", "actor instance not found: act-pm-missing"),
         )
-        missing_control = HOST_CONTROL.HostControl(runner=missing_runner)
+        missing_control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=missing_runner)
         with self.assertRaises(HOST_CONTROL.HostControlError) as missing:
             with mock.patch.object(missing_control, "_recorded_runtime", return_value=TEST_RUNTIME):
                 missing_control.prepare_retry("act-pm-missing")
@@ -310,7 +318,7 @@ class HostControlTests(unittest.TestCase):
             ["act-pm-failed"],
             dict(self._failed_status(), role="../pm"),
         )
-        malformed_control = HOST_CONTROL.HostControl(runner=malformed_runner)
+        malformed_control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=malformed_runner)
         with self.assertRaises(HOST_CONTROL.HostControlError) as malformed:
             with mock.patch.object(malformed_control, "_recorded_runtime", return_value=TEST_RUNTIME):
                 malformed_control.prepare_retry("act-pm-failed")
@@ -333,7 +341,7 @@ class HostControlTests(unittest.TestCase):
                 "instance_record": f"/tmp/instances/{replacement_actor_id}/instance.json",
             },
         )
-        control = HOST_CONTROL.HostControl(
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT,
             runner=runner,
             runtime_resolver=lambda: TEST_RUNTIME,
         )
@@ -364,7 +372,7 @@ class HostControlTests(unittest.TestCase):
             ["act-pm-failed"],
             HOST_CONTROL.HostControlError("COMMAND_FAILED", "Delete failed."),
         )
-        control = HOST_CONTROL.HostControl(runner=runner)
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
 
         with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
             with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
@@ -378,7 +386,7 @@ class HostControlTests(unittest.TestCase):
             with self.subTest(replacement_actor_id=replacement_actor_id):
                 runner = FakePrivateRunner()
                 runner.add("status", ["act-pm-failed"], self._failed_status())
-                control = HOST_CONTROL.HostControl(runner=runner)
+                control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
 
                 with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
                     with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
@@ -397,7 +405,7 @@ class HostControlTests(unittest.TestCase):
             ["pm", str(TEST_RUNTIME.executable), TEST_RUNTIME.version, replacement_actor_id],
             HOST_CONTROL.HostControlError("COMMAND_FAILED", "Replacement start failed."),
         )
-        control = HOST_CONTROL.HostControl(
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT,
             runner=runner,
             runtime_resolver=lambda: TEST_RUNTIME,
         )
@@ -432,7 +440,7 @@ class HostControlTests(unittest.TestCase):
             resolutions.append(True)
             return runtime
 
-        control = HOST_CONTROL.HostControl(
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT,
             runner=runner,
             runtime_resolver=resolve_runtime,
         )
@@ -462,7 +470,7 @@ class HostControlTests(unittest.TestCase):
             os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             os.environ["BUDDYSWITCH_CODEX_BIN"] = "/current/path/must-not-win"
             try:
-                control = HOST_CONTROL.HostControl(runner=runner)
+                control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
                 payload = control.resume("act-pm-demo")
             finally:
                 self._restore_env_value("BUDDYSWITCH_SHARED_ROOT", previous_shared_root)
@@ -488,7 +496,7 @@ class HostControlTests(unittest.TestCase):
                 os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
                 runner = FakePrivateRunner()
                 try:
-                    control = HOST_CONTROL.HostControl(runner=runner)
+                    control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
                     with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
                         control.resume("act-pm-demo")
                 finally:
@@ -501,7 +509,7 @@ class HostControlTests(unittest.TestCase):
         runner = FakePrivateRunner()
         runner.add("stop", ["act-pm-demo"], {"actor_id": "act-pm-demo", "status": "inactive"})
         runner.add("delete", ["act-pm-demo"], {"actor_id": "act-pm-demo", "deleted": True})
-        control = HOST_CONTROL.HostControl(runner=runner)
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
 
         self.assertEqual(control.stop("act-pm-demo")["status"], "inactive")
         self.assertTrue(control.delete("act-pm-demo")["deleted"])
@@ -555,12 +563,12 @@ class HostControlTests(unittest.TestCase):
                 runner = FakePrivateRunner()
                 if operation == "status":
                     runner.add("status", ["act-pm-demo"], payload)
-                    control = HOST_CONTROL.HostControl(runner=runner)
+                    control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
                     action = lambda: control.status("act-pm-demo")
                 else:
                     runner.add("list", [], {"instances": [payload]})
-                    control = HOST_CONTROL.HostControl(runner=runner)
-                    action = lambda: HOST_CONTROL.HostControl(runner=runner).list_instances()
+                    control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
+                    action = lambda: HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner).list_instances()
                 with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
                     with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
                         action()
@@ -572,13 +580,13 @@ class HostControlTests(unittest.TestCase):
                 runner = FakePrivateRunner()
                 valid_status = dict(status_payload, last_failure=last_failure)
                 runner.add("status", ["act-pm-demo"], valid_status)
-                control = HOST_CONTROL.HostControl(runner=runner)
+                control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
                 with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
                     self.assertEqual(control.status("act-pm-demo")["last_failure"], last_failure)
 
     def test_host_control_start_routes_every_published_phase_through_one_cleanup_owner(self) -> None:
         source = (
-            ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "host_control.sh"
+            ROOT / "src" / "buddyswitch" / "foundation" / "host_control" / "shell" / "host_control.sh"
         ).read_text(encoding="utf-8")
         start_block = source.split("start_locked_bootstrap() {", 1)[1].split(
             "instance_set_inactive_locked() {",
@@ -676,13 +684,9 @@ class HostControlTests(unittest.TestCase):
         runner.add("delete", ["act-pm-demo"], {"actor_id": "act-pm-demo", "deleted": True})
         runner.add("interrupt", ["act-pm-demo"], {"actor_id": "act-pm-demo", "thread_id": "thread-main", "turn_id": "turn-1"})
         runner.add("compact", ["act-pm-demo"], {"actor_id": "act-pm-demo", "thread_id": "thread-main", "started": True})
-        control = HOST_CONTROL.HostControl(runner=runner, runtime_resolver=lambda: TEST_RUNTIME)
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner, runtime_resolver=lambda: TEST_RUNTIME)
 
-        with mock.patch.object(
-            HOST_CONTROL.env_manifest,
-            "load_manifest",
-            return_value={"roles": [role_row]},
-        ), mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
+        with mock.patch.object(control, "_recorded_runtime", return_value=TEST_RUNTIME):
             roles = control.roles()
             started = control.start("pm", actor_id="act-pm-demo")
             instances = control.list_instances()
@@ -732,21 +736,20 @@ class HostControlTests(unittest.TestCase):
         ]
         instance_payloads.append(({}, "actor_id"))
 
-        control = HOST_CONTROL.HostControl(runner=FakePrivateRunner())
-        with mock.patch.object(
-            HOST_CONTROL.env_manifest,
-            "load_manifest",
-            side_effect=env_manifest.ManifestError("roles[0].id must be a non-empty string"),
-        ), self.assertRaises(HOST_CONTROL.HostControlError) as raised:
-            control.roles()
-        self.assertEqual(raised.exception.code, "COMMAND_FAILED")
-        self.assertIn("roles[0].id", raised.exception.message)
+        with self.assertRaises(ValueError):
+            HOST_CONTROL.HostControlApplicationInput(
+                roles=(),
+                start_module="buddyswitch.application.entrypoints.host_control_start",
+                central_daemon_module="buddyswitch.application.entrypoints.central_daemon",
+                instance_daemon_module="buddyswitch.application.entrypoints.instance_daemon",
+                runtime_broker_module="buddyswitch.application.entrypoints.runtime_broker",
+            )
 
         for row, field_name in instance_payloads:
             with self.subTest(operation="list", row=row):
                 runner = FakePrivateRunner()
                 runner.add("list", [], {"instances": [row]})
-                control = HOST_CONTROL.HostControl(runner=runner)
+                control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
                 with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
                     control.list_instances()
                 self.assertEqual(raised.exception.code, "COMMAND_FAILED")
@@ -764,7 +767,7 @@ class HostControlTests(unittest.TestCase):
             with self.subTest(row=row):
                 runner = FakePrivateRunner()
                 runner.add("list", [], {"instances": [row]})
-                control = HOST_CONTROL.HostControl(runner=runner)
+                control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
 
                 with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
                     control.list_instances()
@@ -774,7 +777,7 @@ class HostControlTests(unittest.TestCase):
 
     def test_facade_validates_actor_and_role_inputs_before_private_runner(self) -> None:
         runner = FakePrivateRunner()
-        control = HOST_CONTROL.HostControl(runner=runner)
+        control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
 
         for call in (lambda: control.start("../pm"), lambda: control.start("--bad"), lambda: control.status("pm-demo")):
             with self.subTest(call=call):
@@ -868,7 +871,7 @@ class HostControlTests(unittest.TestCase):
                 with self.subTest(operation=operation, payload=payload):
                     runner = FakePrivateRunner()
                     runner.add(operation, args, payload)
-                    control = HOST_CONTROL.HostControl(
+                    control = HOST_CONTROL.HostControl(application_input=TEST_INPUT,
                         runner=runner,
                         runtime_resolver=lambda: TEST_RUNTIME,
                     )
@@ -888,7 +891,7 @@ class HostControlTests(unittest.TestCase):
             os.environ["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
             self.addCleanup(self._restore_env_value, "BUDDYSWITCH_SHARED_ROOT", original_shared_root)
             runner = FakePrivateRunner()
-            control = HOST_CONTROL.HostControl(runner=runner)
+            control = HOST_CONTROL.HostControl(application_input=TEST_INPUT, runner=runner)
 
             get_payload = control.capabilities_get("act-pm-demo")
             set_payload = control.capabilities_set("act-pm-demo", "deep", "maximum")
@@ -912,7 +915,7 @@ class HostControlTests(unittest.TestCase):
             stderr="",
         )
         with mock.patch.object(HOST_CONTROL.subprocess, "run", return_value=completed) as run:
-            payload = HOST_CONTROL._HostControlScriptRunner().run(
+            payload = HOST_CONTROL._HostControlScriptRunner(TEST_INPUT).run(
                 "status",
                 ["act-pm-demo"],
                 timeout_seconds=12,
@@ -921,6 +924,23 @@ class HostControlTests(unittest.TestCase):
         self.assertEqual(payload, {"actor_id": "act-pm-demo"})
         command = run.call_args.args[0]
         self.assertEqual(command, [str(HOST_CONTROL_SCRIPT), "status", "act-pm-demo"])
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(
+            environment["BUDDYSWITCH_HOST_CONTROL_START_MODULE"],
+            "buddyswitch.application.entrypoints.host_control_start",
+        )
+        self.assertEqual(
+            environment["BUDDYSWITCH_HOST_CONTROL_CENTRAL_DAEMON_MODULE"],
+            "buddyswitch.application.entrypoints.central_daemon",
+        )
+        self.assertEqual(
+            environment["BUDDYSWITCH_HOST_CONTROL_INSTANCE_DAEMON_MODULE"],
+            "buddyswitch.application.entrypoints.instance_daemon",
+        )
+        self.assertEqual(
+            environment["BUDDYSWITCH_HOST_CONTROL_RUNTIME_BROKER_MODULE"],
+            "buddyswitch.application.entrypoints.runtime_broker",
+        )
 
     def test_private_runner_normalizes_json_error_payloads(self) -> None:
         completed = subprocess.CompletedProcess(
@@ -934,7 +954,7 @@ class HostControlTests(unittest.TestCase):
         )
         with mock.patch.object(HOST_CONTROL.subprocess, "run", return_value=completed):
             with self.assertRaises(HOST_CONTROL.HostControlError) as raised:
-                HOST_CONTROL._HostControlScriptRunner().run(
+                HOST_CONTROL._HostControlScriptRunner(TEST_INPUT).run(
                     "delete",
                     ["act-pm-demo"],
                     timeout_seconds=12,
@@ -966,7 +986,7 @@ class HostControlTests(unittest.TestCase):
                 [
                     os.environ["BUDDYSWITCH_PYTHON"],
                     "-m",
-                    "buddyswitch.launcher.runtime_lock",
+                    "buddyswitch.foundation.process_runtime.runtime_lock",
                     "--shared-root",
                     str(shared_root),
                     "--",
@@ -1026,7 +1046,7 @@ host_control_emit_error_for_output "$2" "$3"
 
     def test_host_control_script_is_private_json_only_no_public_parser_residue(self) -> None:
         source = (
-            ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "host_control.sh"
+            ROOT / "src" / "buddyswitch" / "foundation" / "host_control" / "shell" / "host_control.sh"
         ).read_text(encoding="utf-8")
         forbidden = [
             "print_help",
@@ -1055,7 +1075,7 @@ host_control_emit_error_for_output "$2" "$3"
             1,
         )[0]
 
-        builder_command = "buddyswitch.application.entrypoints.actor_build"
+        builder_command = '"${BUDDYSWITCH_HOST_CONTROL_START_MODULE}" build'
         self.assertEqual(start_block.count(builder_command), 1)
         self.assertEqual(source.count(builder_command), 1)
         self.assertNotIn("workspace.sh", source)
@@ -1080,7 +1100,7 @@ host_control_emit_error_for_output "$2" "$3"
                 self.assertGreater(start_block.index(service_call), builder_index)
 
     def test_host_control_module_has_no_temporary_cli_entrypoint_residue(self) -> None:
-        source = (ROOT / "src" / "buddyswitch" / "launcher" / "host_control.py").read_text(encoding="utf-8")
+        source = (ROOT / "src" / "buddyswitch" / "foundation" / "host_control" / "runtime.py").read_text(encoding="utf-8")
         forbidden = [
             "import argparse",
             "Sequence",

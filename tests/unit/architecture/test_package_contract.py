@@ -40,6 +40,7 @@ PACKAGE_OWNER_FILES = (
     "config/__init__.py",
     "contracts/__init__.py",
     "launcher/__init__.py",
+    "foundation/host_control/__init__.py",
     "foundation/runtime_broker/__init__.py",
     "runtime_support/__init__.py",
     "skills/__init__.py",
@@ -53,10 +54,12 @@ FOUNDATION_PRIMITIVE_FILES = (
     "foundation/state/actor_private.py",
     "foundation/process_runtime/json_framing.py",
     "foundation/process_runtime/process_identity.py",
+    "foundation/process_runtime/runtime_lock.py",
 )
 FOUNDATION_PRIMITIVE_DOC = "docs/arch/foundation-primitives-architecture.md"
 RUNTIME_BROKER_DOC = "docs/arch/runtime-broker-architecture.md"
 ACTOR_RUNTIME_DOC = "docs/arch/actor-runtime-architecture.md"
+HOST_CONTROL_DOC = "docs/arch/host-control-architecture.md"
 ACTOR_RUNTIME_FILES = (
     "foundation/actor_runtime/__init__.py",
     "foundation/actor_runtime/capability.py",
@@ -83,6 +86,7 @@ PACKAGE_ENTRYPOINTS = (
     "actor_build",
     "browser_runtime",
     "browser_cockpit_proxy",
+    "host_control_start",
     "cleanup",
     "diagnostics",
     "browser_evidence",
@@ -131,6 +135,7 @@ def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -
         "buddyswitch.contracts",
         "buddyswitch.foundation.app_server",
         "buddyswitch.foundation.browser_runtime",
+        "buddyswitch.foundation.host_control",
         "buddyswitch.launcher",
         "buddyswitch.modules.artifact",
         "buddyswitch.modules.demand",
@@ -258,6 +263,7 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/runtime_broker/protocol.py",
             "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
             "src/buddyswitch/foundation/process_runtime/json_framing.py",
+            "src/buddyswitch/foundation/process_runtime/runtime_lock.py",
             "src/buddyswitch/contracts/prepare-turn-context.json",
             "src/buddyswitch/contracts/{pm,design,dev,market,test}.md",
             "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
@@ -342,6 +348,12 @@ def test_current_guidance_names_only_current_installed_package_owners() -> None:
             "src/buddyswitch/foundation/actor_runtime/side_thread.py",
             "src/buddyswitch/foundation/actor_runtime/side_thread_lifecycle.py",
             "src/buddyswitch/foundation/actor_runtime/side_thread_registry.py",
+        ),
+        REPO_ROOT / HOST_CONTROL_DOC: (
+            "src/buddyswitch/foundation/host_control/",
+            "foundation/host_control/shell/host_control.sh",
+            "foundation/process_runtime/runtime_lock.py",
+            "HostControlApplicationInput",
         ),
     }
     missing_required_paths = sorted(

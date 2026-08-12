@@ -16,7 +16,7 @@ module directly; there is no package re-export or Launcher compatibility path.
 
 ```text
 application / module / Actor host -> foundation App Server runtime
-Launcher CLI and host shell ------> Foundation App Server shell projection
+Foundation Host Control shell ----> Foundation App Server shell projection
 Foundation shell projection ------> stable application entrypoint
 stable application entrypoint ----> Foundation App Server runtime main
 Foundation Python runtime --------> foundation process runtime

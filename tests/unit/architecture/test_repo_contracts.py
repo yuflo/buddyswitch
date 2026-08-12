@@ -93,7 +93,7 @@ def test_public_cli_adapter_is_neutral_and_modules_own_product_projections() -> 
     track_imports = _imported_modules(track_cli_adapter)
     calls = _called_names(cli_adapter)
 
-    assert "buddyswitch.launcher.host_control" in imports
+    assert "buddyswitch.foundation.host_control.runtime" in imports
     assert "buddyswitch.foundation.actor_runtime.session" in imports
     assert not any("track" in name for name in imports)
     assert not any("task" in name for name in imports)

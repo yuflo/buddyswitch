@@ -42,6 +42,19 @@ WEB_ROUTES = APPLICATION.web_routes
 ACTOR_CONSOLE_SECTIONS = APPLICATION.actor_console_sections
 
 
+def direct_host_control() -> WEB_MANAGEMENT.host_control_module.HostControl:
+    module = WEB_MANAGEMENT.host_control_module
+    return module.HostControl(
+        application_input=module.HostControlApplicationInput(
+            roles=(module.HostControlRole(id="pm", label="PM", scope="product"),),
+            start_module="buddyswitch.application.entrypoints.host_control_start",
+            central_daemon_module="buddyswitch.application.entrypoints.central_daemon",
+            instance_daemon_module="buddyswitch.application.entrypoints.instance_daemon",
+            runtime_broker_module="buddyswitch.application.entrypoints.runtime_broker",
+        )
+    )
+
+
 def save_test_actor_identity_profile(*, actor_id: str, role_id: str) -> None:
     identity_profiles.save_actor_identity_profile(
         {
@@ -338,14 +351,14 @@ class RecordingHostControl:
         return self._record(
             "capabilities_get",
             (actor_id,),
-            lambda: WEB_MANAGEMENT.host_control_module.HostControl().capabilities_get(actor_id),
+            lambda: direct_host_control().capabilities_get(actor_id),
         )  # type: ignore[return-value]
 
     def capabilities_set(self, actor_id: str, parent: str, side: str) -> dict[str, object]:
         return self._record(
             "capabilities_set",
             (actor_id, parent, side),
-            lambda: WEB_MANAGEMENT.host_control_module.HostControl().capabilities_set(actor_id, parent, side),
+            lambda: direct_host_control().capabilities_set(actor_id, parent, side),
         )  # type: ignore[return-value]
 
 

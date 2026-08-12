@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Owner-local projection: buddyswitch/foundation/host_control.
+
 HOST_CONTROL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_CONTROL_SELF="${HOST_CONTROL_DIR}/host_control.sh"
-ENV_HELPER="${HOST_CONTROL_DIR}/env.sh"
-BROWSER_HELPER="${HOST_CONTROL_DIR}/browser_cockpit.sh"
-APP_SERVER_HELPER="${HOST_CONTROL_DIR}/../../foundation/app_server/shell/app_server.sh"
+ENV_HELPER="${HOST_CONTROL_DIR}/environment.sh"
+SERVICES_HELPER="${HOST_CONTROL_DIR}/services.sh"
 DAEMON_HELPER="${HOST_CONTROL_DIR}/daemon.sh"
 RUNTIME_BROKER_HELPER="${HOST_CONTROL_DIR}/runtime_broker.sh"
+APP_SERVER_HELPER="${HOST_CONTROL_DIR}/../../app_server/shell/app_server.sh"
 
 source "${ENV_HELPER}"
-source "${BROWSER_HELPER}"
 source "${APP_SERVER_HELPER}"
+source "${SERVICES_HELPER}"
 source "${DAEMON_HELPER}"
 source "${RUNTIME_BROKER_HELPER}"
 
@@ -507,12 +509,15 @@ start_locked_bootstrap() {
   export BUDDYSWITCH_CODEX_VERSION="${requested_codex_version}"
   buddyswitch_validate_role_id "${requested_role}" || return $?
   buddyswitch_validate_actor_id "${requested_actor_id}" || return $?
-  buddyswitch_require_env_profile "${requested_role}" || return $?
-  buddyswitch_require_role_agents_template "${requested_role}" || return $?
   buddyswitch_env_bind_instance "${requested_actor_id}" || return $?
 
+  if [[ -z "${BUDDYSWITCH_HOST_CONTROL_START_MODULE:-}" ]]; then
+    echo "Host Control application start input is required." >&2
+    return 2
+  fi
+
   build_json="$(
-    "${BUDDYSWITCH_PYTHON}" -m buddyswitch.application.entrypoints.actor_build \
+    "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_HOST_CONTROL_START_MODULE}" build \
       --project-source "${BUDDYSWITCH_PROJECT_SOURCE}" \
       --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
       --actor-id "${requested_actor_id}" \
@@ -543,13 +548,19 @@ PY
     buddyswitch_runtime_broker_ensure || return $?
   buddyswitch_run_published_start_phase \
     "${requested_actor_id}" "codex_config_patch" "Codex config patch failed." "" "" \
-    buddyswitch_patch_codex_config || return $?
+    "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_HOST_CONTROL_START_MODULE}" configure \
+      --actor-id "${requested_actor_id}" --role-id "${requested_role}" \
+      --broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" --phase codex-config || return $?
   buddyswitch_run_published_start_phase \
     "${requested_actor_id}" "env_mcp_ensure" "Environment MCP ensure failed." "" "" \
-    buddyswitch_env_mcp_ensure || return $?
+    "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_HOST_CONTROL_START_MODULE}" configure \
+      --actor-id "${requested_actor_id}" --role-id "${requested_role}" \
+      --broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" --phase env-mcp || return $?
   buddyswitch_run_published_start_phase \
     "${requested_actor_id}" "browser_register" "Browser cockpit registration failed." "" "" \
-    buddyswitch_browser_register_cockpit_mcp || return $?
+    "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_HOST_CONTROL_START_MODULE}" configure \
+      --actor-id "${requested_actor_id}" --role-id "${requested_role}" \
+      --broker-socket "${BUDDYSWITCH_RUNTIME_BROKER_SOCKET}" --phase browser-register || return $?
   browser_output="${BUDDYSWITCH_START_PHASE_OUTPUT}"
   if [[ -n "${browser_output}" ]]; then
     if [[ -n "${BUDDYSWITCH_START_DIAGNOSTICS_FILE:-}" ]]; then
@@ -1118,26 +1129,6 @@ instance_delete_locked() {
   buddyswitch_remove_owned_path "${instance_root}" || return $?
 }
 
-host_control_roles() {
-  if [[ $# -ne 0 ]]; then
-    echo "roles accepts no arguments" >&2
-    return 2
-  fi
-  "${BUDDYSWITCH_PYTHON}" - <<'PY'
-import json
-from buddyswitch.application.build import activate_application
-from buddyswitch.runtime_support.env_manifest import load_manifest
-
-activate_application()
-manifest = load_manifest()
-roles = [
-    {"id": role["id"], "label": role["label"], "scope": role["scope"]}
-    for role in manifest["roles"]
-]
-print(json.dumps({"roles": roles}, ensure_ascii=True, sort_keys=True))
-PY
-}
-
 host_control_start() {
   if [[ $# -ne 4 ]]; then
     echo "start requires <role-id> <codex-executable> <codex-version> <actor-id>" >&2
@@ -1223,9 +1214,6 @@ host_control_run_raw_operation() {
     shift || true
   fi
   case "${operation}" in
-    roles)
-      host_control_roles "$@"
-      ;;
     start)
       host_control_start "$@"
       ;;

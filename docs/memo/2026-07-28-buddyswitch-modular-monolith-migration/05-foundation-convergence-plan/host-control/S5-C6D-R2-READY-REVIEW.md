@@ -1,6 +1,6 @@
 # S5 C6D R2 READY Review
 
-> Decision: `READY — R2 ONLY`
+> Decision: `CONSUMED — ACCEPTED; DO NOT EXECUTE`
 > Packet: `BS-MM-S5-HOST-CONTROL-R2-20260812-01`
 > Entry: exact preserved R1 dirty candidate described below
 

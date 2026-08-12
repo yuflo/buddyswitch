@@ -66,9 +66,11 @@ infer completion from a Message response.
 
 ### Private Host Control
 
-Private Host Control owns role discovery, instance
+Foundation Host Control owns instance
 start/list/status/clear/resume/stop/delete, interrupt, compact, capabilities,
-and daemon/App Server coordination. It returns host facts, not product state.
+and Daemon/App Server coordination. Application supplies the one current Role
+catalog/validation/start input, and both generic Web and CLI receive the same
+assembled capability. Host Control returns host facts, not product state.
 
 ### Actor Session
 

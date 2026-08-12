@@ -8,7 +8,8 @@ import unittest
 
 from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.actor_runtime import session as actor_session
-from buddyswitch.launcher import cli, cli_contract, host_control
+from buddyswitch.foundation.host_control import runtime as host_control
+from buddyswitch.launcher import cli, cli_contract
 
 
 class CliContractTests(unittest.TestCase):

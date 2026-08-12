@@ -161,7 +161,10 @@ class ExternalControlArchitectureTests(unittest.TestCase):
     def test_actor_environment_build_is_private_to_host_control(self) -> None:
         cli_source = _source("src/buddyswitch/launcher/cli.py")
         web_source = _source("src/buddyswitch/launcher/web_management.py")
-        host_source = _source("src/buddyswitch/launcher/shell/host_control.sh")
+        host_source = _source("src/buddyswitch/foundation/host_control/shell/host_control.sh")
+        application_start_source = _source(
+            "src/buddyswitch/application/entrypoints/host_control_start.py"
+        )
         env_source = _source("src/buddyswitch/launcher/shell/env.sh")
         browser_source = _source("src/buddyswitch/launcher/shell/browser_cockpit.sh")
         start_block = host_source.split("start_locked_bootstrap() {", 1)[1].split(
@@ -177,19 +180,14 @@ class ExternalControlArchitectureTests(unittest.TestCase):
         self.assertIn("host_control_module.HostControl", web_source)
         self.assertNotIn("actor_environment", cli_source)
         self.assertNotIn("actor_environment", web_source)
-        self.assertEqual(
-            start_block.count("buddyswitch.application.entrypoints.actor_build"),
-            1,
-        )
-        self.assertEqual(
-            host_source.count("buddyswitch.application.entrypoints.actor_build"),
-            1,
-        )
+        self.assertIn('"${BUDDYSWITCH_HOST_CONTROL_START_MODULE}" build', start_block)
+        self.assertEqual(application_start_source.count("resolve_actor_bootstrap"), 2)
+        self.assertNotIn("buddyswitch.application", host_source)
         for forbidden in (
             "actor_environment.py",
             "--validate-existing",
-            "buddyswitch_require_env_profile",
-            "buddyswitch_require_role_agents_template",
+            "runtime_support",
+            "launcher/shell",
         ):
             with self.subTest(resume_forbidden=forbidden):
                 self.assertNotIn(forbidden, resume_block)
@@ -269,10 +267,10 @@ class ExternalControlArchitectureTests(unittest.TestCase):
                 1,
             ),
             source.replace(
-                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
+                "        result = _dispatch(\n",
                 "        if any(arg == \"--\" + \"json\" for arg in args):\n"
                 "            raise RuntimeError(args)\n"
-                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
+                "        result = _dispatch(\n",
                 1,
             ),
             source.replace(
@@ -280,10 +278,10 @@ class ExternalControlArchitectureTests(unittest.TestCase):
                 'RETIRED_PREFIX = "--"\nRETIRED_NAME = "output"\nYES_FLAG = DASH + "yes"\n',
                 1,
             ).replace(
-                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
+                "        result = _dispatch(\n",
                 "        if any(arg == RETIRED_PREFIX + RETIRED_NAME for arg in args):\n"
                 "            raise RuntimeError(args)\n"
-                "        result = _dispatch(args, commands=commands, help_text=help_text)\n",
+                "        result = _dispatch(\n",
                 1,
             ),
         )

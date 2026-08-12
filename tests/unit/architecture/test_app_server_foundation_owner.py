@@ -88,11 +88,11 @@ def test_every_live_host_imports_the_direct_foundation_runtime() -> None:
         assert "buddyswitch.foundation.app_server.runtime" in _imports(consumer), consumer
 
     cli_source = (PACKAGE_ROOT / "launcher" / "cli.py").read_text(encoding="utf-8")
-    host_source = (PACKAGE_ROOT / "launcher" / "shell" / "host_control.sh").read_text(
+    host_source = (PACKAGE_ROOT / "foundation" / "host_control" / "shell" / "host_control.sh").read_text(
         encoding="utf-8"
     )
     assert 'PACKAGE_ROOT / "foundation" / "app_server" / "shell" / "app_server.sh"' in cli_source
-    assert "../../foundation/app_server/shell/app_server.sh" in host_source
+    assert "../../app_server/shell/app_server.sh" in host_source
     assert 'SHELL_ROOT / "app_server.sh"' not in cli_source
     assert '${HOST_CONTROL_DIR}/app_server.sh' not in host_source
 

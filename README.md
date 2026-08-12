@@ -107,6 +107,8 @@ package/build declaration.
 - `src/buddyswitch/foundation/runtime_broker/protocol.py` for the runtime broker protocol envelope.
 - `src/buddyswitch/foundation/runtime_broker/dispatcher.py` for `env.tool`, health, and Browser broker dispatch.
 - `src/buddyswitch/foundation/process_runtime/json_framing.py` for shared Runtime Broker and Daemon socket framing.
+- `src/buddyswitch/foundation/process_runtime/runtime_lock.py` for the shared global lifecycle lock.
+- `src/buddyswitch/foundation/host_control/` for private instance lifecycle coordination and state.
 - `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.
 - `src/buddyswitch/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
 - `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md` for Role bootstrap guidance.

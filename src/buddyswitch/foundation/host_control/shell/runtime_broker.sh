@@ -77,7 +77,7 @@ _buddyswitch_runtime_broker_lifecycle_json() {
   (
     cd "${BUDDYSWITCH_INSTANCE_ROOT}"
     export BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state"
-    "${BUDDYSWITCH_PYTHON}" -m buddyswitch.application.entrypoints.runtime_broker "${command}" \
+    "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_HOST_CONTROL_RUNTIME_BROKER_MODULE}" "${command}" \
       --socket "${socket_path}" \
       --pid-file "${pid_file}" \
       --marker-file "${marker_file}" \

@@ -21,7 +21,7 @@ from uuid import uuid4
 HELPER_DIR = Path(__file__).resolve().parent
 
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
-from buddyswitch.launcher import host_control as host_control_module
+from buddyswitch.foundation.host_control import runtime as host_control_module
 from buddyswitch.launcher import cli_contract
 from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef
 import buddyswitch.foundation.state.runtime as state_runtime
@@ -360,7 +360,7 @@ class WebManagementService:
     def __init__(
         self,
         *,
-        host_control: host_control_module.HostControl | None = None,
+        host_control: host_control_module.HostControl,
         terminal_opener: Callable[[str], None] | None = None,
         platform_name: str | None = None,
         busy_guard: BusyGuard | None = None,
@@ -369,7 +369,7 @@ class WebManagementService:
         ] | None = None,
         web_routes: tuple[WebRouteRegistration, ...] | None = None,
     ) -> None:
-        self._host_control = host_control or host_control_module.HostControl()
+        self._host_control = host_control
         self._terminal_opener = terminal_opener or open_macos_terminal_app
         self._platform_name = platform_name or sys.platform
         self._busy_guard = busy_guard or BusyGuard()
@@ -1205,7 +1205,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def emit_startup_failure(exc: BaseException) -> int:
+    """Project a pre-server failure through the Web startup boundary."""
+
+    print(str(exc), file=sys.stderr, flush=True)
+    return 1
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    host_control: host_control_module.HostControl,
+) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     try:
@@ -1215,11 +1226,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     bind_web_runtime_state()
     try:
-        service = WebManagementService()
+        service = WebManagementService(host_control=host_control)
         service.prepare_routes()
     except Exception as exc:
-        print(str(exc), file=sys.stderr, flush=True)
-        return 1
+        return emit_startup_failure(exc)
     server = create_server(args.host, args.port, service)
     url = f"http://{args.host}:{server.server_port}"
     cli_contract.emit(

@@ -1,8 +1,8 @@
 # S5 C6D Host Control
 
-> State: `R1 CONSUMED; READY — R2 ONLY`
-> Packet: `BS-MM-S5-HOST-CONTROL-R2-20260812-01`
-> Execution base: exact preserved R1 dirty candidate plus coordinating memos
+> State: `ACCEPTED`
+> Packet: R1 and R2 consumed
+> Acceptance: `S5-C6D-ACCEPTANCE.md`
 
 C6D converges the private instance-lifecycle control path. Foundation owns
 product-neutral lifecycle coordination and the shared runtime lock; application
@@ -12,8 +12,9 @@ peer consumers and receive the same assembled control capability.
 
 R1 completed the lifecycle/lock cutover and all behavior/replacement proof, but
 hub review found concrete Application module invocations in two Foundation
-helper shells. R2 only closes that reverse dependency and its escaped proof
-class; it does not redo C6D.
+helper shells. R2 closed that reverse dependency through the one existing
+application input and expanded proof to every helper shell. The coordinating
+hub accepted the complete C6D candidate; neither packet may resume.
 
 Read the continuation in order:
 
@@ -22,6 +23,7 @@ Read the continuation in order:
 3. `S5-C6D-R2-GOAL-PACKET.md`;
 4. original snapshot, boundary design and Goal Packet for protected semantics.
 
-C6D does not authorize physical WebHost/CliHost convergence, RoleHost, final
-Launcher-root deletion, C7, or S6. Paths in these documents are source-grounded
-hypotheses inside the semantic boundary, not mandatory edit instructions.
+C6D acceptance unlocks only fresh source review and READY preparation for the
+remaining physical WebHost/CliHost convergence. RoleHost, C7 and S6 remain
+unauthorized. Paths in these documents are source-grounded hypotheses inside
+the semantic boundary, not mandatory edit instructions.

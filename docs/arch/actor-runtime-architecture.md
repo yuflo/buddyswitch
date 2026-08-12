@@ -25,7 +25,7 @@ runtime owner.
 ## Dependency direction
 
 ```text
-application / Demand / current Launcher hosts
+application / Demand / Foundation Host Control / current Launcher adapters
                      -> foundation Actor Runtime
 application Actor build -> resolved Role/Skill bootstrap -> Actor Runtime environment
 foundation Actor Runtime -> foundation App Server
@@ -34,12 +34,13 @@ foundation Actor Runtime -> foundation Process Runtime
 
 Foundation Actor Runtime imports only the standard library and direct
 `foundation.app_server` and `foundation.process_runtime` owners. Application,
-Demand, Host Control, CLI, and shell code are consumers. Role selection,
-instance start/list, Host Control lifecycle, runtime locking, Web routing,
+Demand, Foundation Host Control, CLI, and shell code are consumers. Role selection,
+instance lifecycle, Process Runtime locking, Web routing,
 public CLI dispatch, and host/global cleanup orchestration remain outside this
 owner. Current central Role/Skill selection remains application-side until S6;
 it supplies one explicit resolved bootstrap projection to the environment owner
-through the stable `buddyswitch.application.entrypoints.actor_build` boundary.
+through the application-selected Host Control start input and the stable
+`buddyswitch.application.entrypoints.actor_build` boundary.
 
 ## Runtime contract
 

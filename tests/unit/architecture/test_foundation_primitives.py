@@ -19,6 +19,9 @@ OWNER_FILES = {
     "process_runtime.process_identity": (
         FOUNDATION_ROOT / "process_runtime" / "process_identity.py"
     ),
+    "process_runtime.runtime_lock": (
+        FOUNDATION_ROOT / "process_runtime" / "runtime_lock.py"
+    ),
 }
 PACKAGE_ROOTS = (
     FOUNDATION_ROOT / "identity" / "__init__.py",
@@ -256,6 +259,7 @@ def test_foundation_primitive_dependencies_point_only_between_direct_owners() ->
         "state.runtime": set(),
         "state.actor_private": set(),
         "process_runtime.process_identity": set(),
+        "process_runtime.runtime_lock": set(),
     }
 
     visiting: set[str] = set()

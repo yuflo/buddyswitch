@@ -439,7 +439,10 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         stderr = io.StringIO()
 
         with mock.patch("sys.stderr", stderr):
-            result = WEB_MANAGEMENT.main(["--host", "0.0.0.0"])
+            result = WEB_MANAGEMENT.main(
+                ["--host", "0.0.0.0"],
+                host_control=RecordingHostControl(),
+            )
 
         self.assertEqual(result, 2)
         self.assertIn("local", stderr.getvalue())

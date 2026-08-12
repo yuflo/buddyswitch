@@ -13,7 +13,8 @@ OWNER = PACKAGE_ROOT / "foundation" / "actor_runtime" / "environment.py"
 ENTRYPOINT = PACKAGE_ROOT / "application" / "entrypoints" / "actor_build.py"
 RETIRED_OWNER = PACKAGE_ROOT / "launcher" / "actor_environment.py"
 LAUNCHER_ROOT = PACKAGE_ROOT / "launcher"
-HOST_CONTROL_SHELL = LAUNCHER_ROOT / "shell" / "host_control.sh"
+HOST_CONTROL_SHELL = PACKAGE_ROOT / "foundation" / "host_control" / "shell" / "host_control.sh"
+HOST_CONTROL_START = PACKAGE_ROOT / "application" / "entrypoints" / "host_control_start.py"
 RETIRED_MODULE = "buddyswitch.launcher.actor_environment"
 
 
@@ -74,10 +75,12 @@ def test_application_resolves_one_bootstrap_before_direct_publication() -> None:
     assert "validate_runtime_skills" not in runtime_skill_source
 
 
-def test_stable_host_control_build_boundary_is_unchanged() -> None:
+def test_stable_host_control_build_boundary_is_application_supplied() -> None:
     host_source = HOST_CONTROL_SHELL.read_text(encoding="utf-8")
-    stable_entrypoint = "buddyswitch.application.entrypoints.actor_build"
-    assert host_source.count(stable_entrypoint) == 1
+    start_source = HOST_CONTROL_START.read_text(encoding="utf-8")
+    assert '"${BUDDYSWITCH_HOST_CONTROL_START_MODULE}" build' in host_source
+    assert "resolve_actor_bootstrap" in start_source
+    assert "buddyswitch.application" not in host_source
     assert "foundation.actor_runtime.environment" not in host_source
 
 

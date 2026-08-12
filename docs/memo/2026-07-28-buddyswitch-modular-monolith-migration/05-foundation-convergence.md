@@ -1,8 +1,8 @@
 # S5 Foundation Convergence Charter
 
-> Current state: C1–C6C ACCEPTED; C6D R2 READY
+> Current state: C1–C6D ACCEPTED; remaining Web/Cli host source refresh
 > Entry prerequisite: S4 ACCEPTED
-> Execution authority: `BS-MM-S5-HOST-CONTROL-R2-20260812-01` only
+> Execution authority: none; the next owner requires fresh READY review
 > Merge model: ordered owner-bounded checkpoints, then final S5 acceptance
 
 The executable blueprint and current handoff live at

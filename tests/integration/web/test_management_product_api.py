@@ -339,7 +339,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
         shared_root = self._use_capability_shared_root()
         write_web_capability_instance(shared_root)
 
-        host_payload = WEB_MANAGEMENT.host_control_module.HostControl().capabilities_set(
+        host_payload = direct_host_control().capabilities_set(
             "act-pm-demo", parent="deep", side="maximum"
         )
         service = self._service()
@@ -362,7 +362,7 @@ class WebManagementProductApiTests(RuntimeWorkspaceTestCase):
             "/api/actors/act-pm-demo/capabilities",
             b'{"parent":"deep","side":"maximum"}',
         )
-        host_payload = WEB_MANAGEMENT.host_control_module.HostControl().capabilities_get("act-pm-demo")
+        host_payload = direct_host_control().capabilities_get("act-pm-demo")
 
         self.assertEqual(status, 200)
         self.assertTrue(host_payload["ok"])

@@ -1,4 +1,4 @@
-"""Run a command while holding the BuddySwitch runtime lock."""
+"""Run a command while holding the shared BuddySwitch runtime lock."""
 
 from __future__ import annotations
 

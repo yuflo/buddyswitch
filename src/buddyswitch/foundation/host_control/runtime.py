@@ -1,4 +1,4 @@
-"""Private Host Control facade for BuddySwitch instance lifecycle operations."""
+"""Product-neutral private instance lifecycle owner."""
 
 from __future__ import annotations
 
@@ -15,8 +15,7 @@ from uuid import uuid4
 from buddyswitch.foundation.actor_runtime import capability as actor_capability
 from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.process_runtime.invocation import current_runtime_identity
-from buddyswitch.launcher import runtime_lock
-from buddyswitch.runtime_support import env_manifest
+from buddyswitch.foundation.process_runtime import runtime_lock
 
 HELPER_DIR = Path(__file__).resolve().parent
 SHELL_ROOT = HELPER_DIR / "shell"
@@ -24,7 +23,6 @@ SHELL_ROOT = HELPER_DIR / "shell"
 VALID_ACTOR_ID_RE = re.compile(r"^act-[A-Za-z0-9._-]+$")
 VALID_ROLE_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 SCRIPT_OPERATIONS = {
-    "roles",
     "start",
     "list",
     "status",
@@ -35,7 +33,7 @@ SCRIPT_OPERATIONS = {
     "interrupt",
     "compact",
 }
-LOCKED_OPERATIONS = SCRIPT_OPERATIONS - {"roles", "list", "status"}
+LOCKED_OPERATIONS = SCRIPT_OPERATIONS - {"list", "status"}
 
 
 class HostControlError(RuntimeError):
@@ -57,7 +55,50 @@ class HostControlError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class HostControlRole:
+    """One validated application-supplied Role projection."""
+
+    id: str
+    label: str
+    scope: str
+
+
+@dataclass(frozen=True)
+class HostControlApplicationInput:
+    """The one exact current Role/start input supplied by application."""
+
+    roles: tuple[HostControlRole, ...]
+    start_module: str
+    central_daemon_module: str
+    instance_daemon_module: str
+    runtime_broker_module: str
+
+    def __post_init__(self) -> None:
+        if not self.roles or not all(isinstance(role, HostControlRole) for role in self.roles):
+            raise ValueError("Host Control roles must be a non-empty typed tuple")
+        role_ids = tuple(role.id for role in self.roles)
+        if len(role_ids) != len(set(role_ids)):
+            raise ValueError("Host Control role ids must be unique")
+        for role in self.roles:
+            validate_role_id(role.id)
+            if not role.label.strip() or not role.scope.strip():
+                raise ValueError("Host Control role label and scope must be non-empty")
+        for field_name, module in (
+            ("start module", self.start_module),
+            ("central daemon module", self.central_daemon_module),
+            ("instance daemon module", self.instance_daemon_module),
+            ("runtime broker module", self.runtime_broker_module),
+        ):
+            if not isinstance(module, str) or not re.fullmatch(
+                r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*",
+                module,
+            ):
+                raise ValueError(f"Host Control {field_name} must be a Python module")
+
+
+@dataclass(frozen=True)
 class _HostControlScriptRunner:
+    application_input: HostControlApplicationInput
     shell_root: Path = SHELL_ROOT
 
     def run(self, operation: str, args: list[str], *, timeout_seconds: float) -> dict[str, object]:
@@ -67,6 +108,16 @@ class _HostControlScriptRunner:
         command = [str(script), operation, *args]
         try:
             environment = os.environ.copy()
+            environment["BUDDYSWITCH_HOST_CONTROL_START_MODULE"] = self.application_input.start_module
+            environment["BUDDYSWITCH_HOST_CONTROL_CENTRAL_DAEMON_MODULE"] = (
+                self.application_input.central_daemon_module
+            )
+            environment["BUDDYSWITCH_HOST_CONTROL_INSTANCE_DAEMON_MODULE"] = (
+                self.application_input.instance_daemon_module
+            )
+            environment["BUDDYSWITCH_HOST_CONTROL_RUNTIME_BROKER_MODULE"] = (
+                self.application_input.runtime_broker_module
+            )
             if operation in LOCKED_OPERATIONS:
                 shared_root = _shared_root_from_environment()
                 with runtime_lock.hold_runtime_lock(
@@ -124,24 +175,24 @@ class HostControl:
     def __init__(
         self,
         *,
+        application_input: HostControlApplicationInput,
         runner: _HostControlScriptRunner | Any | None = None,
         runtime_resolver: Callable[[], codex_runtime.CodexRuntime] | None = None,
     ) -> None:
-        self._runner = runner or _HostControlScriptRunner()
+        if not isinstance(application_input, HostControlApplicationInput):
+            raise ValueError("Host Control requires one typed application input")
+        self._application_input = application_input
+        self._runner = runner or _HostControlScriptRunner(application_input)
         self._runtime_resolver = runtime_resolver or self._resolve_runtime
 
     def roles(self) -> list[dict[str, object]]:
-        try:
-            manifest = env_manifest.load_manifest()
-        except env_manifest.ManifestError as exc:
-            raise HostControlError("COMMAND_FAILED", str(exc), returncode=1) from exc
         return [
             {
-                "id": role["id"],
-                "label": role["label"],
-                "scope": role["scope"],
+                "id": role.id,
+                "label": role.label,
+                "scope": role.scope,
             }
-            for role in manifest["roles"]
+            for role in self._application_input.roles
         ]
 
     def allocate_actor_id(self, role_id: str) -> str:
@@ -150,10 +201,13 @@ class HostControl:
 
     def start(self, role_id: str, actor_id: str | None = None) -> dict[str, object]:
         role = validate_role_id(role_id)
-        try:
-            env_manifest.require_role(env_manifest.load_manifest(), role)
-        except env_manifest.ManifestError as exc:
-            raise HostControlError("INVALID_REQUEST", str(exc), returncode=2) from exc
+        valid_roles = {row.id for row in self._application_input.roles}
+        if role not in valid_roles:
+            raise HostControlError(
+                "INVALID_REQUEST",
+                f"Unknown role '{role}'. Valid: {', '.join(sorted(valid_roles))}",
+                returncode=2,
+            )
         requested_actor_id = self.allocate_actor_id(role) if actor_id is None else validate_actor_id(actor_id)
         try:
             runtime = self._runtime_resolver()
@@ -469,13 +523,6 @@ def _expect_object_list(payload: dict[str, object], field_name: str) -> list[dic
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         raise HostControlError("COMMAND_FAILED", f"Invalid Host Control {field_name} payload.", returncode=1)
     return [dict(row) for row in rows]
-
-
-def _expect_role_rows(payload: dict[str, object]) -> list[dict[str, object]]:
-    rows = _expect_object_list(payload, "roles")
-    for row in rows:
-        _require_str_fields(row, "roles row", ("id", "label", "scope"))
-    return rows
 
 
 def _expect_instance_rows(payload: dict[str, object]) -> list[dict[str, object]]:

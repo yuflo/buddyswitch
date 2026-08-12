@@ -36,6 +36,7 @@ def test_contributed_route_is_instantiated_prepared_and_dispatched() -> None:
         return Route()
 
     service = web_management.WebManagementService(
+        host_control=mock.Mock(),
         web_routes=(
             route_type(
                 name="example",
@@ -89,6 +90,7 @@ def test_route_preparation_failure_is_not_published_as_ready() -> None:
             raise AssertionError((method, path, body, headers))
 
     service = web_management.WebManagementService(
+        host_control=mock.Mock(),
         web_routes=(
             route_type(
                 name="unavailable",

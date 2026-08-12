@@ -4,7 +4,8 @@
 
 Foundation primitives provide small, product-neutral owners for identity,
 runtime state, actor-private cleanup, process-start identity, and local-socket
-JSON framing. Product and host modules import these owners directly; the
+JSON framing. Process Runtime also owns the shared global lifecycle lock.
+Product and host modules import these owners directly; the
 package roots are inert.
 
 ## Owners
@@ -22,6 +23,9 @@ package roots are inert.
   process-start records and liveness checks used by lifecycle controllers.
 - `src/buddyswitch/foundation/process_runtime/json_framing.py` owns the shared
   Content-Length framed JSON-object read/write algorithm and byte limits.
+- `src/buddyswitch/foundation/process_runtime/runtime_lock.py` owns the shared
+  global lifecycle lock, timeout, descendant assertion, signal forwarding, and
+  child process-group cleanup contract.
 
 ## Dependency direction
 

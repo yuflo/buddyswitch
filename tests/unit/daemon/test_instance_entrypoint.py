@@ -19,7 +19,13 @@ ROOT = REPO_ROOT
 INSTANCE_PROCESS_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance_process.py"
 APPLICATION_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "application" / "daemon.py"
 DAEMON_SH_PATH = (
-    ROOT / "src" / "buddyswitch" / "launcher" / "shell" / "daemon.sh"
+    ROOT
+    / "src"
+    / "buddyswitch"
+    / "foundation"
+    / "host_control"
+    / "shell"
+    / "daemon.sh"
 )
 CENTRAL_DAEMON_PATH = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "central_process.py"
 MODULE_COUNTER = count()
@@ -318,11 +324,19 @@ class InstanceDaemonEntrypointTests(unittest.TestCase):
 
     def test_daemon_shell_still_calls_instance_daemon_entrypoint(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")
-        self.assertIn("-m buddyswitch.application.entrypoints.instance_daemon", shell_source)
+        invocation = '-m "${BUDDYSWITCH_HOST_CONTROL_INSTANCE_DAEMON_MODULE}"'
+        self.assertEqual(shell_source.count(invocation), 3)
+        for command in ("start", "stop", "status"):
+            self.assertIn(f'{invocation} {command}', shell_source)
+        self.assertIn('--instance-json "${BUDDYSWITCH_INSTANCE_JSON}"', shell_source)
 
     def test_daemon_shell_ensures_central_daemon_lifecycle(self) -> None:
         shell_source = DAEMON_SH_PATH.read_text(encoding="utf-8")
-        self.assertIn("-m buddyswitch.application.entrypoints.central_daemon", shell_source)
+        invocation = '-m "${BUDDYSWITCH_HOST_CONTROL_CENTRAL_DAEMON_MODULE}"'
+        self.assertEqual(shell_source.count(invocation), 2)
+        self.assertIn(f'{invocation} start', shell_source)
+        self.assertIn(f'{invocation} stop-if-idle', shell_source)
+        self.assertIn('--shared-root "${BUDDYSWITCH_SHARED_ROOT}"', shell_source)
         self.assertIn("buddyswitch_central_daemon_ensure", shell_source)
         self.assertIn("buddyswitch_central_daemon_stop_if_idle", shell_source)
         self.assertTrue(CENTRAL_DAEMON_PATH.exists())

@@ -81,7 +81,11 @@ def test_long_path_fallback_sockets_are_root_unique_and_match_shell_resolvers(
         actor_id=actor_id,
     )
     assert first_broker == _shell_socket(
-        Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"]) / "launcher" / "shell" / "runtime_broker.sh",
+        Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"])
+        / "foundation"
+        / "host_control"
+        / "shell"
+        / "runtime_broker.sh",
         "_buddyswitch_runtime_broker_effective_socket",
         instance_root=first_root,
         actor_id=actor_id,

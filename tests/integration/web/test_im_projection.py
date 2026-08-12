@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
@@ -24,6 +25,7 @@ def _web_service_with_im(
         web_identity_provider=provider,
     )
     return web_management.WebManagementService(
+        host_control=mock.Mock(),
         web_routes=(
             web_management.WebRouteRegistration(
                 name="communication-im-test",
@@ -193,7 +195,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
         )
 
     def test_web_management_does_not_expose_retired_web_im_route_family(self) -> None:
-        service = web_management.WebManagementService()
+        service = web_management.WebManagementService(host_control=mock.Mock())
         retired_prefix = "/api/web/" + "im"
 
         for method, path, body in (
@@ -208,7 +210,7 @@ class ImWebManagementProjectionTests(unittest.TestCase):
                 self.assertEqual(raised.exception.status, 404)
 
     def test_web_management_removes_old_message_send_route(self) -> None:
-        service = web_management.WebManagementService()
+        service = web_management.WebManagementService(host_control=mock.Mock())
 
         with self.assertRaises(web_management.HttpError) as raised:
             old_route = "/api/messages" + "/send"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ def _web_service_with_im(
         web_identity_provider=provider,
     )
     return web_management.WebManagementService(
+        host_control=mock.Mock(),
         web_routes=(
             web_management.WebRouteRegistration(
                 name="communication-im-test",

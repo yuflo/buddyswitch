@@ -54,11 +54,9 @@ os.environ.setdefault("BUDDYSWITCH_STATE_ROOT", str(_SHARED_ROOT / "state"))
 
 from buddyswitch.foundation.actor_runtime import codex_runtime  # noqa: E402
 from buddyswitch.foundation.actor_runtime import session as actor_session  # noqa: E402
-from buddyswitch.launcher import (  # noqa: E402
-    cli_contract,
-    host_control,
-    runtime_lock,
-)
+from buddyswitch.foundation.host_control import runtime as host_control  # noqa: E402
+from buddyswitch.foundation.process_runtime import runtime_lock  # noqa: E402
+from buddyswitch.launcher import cli_contract  # noqa: E402
 from buddyswitch.foundation.daemon import central_process, central_service  # noqa: E402
 
 
@@ -168,6 +166,7 @@ HELP_TEXT = render_help(())
 def main(
     argv: Sequence[str] | None = None,
     *,
+    host_control: host_control.HostControl,
     command_registrations: tuple[
         cli_contract.CliCommandRegistration, ...
     ] = (),
@@ -178,19 +177,30 @@ def main(
         help_text = render_help(command_registrations)
         if _is_help(args):
             raise HelpRequested(help_text)
-        result = _dispatch(args, commands=commands, help_text=help_text)
+        result = _dispatch(
+            args,
+            host_control=host_control,
+            commands=commands,
+            help_text=help_text,
+        )
     except HelpRequested as exc:
         sys.stdout.write(exc.text)
         return 0
     except WebProcessExited as exc:
         return exc.status
     except Exception as exc:
-        error = _map_exception(exc)
-        cli_contract.emit(cli_contract.failure(error), sys.stdout)
-        return cli_contract.exit_code(error)
+        return emit_failure(exc)
 
     cli_contract.emit(cli_contract.success(result.kind, result.data), sys.stdout)
     return 0
+
+
+def emit_failure(exc: BaseException) -> int:
+    """Project a pre-dispatch failure through the public CLI error contract."""
+
+    error = _map_exception(exc)
+    cli_contract.emit(cli_contract.failure(error), sys.stdout)
+    return cli_contract.exit_code(error)
 
 
 def _is_help(args: list[str]) -> bool:
@@ -200,6 +210,7 @@ def _is_help(args: list[str]) -> bool:
 def _dispatch(
     args: list[str],
     *,
+    host_control: host_control.HostControl,
     commands: dict[str, cli_contract.CliCommandRegistration],
     help_text: str,
 ) -> CommandResult | cli_contract.CliCommandResult:
@@ -207,23 +218,28 @@ def _dispatch(
         raise cli_contract.CliError("UNKNOWN_COMMAND", "BuddySwitch command is required")
     command, rest = args[0], args[1:]
     if command == "instance":
-        return _dispatch_instance(rest, help_text=help_text)
+        return _dispatch_instance(rest, host_control=host_control, help_text=help_text)
     if command in commands:
         return commands[command].handler(rest)
     if command == "data":
         return _dispatch_data(rest)
     if command == "env":
-        return _dispatch_env(rest)
+        return _dispatch_env(rest, host_control=host_control)
     if command == "web":
         raise WebProcessExited(_run_web(rest))
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown top-level command: {command}")
 
 
-def _dispatch_instance(args: list[str], *, help_text: str) -> CommandResult:
+def _dispatch_instance(
+    args: list[str],
+    *,
+    host_control: host_control.HostControl,
+    help_text: str,
+) -> CommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "instance command is required")
     command, rest = args[0], args[1:]
-    control = host_control.HostControl()
+    control = host_control
     if command == "roles":
         _require_no_args(rest, "instance roles")
         return CommandResult("instance.roles", {"roles": control.roles()})
@@ -301,7 +317,7 @@ def _dispatch_data(args: list[str]) -> CommandResult:
     return CommandResult("data.cleanup", data)
 
 
-def _dispatch_env(args: list[str]) -> CommandResult:
+def _dispatch_env(args: list[str], *, host_control: host_control.HostControl) -> CommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "env command is required")
     command, rest = args[0], args[1:]
@@ -331,11 +347,15 @@ def _dispatch_env(args: list[str]) -> CommandResult:
         _run_locked_shell_owner(_reset_locked_script(), [])
         return CommandResult("env.reset", {"shared_root": str(shared_root), "removed": existed and not shared_root.exists()})
     if command == "browser":
-        return _dispatch_env_browser(rest)
+        return _dispatch_env_browser(rest, host_control=host_control)
     raise cli_contract.CliError("UNKNOWN_COMMAND", f"Unknown env command: {command}")
 
 
-def _dispatch_env_browser(args: list[str]) -> CommandResult:
+def _dispatch_env_browser(
+    args: list[str],
+    *,
+    host_control: host_control.HostControl,
+) -> CommandResult:
     if not args:
         raise cli_contract.CliError("UNKNOWN_COMMAND", "env browser command is required")
     command, rest = args[0], args[1:]
@@ -352,11 +372,11 @@ def _dispatch_env_browser(args: list[str]) -> CommandResult:
         if actor_id is None:
             raise cli_contract.CliError("INVALID_ARGUMENT", f"env browser {command} requires --instance <actor-id>")
         _validate_actor_id(actor_id)
-        _require_known_actor(actor_id)
+        _require_known_actor(actor_id, host_control=host_control)
         completed = _run_locked_shell_owner(_browser_locked_script(actor_id), shell_args)
     else:
         if actor_id is not None:
-            _require_known_actor(actor_id)
+            _require_known_actor(actor_id, host_control=host_control)
         completed = _run_shell_owner(_browser_script(actor_id), shell_args)
     return CommandResult(f"env.browser.{command}", _owner_json_data(completed))
 
@@ -519,9 +539,9 @@ def _parse_web_args(args: list[str]) -> dict[str, str]:
     }
 
 
-def _require_known_actor(actor_id: str) -> None:
+def _require_known_actor(actor_id: str, *, host_control: host_control.HostControl) -> None:
     _validate_actor_id(actor_id)
-    for row in host_control.HostControl().list_instances():
+    for row in host_control.list_instances():
         if row.get("actor_id") == actor_id:
             return
     raise cli_contract.CliError("NOT_FOUND", f"actor instance not found: {actor_id}", {"actor_id": actor_id})

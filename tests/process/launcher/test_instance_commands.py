@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
@@ -14,12 +15,14 @@ from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
 from tests.support.python import PYTHON
 from tests.support.cli import write_executable
+from tests.support.fake_cdp import FakeCdpServer
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "buddyswitch-codex"
 HOST_CONTROL = (
     Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"])
-    / "launcher"
+    / "foundation"
+    / "host_control"
     / "shell"
     / "host_control.sh"
 )
@@ -404,24 +407,17 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
             self.assertIn("active browser cockpit", self._output_error_text(delete_result))
             self.assertTrue(target_root.exists())
     def test_instance_delete_blocks_live_target_browser_endpoint(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+        with closing(FakeCdpServer().start()) as server, tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, _ = self._write_instance_record(shared_root, "act-pm-live-browser-endpoint", browser_port=9333)
+            target_root, _ = self._write_instance_record(
+                shared_root,
+                "act-pm-live-browser-endpoint",
+                browser_port=server.port,
+            )
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
-            write_executable(
-                fake_bin / "curl",
-                """#!/usr/bin/env bash
-for arg in "$@"; do
-  if [[ "${arg}" == "http://127.0.0.1:9333/json/version" ]]; then
-    exit 0
-  fi
-done
-exit 1
-""",
-            )
             write_executable(
                 fake_bin / "lsof",
                 """#!/usr/bin/env bash
@@ -431,7 +427,7 @@ printf '12345\n'
             write_executable(
                 fake_bin / "ps",
                 f"""#!/usr/bin/env bash
-printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={target_root / "browser" / "profile"}'
+printf '%s\\n' 'Google Chrome --remote-debugging-port={server.port} --user-data-dir={target_root / "browser" / "profile"}'
 """,
             )
             env = os.environ.copy()
@@ -453,28 +449,26 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={targ
             self.assertIn("active browser cockpit", self._output_error_text(delete_result))
             self.assertTrue(target_root.exists())
     def test_instance_delete_ignores_foreign_browser_endpoint_on_stale_port(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
+        with closing(FakeCdpServer().start()) as server, tempfile.TemporaryDirectory() as temp_root, tempfile.TemporaryDirectory() as source_home:
             temp_root_path = Path(temp_root)
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
-            target_root, _ = self._write_instance_record(shared_root, "act-pm-stale-port", browser_port=9333)
-            market_root, _ = self._write_instance_record(shared_root, "act-market-live-port", role="market", browser_port=9333)
+            target_root, _ = self._write_instance_record(
+                shared_root,
+                "act-pm-stale-port",
+                browser_port=server.port,
+            )
+            market_root, _ = self._write_instance_record(
+                shared_root,
+                "act-market-live-port",
+                role="market",
+                browser_port=server.port,
+            )
             market_browser = market_root / "browser"
             market_browser.mkdir(parents=True, exist_ok=True)
             (market_browser / "chrome.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
             fake_bin = temp_root_path / "bin"
             fake_bin.mkdir(parents=True, exist_ok=True)
-            write_executable(
-                fake_bin / "curl",
-                """#!/usr/bin/env bash
-for arg in "$@"; do
-  if [[ "${arg}" == "http://127.0.0.1:9333/json/version" ]]; then
-    exit 0
-  fi
-done
-exit 1
-""",
-            )
             write_executable(
                 fake_bin / "lsof",
                 """#!/usr/bin/env bash
@@ -484,7 +478,7 @@ printf '12345\n'
             write_executable(
                 fake_bin / "ps",
                 f"""#!/usr/bin/env bash
-printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={market_root / "browser" / "profile"}'
+printf '%s\\n' 'Google Chrome --remote-debugging-port={server.port} --user-data-dir={market_root / "browser" / "profile"}'
 """,
             )
             env = os.environ.copy()
@@ -785,7 +779,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             self.assertFalse(calls_path.exists(), "help path must not call Codex binary")
             self.assertFalse(ready_file.exists(), "help path must not start browser")
             self.assertFalse(shared_root.exists(), "help path must not create shared instance state")
-    def test_locked_start_bootstrap_revalidates_role_before_instance_mutation(self) -> None:
+    def test_locked_start_bootstrap_requires_explicit_application_input_before_instance_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -804,7 +798,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 [
                     PYTHON,
                     "-m",
-                    "buddyswitch.launcher.runtime_lock",
+                    "buddyswitch.foundation.process_runtime.runtime_lock",
                     "--",
                     str(HOST_CONTROL),
                     "start-bootstrap-locked",
@@ -818,8 +812,8 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
 
             self.assertNotEqual(direct_start.returncode, 0)
             error = json.loads(direct_start.stdout)["error"]
-            self.assertIn("Unknown role 'unknown'", error["message"])
-            self.assertFalse((shared_root / "instances").exists(), "invalid locked role must not create instances")
+            self.assertIn("application start input is required", error["message"])
+            self.assertFalse((shared_root / "instances").exists(), "missing application input must not create instances")
 
     def test_locked_start_builder_failure_blocks_record_and_runtime_services(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -839,12 +833,15 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
             env["BUDDYSWITCH_START_CODEX_BIN"] = PYTHON
             env["BUDDYSWITCH_START_CODEX_VERSION"] = "test-runtime"
             env["BUDDYSWITCH_HOST_CONTROL_INTERNAL"] = "1"
+            env["BUDDYSWITCH_HOST_CONTROL_START_MODULE"] = (
+                "buddyswitch.application.entrypoints.host_control_start"
+            )
 
             completed = run_process(
                 [
                     PYTHON,
                     "-m",
-                    "buddyswitch.launcher.runtime_lock",
+                    "buddyswitch.foundation.process_runtime.runtime_lock",
                     "--shared-root",
                     str(shared_root),
                     "--",
@@ -882,7 +879,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 [
                     PYTHON,
                     "-m",
-                    "buddyswitch.launcher.runtime_lock",
+                    "buddyswitch.foundation.process_runtime.runtime_lock",
                     "--",
                     str(HOST_CONTROL),
                     "instance-set-inactive-locked",
@@ -938,7 +935,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 [
                     PYTHON,
                     "-m",
-                    "buddyswitch.launcher.runtime_lock",
+                    "buddyswitch.foundation.process_runtime.runtime_lock",
                     "--shared-root",
                     str(shared_root),
                     "--",
@@ -972,7 +969,7 @@ printf '%s\\n' 'Google Chrome --remote-debugging-port=9333 --user-data-dir={mark
                 [
                     PYTHON,
                     "-m",
-                    "buddyswitch.launcher.runtime_lock",
+                    "buddyswitch.foundation.process_runtime.runtime_lock",
                     "--shared-root",
                     str(shared_root),
                     "--",

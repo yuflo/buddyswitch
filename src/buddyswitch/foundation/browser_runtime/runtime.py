@@ -446,6 +446,8 @@ def _classify_snapshot(
         found_foreign = False
         for pid in port_listener_pids:
             command_line = _process_command_line(pid)
+            if _is_profile_owned_process(command_line, profile_dir):
+                return "owned"
             if _has_user_data_dir(command_line):
                 found_foreign = True
         if found_foreign:

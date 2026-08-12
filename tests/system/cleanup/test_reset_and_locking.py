@@ -35,7 +35,7 @@ class TestResetAndLocking(SystemLauncherHarness, unittest.TestCase):
             first = run_process(
                 [
                     PYTHON,
-                    str(ROOT / "src" / "buddyswitch" / "launcher" / "runtime_lock.py"),
+                    str(ROOT / "src" / "buddyswitch" / "foundation" / "process_runtime" / "runtime_lock.py"),
                     "--",
                     "bash",
                     "-c",
@@ -68,7 +68,7 @@ class TestResetAndLocking(SystemLauncherHarness, unittest.TestCase):
                 second = run_process(
                     [
                         PYTHON,
-                        str(ROOT / "src" / "buddyswitch" / "launcher" / "runtime_lock.py"),
+                        str(ROOT / "src" / "buddyswitch" / "foundation" / "process_runtime" / "runtime_lock.py"),
                         "--",
                         PYTHON,
                         "-c",
@@ -114,7 +114,7 @@ class TestResetAndLocking(SystemLauncherHarness, unittest.TestCase):
             wrapper = self._ledger.start_process(
                 [
                     PYTHON,
-                    str(ROOT / "src" / "buddyswitch" / "launcher" / "runtime_lock.py"),
+                    str(ROOT / "src" / "buddyswitch" / "foundation" / "process_runtime" / "runtime_lock.py"),
                     "--",
                     PYTHON,
                     "-c",

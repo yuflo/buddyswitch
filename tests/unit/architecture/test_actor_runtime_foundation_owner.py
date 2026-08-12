@@ -200,7 +200,7 @@ def test_current_consumers_import_direct_actor_runtime_modules() -> None:
             "buddyswitch.foundation.actor_runtime.codex_runtime",
             "buddyswitch.foundation.actor_runtime.session",
         },
-        PACKAGE_ROOT / "launcher" / "host_control.py": {
+        PACKAGE_ROOT / "foundation" / "host_control" / "runtime.py": {
             "buddyswitch.foundation.actor_runtime.capability",
             "buddyswitch.foundation.actor_runtime.codex_runtime",
         },
@@ -227,7 +227,7 @@ def test_current_consumers_import_direct_actor_runtime_modules() -> None:
     for path, required in expected_imports.items():
         assert required <= _imports(path), path
 
-    shell = (PACKAGE_ROOT / "launcher" / "shell" / "host_control.sh").read_text(
+    shell = (PACKAGE_ROOT / "foundation" / "host_control" / "shell" / "host_control.sh").read_text(
         encoding="utf-8"
     )
     assert "from buddyswitch.foundation.actor_runtime import capability as actor_capability" in shell

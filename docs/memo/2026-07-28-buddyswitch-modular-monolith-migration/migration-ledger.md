@@ -16,15 +16,15 @@
 | S5 C6A acceptance | `05-foundation-convergence-plan/app-server/S5-C6A-ACCEPTANCE.md`; patch `63f54a92…`; FINAL `2136e109979a470485151eb4b0c132e1` |
 | S5 C6B acceptance | `05-foundation-convergence-plan/actor-runtime/S5-C6B-ACCEPTANCE.md`; patch `6548db01…`; FINAL `7678be695ad14ba1b3cfdf2780a9670a` |
 | S5 C6C acceptance | `05-foundation-convergence-plan/actor-environment/S5-C6C-ACCEPTANCE.md`; patch `3d651bce…`; FINAL `c9211e36639740738eca7fe0cbda96ca` |
-| S5 C6D R1 review | `05-foundation-convergence-plan/host-control/S5-C6D-R1-RETURN-REVIEW.md`; candidate preserved; Foundation helper-shell reverse dependency remains |
+| S5 C6D acceptance | `05-foundation-convergence-plan/host-control/S5-C6D-ACCEPTANCE.md`; patch `646fcf40…`; FINAL `374bde20002b48cfaa40b6585298d66f` |
 | Active stage | S5 — Foundation Convergence |
-| State | C1–C6C ACCEPTED; C6D R2 READY |
-| Runtime migration authorized | C6D R2 only |
+| State | C1–C6D ACCEPTED; remaining Web/Cli host source refresh |
+| Runtime migration authorized | none; the next owner requires fresh READY review |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | execute bounded C6D R2 from the exact preserved R1 candidate, then hub acceptance |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State, Process, Runtime Broker, Daemon, App Server and Actor Runtime owners |
+| Next gate | commit/push C6D, then refresh current Web/Cli host owners and prepare the smallest coherent next READY unit |
+| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup contracts, Browser Runtime, Identity, State, Process, Runtime Broker, Daemon, App Server, Actor Runtime and Host Control owners |
 
 ## Stage ledger
 
@@ -35,7 +35,7 @@
 | S2 Demand | ACCEPTED | S1 | coordinating hub | closed |
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
-| S5 Foundation | C1–C6C ACCEPTED; C6D R2 READY | S4 | coordinating hub | execute bounded C6D R2 only; Web/CLI/C7 blocked |
+| S5 Foundation | C1–C6D ACCEPTED; Web/Cli host refresh | S4 | coordinating hub | refresh remaining host owners; C7 blocked |
 | S6 RoleHost | BLOCKED | S5 | unassigned | final component Skill exports |
 | S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
 
@@ -540,6 +540,7 @@ source refresh and READY preparation are unblocked.
 | 2026-08-12 | S5 C6D Host Control handoff | READY | `05-foundation-convergence-plan/host-control/S5-C6D-READY-REVIEW.md`; focused `2a202fd6bf464799a6cb02b212730597`; source-equivalent FINAL `c9211e36…`; topology `S5C6DP-20260812-01`; packet `BS-MM-S5-HOST-CONTROL-R1-20260812-01`; D-068 | execute C6D only from exact clean READY commit; Web/CLI/C7/S6 remain blocked |
 | 2026-08-12 | S5 C6D Host Control R1 review | REJECTED — BOUNDED CONTINUATION | `host-control/S5-C6D-R1-RETURN-REVIEW.md`; R1 patch `b2afa3e6…`; FINAL `66352702fd534bea944ca3da7797b435`; exact candidate preserved; Foundation helper shells still name concrete Application entrypoints | consume R1; preserve candidate; authorize only R2 dependency inversion and recursive shell proof |
 | 2026-08-12 | S5 C6D Host Control R2 handoff | READY | `host-control/S5-C6D-R2-READY-REVIEW.md`; packet `BS-MM-S5-HOST-CONTROL-R2-20260812-01`; exact R1 source/runtime identity frozen | execute R2 only; Web/CLI/C7/S6 remain blocked |
+| 2026-08-12 | S5 C6D Host Control acceptance | ACCEPTED | `host-control/S5-C6D-ACCEPTANCE.md`; patch `646fcf40…`; exact/affected `385408942b6c45759513c87dd14d5b2a`, `605d230ab8954f218cd953159e45e939`, `007e7bdef2234a929de0ee971063b6e3`; recursive shell proof `87d4b9b2f7154df8831592b2a60e7a5e`; FINAL `374bde20002b48cfaa40b6585298d66f` | commit/push C6D checkpoint, then refresh current Web/Cli host owners from committed source; never resume R1 or R2 |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -561,11 +562,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S5 / Foundation / C6D Host Control R2
-Master state: C1–C6C ACCEPTED; C6D R2 READY
-Goal Packet: BS-MM-S5-HOST-CONTROL-R2-20260812-01
+Stage: S5 / Foundation / remaining Web/Cli host refresh
+Master state: C1–C6D ACCEPTED
+Goal Packet: none
 Execution session: none
-Last hub checkpoint: C6D R1 reviewed and consumed; candidate patch `b2afa3e6...`, FINAL `66352702fd534bea944ca3da7797b435`
-Next action: execute bounded C6D R2 from exact preserved R1 candidate and return Result Packet
+Last hub checkpoint: C6D accepted; candidate patch `646fcf40...`, FINAL `374bde20002b48cfaa40b6585298d66f`
+Next action: commit/push C6D, then refresh current Web/Cli host owners and prepare the smallest coherent next READY unit
 No-polling state: inactive during hub preparation
 ```
