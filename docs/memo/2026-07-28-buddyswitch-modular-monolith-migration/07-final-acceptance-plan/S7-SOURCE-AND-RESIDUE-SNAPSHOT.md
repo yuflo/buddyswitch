@@ -1,5 +1,8 @@
 # S7 Source and Residue Snapshot
 
+> Historical R1 entry snapshot. Its open-row and stage-state statements record
+> the pre-acceptance instant only; see `S7-ACCEPTANCE.md` for current status.
+
 ## Frozen entry identity
 
 ```text

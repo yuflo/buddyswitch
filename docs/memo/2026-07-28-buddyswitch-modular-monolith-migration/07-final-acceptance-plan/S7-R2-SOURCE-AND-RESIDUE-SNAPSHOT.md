@@ -1,5 +1,8 @@
 # S7 R2 Source and Residue Snapshot
 
+> Historical R2 entry snapshot. Its pre-acceptance residue state is superseded
+> by `S7-ACCEPTANCE.md`.
+
 ## Frozen candidate checkpoint
 
 ```text

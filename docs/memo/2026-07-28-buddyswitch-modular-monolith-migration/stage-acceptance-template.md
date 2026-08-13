@@ -1,5 +1,8 @@
 # Stage Acceptance Record Template
 
+> Historical template: the S0–S7 migration program is complete. This file is
+> preserved as process evidence only.
+
 > This template is completed after implementation freezes. Replace every
 > `[REQUIRED: ...]` field with exact evidence. Task completion alone is not
 > acceptance.

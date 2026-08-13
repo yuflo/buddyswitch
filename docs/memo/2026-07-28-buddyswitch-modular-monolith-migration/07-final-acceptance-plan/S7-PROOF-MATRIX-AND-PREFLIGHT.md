@@ -1,5 +1,7 @@
 # S7 Proof Matrix and Preflight
 
+> Historical preflight evidence. S7 is accepted; see `S7-ACCEPTANCE.md`.
+
 ## Pre-READY evidence
 
 ### Architecture, replacement and distribution

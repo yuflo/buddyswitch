@@ -91,7 +91,7 @@ Statuses:
 | R-DOC-002 | CLOSED — after S7 R1 exposed root README Task guidance omitted by the original proof, current guidance now names `task_sys` and canonical Task object state, with an owner-local regression rejecting `task.*`/`taskbox` | S2–S4; S3 repair | `03-task-goal-boundary-cutover-plan/S3-DOCUMENTATION-REPAIR-ACCEPTANCE.md`; GREEN `90a672c1176049428c05db2faa3d8b4f`; affected `71208e299dc541a092fc4b54f4588170` |
 | R-DOC-003 | CLOSED — current Foundation, Actor, App, Daemon, Broker, Web, CLI and cleanup guidance matches the sole accepted S5 owner topology | S5 | accepted component lanes; C5/C6 acceptance records; `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md` |
 | R-DOC-004 | CLOSED — root/current architecture guidance names RoleHost and physically aggregated Role packages, not manifest/profile paths | S6 | `docs/arch/role-host-architecture.md`; S6 package/current-doc proof |
-| R-DOC-005 | CONFIRMED — migration instructions remain active only through S7; after final acceptance the hub must mark the pack historical and remove it from current execution authority | S7 | passing frozen S7 acceptance + coordinating historical-only promotion |
+| R-DOC-005 | CLOSED — S7 is accepted; the migration pack, roadmap, target design, readiness audit, Goal Packets, plans and coordination templates are historical evidence only and grant no current execution authority | S7 | `07-final-acceptance-plan/S7-ACCEPTANCE.md`; focused `23844b3ca1b04c9198f0eaf57a7e085f`; FINAL `3f80da41adde4e16a0a3fd12ffe4774e` |
 
 ## Closure rule
 

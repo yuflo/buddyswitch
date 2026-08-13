@@ -1,9 +1,10 @@
 # S7 Final System Acceptance Charter
 
-> Current state: READY — R2 VALIDATION ONLY
+> Current state: ACCEPTED — PROGRAM COMPLETE
 > Entry prerequisite: committed and pushed S6 acceptance checkpoint
 > Runtime changes: none; defects reopen their owning stage
-> Goal Packet: `07-final-acceptance-plan/S7-R2-GOAL-PACKET.md`
+> Acceptance: `07-final-acceptance-plan/S7-ACCEPTANCE.md`
+> Goal Packets: consumed; no current execution authority
 
 ## Acceptance sentence
 

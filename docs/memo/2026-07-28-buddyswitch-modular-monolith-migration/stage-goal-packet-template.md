@@ -1,5 +1,8 @@
 # Stage Goal Packet Template
 
+> Historical template: the S0–S7 migration program is complete. This file
+> cannot create or grant current execution authority.
+
 > This file is filled by the coordinating session only.
 > An execution session receives one complete packet and no future-stage packet.
 

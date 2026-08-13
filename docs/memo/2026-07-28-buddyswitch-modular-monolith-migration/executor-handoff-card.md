@@ -1,5 +1,8 @@
 # Stage Executor Handoff Card
 
+> Historical template: the migration program is complete. Do not use this
+> card to authorize new work.
+
 > Copy this card into the stage task. Replace every required field with an exact
 > value and links. Do not attach future stage plans as active instructions.
 

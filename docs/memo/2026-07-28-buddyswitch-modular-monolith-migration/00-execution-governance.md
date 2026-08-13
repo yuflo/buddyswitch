@@ -1,5 +1,8 @@
 # Modular Monolith Migration Execution Governance
 
+> Historical process record: S0–S7 are accepted and the program is complete.
+> This file grants no current execution authority.
+
 ## 1. Purpose
 
 This document prevents two failure modes:

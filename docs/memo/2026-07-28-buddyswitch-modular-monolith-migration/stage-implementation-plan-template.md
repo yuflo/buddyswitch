@@ -1,5 +1,8 @@
 # Stage Implementation Plan Template
 
+> Historical template: the S0–S7 migration program is complete. This file
+> grants no current execution authority.
+
 > This file defines the required shape of a stage plan. It is not executable by
 > itself. A stage is not READY until every `[REQUIRED: ...]` field has been
 > replaced by exact current-source content.

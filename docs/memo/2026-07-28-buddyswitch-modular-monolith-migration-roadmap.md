@@ -1,10 +1,14 @@
 # BuddySwitch Modular Monolith Migration Roadmap
 
-> Status: revised after comprehensive readiness audit
-> Runtime authorization: none until S0 acceptance and reviewed S1 plan
+> Status: completed; historical migration roadmap
+> Runtime authorization: none; every stage and Goal Packet is consumed
 > Target: `2026-07-28-buddyswitch-explicit-modular-monolith-design.md`
 > Audit: `2026-07-28-buddyswitch-modular-monolith-readiness-audit.md`
 > Execution pack: `2026-07-28-buddyswitch-modular-monolith-migration/README.md`
+> Program acceptance: `2026-07-28-buddyswitch-modular-monolith-migration/07-final-acceptance-plan/S7-ACCEPTANCE.md`
+
+All stage-state and authorization statements below preserve their planning-time
+context only. They do not grant current execution authority.
 
 ## 1. Outcome
 

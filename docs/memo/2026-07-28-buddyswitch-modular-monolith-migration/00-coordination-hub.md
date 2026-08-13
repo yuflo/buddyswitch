@@ -1,7 +1,10 @@
 # Modular Monolith Migration Coordination Hub
 
-> Status: ACCEPTED
-> Authority: current coordinating Codex session
+> Historical process record: S0–S7 are accepted and the program is complete.
+> This file grants no current coordination or execution authority.
+
+> Status: HISTORICAL — PROGRAM COMPLETE
+> Authority: none; historical coordination evidence only
 > Thread identity: `019f8ddd-bfd2-7b71-bfe7-c1aba4de7f4b`
 > Execution model: independent stage sessions, asynchronous return
 

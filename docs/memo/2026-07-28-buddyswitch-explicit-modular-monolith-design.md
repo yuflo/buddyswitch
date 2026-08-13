@@ -1,10 +1,11 @@
 # BuddySwitch Explicit Modular Monolith Design
 
-> Status: accepted target architecture; runtime not yet migrated
+> Status: accepted and implemented; historical target-design evidence
 > Date: 2026-07-28
 > Evidence baseline: `9e527141ef9c6ca705015fcecfa0b2a6fe1c3fc3`
 > Readiness audit: `2026-07-28-buddyswitch-modular-monolith-readiness-audit.md`
 > Current executable truth remains: `docs/arch/**`
+> Program acceptance: `2026-07-28-buddyswitch-modular-monolith-migration/07-final-acceptance-plan/S7-ACCEPTANCE.md`
 
 ## 1. Decision
 

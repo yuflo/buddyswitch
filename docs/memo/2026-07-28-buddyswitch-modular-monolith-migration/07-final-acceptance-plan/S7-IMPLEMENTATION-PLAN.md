@@ -1,5 +1,8 @@
 # S7 Final System Acceptance Implementation Plan
 
+> Historical plan: S7 is accepted and both Goal Packets are consumed. This
+> plan grants no current execution authority; see `S7-ACCEPTANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:executing-plans` to execute this validation plan task by task.
 > Follow root `AGENTS.md` and `$buddyswitch-testing`.
@@ -23,7 +26,7 @@ non-editable BuddySwitch distribution, existing `./buddyswitch-test`.
 ```text
 Stage:               S7 / final system acceptance
 Charter:             ../07-final-acceptance.md
-State:               READY — R2 VALIDATION ONLY
+State:               ACCEPTED — HISTORICAL
 Candidate checkpoint:7efd2a038e4604b0c3a20c8fb678980638113a2e
 Executable source:   unchanged from 6a51244192f5bad36a4438f030183acc4c5f9529
 Source dirty diff:   none; later packet commit may be memo-only

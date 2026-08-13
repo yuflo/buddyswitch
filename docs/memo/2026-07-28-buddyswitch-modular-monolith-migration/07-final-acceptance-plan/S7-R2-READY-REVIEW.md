@@ -1,8 +1,9 @@
 # S7 R2 READY Review
 
-> Decision: `READY — R2 VALIDATION ONLY`
+> Decision: historical R2 admission; R2 is now `ACCEPTED — CONSUMED`
 > Packet: `BS-MM-S7-FINAL-R2-20260813-01`
 > Candidate checkpoint: `7efd2a038e4604b0c3a20c8fb678980638113a2e`
+> Current authority: none; see `S7-ACCEPTANCE.md`
 
 ## Decision
 

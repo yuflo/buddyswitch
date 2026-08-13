@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S6 ACCEPTED; S7 READY — R2 VALIDATION ONLY
-> Runtime authorization: validation only through `BS-MM-S7-FINAL-R2-20260813-01`
+> Current state: S0–S7 ACCEPTED — PROGRAM COMPLETE
+> Runtime authorization: none; this pack is historical evidence only
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -12,8 +12,8 @@ Read:
 4. `../2026-07-28-buddyswitch-modular-monolith-migration-roadmap.md`;
 5. `00-coordination-hub.md`;
 6. `00-execution-governance.md`;
-7. only the current stage Goal Packet, charter and named return review. Historical
-   implementation plans provide context, not execution authority.
+7. historical stage packets, plans, reviews and acceptance records as evidence
+   only. No file in this pack grants current execution authority.
 
 ## Stage charters
 
@@ -26,18 +26,18 @@ Read:
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
 | S5 | `05-foundation-convergence.md` | ACCEPTED |
 | S6 | `06-role-host-cutover.md` | ACCEPTED |
-| S7 | `07-final-acceptance.md` | READY — R2 VALIDATION ONLY |
+| S7 | `07-final-acceptance.md` | ACCEPTED — PROGRAM COMPLETE |
 
 ## Control surfaces
 
-- `migration-ledger.md`: live state and next gate;
-- `00-coordination-hub.md`: sole program-control and asynchronous session protocol;
+- `migration-ledger.md`: final historical program state;
+- `00-coordination-hub.md`: historical coordination protocol;
 - `decision-log.md`: accepted target/execution decisions;
 - `residue-register.md`: old live surfaces and removal owner;
-- `executor-handoff-card.md`: one executor payload;
-- `stage-implementation-plan-template.md`: required READY plan;
-- `stage-goal-packet-template.md`: exact independent-session handoff;
-- `stage-acceptance-template.md`: required acceptance record.
+- `executor-handoff-card.md`: historical executor payload;
+- `stage-implementation-plan-template.md`: historical READY-plan template;
+- `stage-goal-packet-template.md`: historical independent-session template;
+- `stage-acceptance-template.md`: historical acceptance-record template.
 
 S1 has an audit-reviewed structured blueprint at
 `01-single-package-runtime-cutover-plan/README.md`. R4 and the first
@@ -339,7 +339,15 @@ FINAL `56b2be7f071942b89ffecad5e2891bc9`. S6 is accepted at
 source refresh and READY preparation are unblocked, but no S7 execution is
 authorized.
 
-Do not hand the whole program to one executor. The handoff unit is one current
-stage or owner-bounded lane with an outcome, semantic authority boundary,
-protected contracts and proof obligations. Historical implementation plans are
-context, not commands.
+S7 R1 then rejected an otherwise green executable candidate because root
+guidance still taught retired Task names and state. The owning S3 boundary was
+reopened, repaired with exact RED/GREEN proof and pushed at `7efd2a0…`. S7 R2
+reproved architecture/package/current guidance and ran one frozen repository
+FINAL `3f80da41adde4e16a0a3fd12ffe4774e`: 1,726 tests and 1,687 subtests passed,
+including the investor Role bootstrap and Web Actor→Goal→Demand journey, with
+clean runtime and resource state. S7 and the full S0–S7 program are accepted in
+`07-final-acceptance-plan/S7-ACCEPTANCE.md`. Every packet is consumed,
+R-DOC-005 is closed and this pack is historical evidence only.
+
+The program has no current executor handoff. The coordination and handoff rules
+above are preserved only as historical process evidence, not commands.

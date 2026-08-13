@@ -1,5 +1,8 @@
 # S7 R2 Final System Acceptance Goal Packet
 
+> Historical packet: `ACCEPTED — CONSUMED`
+> This file grants no current execution authority. See `S7-ACCEPTANCE.md`.
+
 ## 1. Copy-paste session request
 
 ```text
