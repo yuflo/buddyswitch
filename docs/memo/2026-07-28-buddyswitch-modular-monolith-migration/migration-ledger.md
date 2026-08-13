@@ -21,13 +21,13 @@
 | S5 C6F acceptance | `05-foundation-convergence-plan/cli-runtime/S5-C6F-ACCEPTANCE.md`; patch `4676cf6d…`; FINAL `f9dea78e158e473db2a89081e60cb595` |
 | S5 C7/final acceptance | `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md`; patch `2126cb32…`; FINAL `364f7e924501414a9ca48b3404645307` |
 | S6 acceptance | `06-role-host-cutover-plan/S6-ACCEPTANCE.md`; patch `58ce6aa5…`; FINAL `56b2be7f071942b89ffecad5e2891bc9` |
-| Active stage | S7 — final system acceptance preparation |
-| State | S0–S6 ACCEPTED; S7 PREPARATION UNBLOCKED |
-| Runtime migration authorized | none; S7 requires source refresh and READY review |
+| Active stage | S7 — final system acceptance |
+| State | S0–S6 ACCEPTED; S7 READY |
+| Runtime migration authorized | validation only; no repository/runtime mutation |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | commit/push S6 checkpoint, then S7 source refresh and evidence-backed READY review |
+| Next gate | execute `BS-MM-S7-FINAL-R1-20260813-01`, then hub acceptance and historical-only promotion |
 | Current executable truth | one installed package; physically aggregated explicit product modules; direct product-neutral Foundation owners; physically aggregated reviewed Role packages selected by one narrow RoleHost; no central Role/Skill/profile catalog |
 
 ## Stage ledger
@@ -41,7 +41,7 @@
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
 | S5 Foundation | ACCEPTED | S4 | coordinating hub | closed; every S5 packet consumed |
 | S6 RoleHost | ACCEPTED | S5 | coordinating hub | closed; R1 and R2 consumed |
-| S7 Final acceptance | PREPARATION UNBLOCKED | S6 | coordinating hub + migration lead | refresh frozen source, residue, proof classes and final Actor/operations plan |
+| S7 Final acceptance | READY | S6 | coordinating hub + migration lead | execute one zero-write focused/frozen-FINAL proof packet |
 
 ## S0 completed
 
@@ -557,6 +557,7 @@ source refresh and READY preparation are unblocked.
 | 2026-08-13 | S6 RoleHost handoff | READY — R1 ONLY | `06-role-host-cutover-plan/S6-READY-REVIEW.md`; preservation `e289d49da34a4e6c90adb9622a9bdcc3`, `dde21cf252224a7e86a2d36a0afe6323`; source-equivalent FINAL `364f7e924501414a9ca48b3404645307`; topology/runner `S6P-22d21453397022fd`; packet `BS-MM-S6-ROLE-HOST-R1-20260813-01`; D-074–D-076 | execute one atomic S6 candidate from the clean pushed preparation checkpoint; S7 remains blocked |
 | 2026-08-13 | S6 R1 return review / R2 handoff | REPLANNING — BOUNDED COMPLETION | R1 candidate preserved; hub review found global private-Skill lookup, central exact-six test matrices and unearned Foundation profile/Artifact vocabulary; packet `BS-MM-S6-ROLE-HOST-R2-20260813-01`; D-077 | consume R1; repair only the three owner boundaries in place; reprove and run one replacement FINAL; S7 remains blocked |
 | 2026-08-13 | S6 RoleHost acceptance | ACCEPTED | `06-role-host-cutover-plan/S6-ACCEPTANCE.md`; patch `58ce6aa54b04dabb933b02cdafe389867503544d2c6b3bc57392377829f29490`; private/narrow exact `285538ef4b7e4c8091d306ab2ea59ab5`; owner/Role-local `08f71401de114c05ab2c6cb9a479d5c9`; affected `af4886c1a3654524804bf5f1315561ca`; real Actor `0245baaa9b20402e845d21a77a6dbda6`; package `fd32828193b74698b17bf9d79c884065`; FINAL `56b2be7f071942b89ffecad5e2891bc9` | consume R1/R2; close R-ROLE-001–007 and R-DOC-004; commit/push S6 checkpoint; then refresh and READY-review S7 |
+| 2026-08-13 | S7 final acceptance handoff | READY — VALIDATION ONLY | `07-final-acceptance-plan/S7-READY-REVIEW.md`; architecture/package `5e822ce3503c46b7818bb447fc239a27`; real Actor/product `9a85e5acda2846c6bd0a1b2e2b4ab9e5`; source-equivalent baseline `56b2be7f071942b89ffecad5e2891bc9`; packet `BS-MM-S7-FINAL-R1-20260813-01`; D-078 | execute one zero-write validation packet; material defects reopen their owner; hub alone accepts and closes R-DOC-005 |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -578,11 +579,12 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S7 / final system acceptance / source refresh
-Master state: S0–S6 ACCEPTED; S7 PREPARATION UNBLOCKED
-Goal Packet: none; S7 packet is not READY
-Execution session: none
-Last accepted product candidate: S6 patch 58ce6aa54b04dabb933b02cdafe389867503544d2c6b3bc57392377829f29490
-Next action: commit/push the S6 acceptance checkpoint, then refresh S7 source, residue and proof obligations before any handoff
-No-polling state: inactive
+Stage: S7 / final system acceptance
+Master state: S0–S6 ACCEPTED; S7 READY
+Goal Packet: BS-MM-S7-FINAL-R1-20260813-01
+Execution session: unknown until user supplies it
+Last hub checkpoint: S7 READY on pushed S6 executable checkpoint 6a51244192f5bad36a4438f030183acc4c5f9529; architecture/package and representative real-Actor/product preflight green
+Next action: user starts one independent S7 validation task from the Goal Packet
+Expected return: exact focused and sole FINAL evidence, cleanup, R-DOC-005 proposal and ACCEPTED/REJECTED proposal
+No-polling state: PAUSED_FOR_USER_RESULT
 ```

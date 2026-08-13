@@ -1,8 +1,9 @@
 # S7 Final System Acceptance Charter
 
-> Current state: PREPARATION UNBLOCKED
+> Current state: READY
 > Entry prerequisite: committed and pushed S6 acceptance checkpoint
 > Runtime changes: none; defects reopen their owning stage
+> Goal Packet: `07-final-acceptance-plan/S7-GOAL-PACKET.md`
 
 ## Acceptance sentence
 

@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S6 ACCEPTED; S7 PREPARATION UNBLOCKED
-> Runtime authorization: none; S7 requires a source-bound READY decision
+> Current state: S0–S6 ACCEPTED; S7 READY
+> Runtime authorization: validation only; no repository/runtime mutation
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -26,7 +26,7 @@ Read:
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
 | S5 | `05-foundation-convergence.md` | ACCEPTED |
 | S6 | `06-role-host-cutover.md` | ACCEPTED |
-| S7 | `07-final-acceptance.md` | PREPARATION UNBLOCKED |
+| S7 | `07-final-acceptance.md` | READY |
 
 ## Control surfaces
 

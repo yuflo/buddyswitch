@@ -91,7 +91,7 @@ Statuses:
 | R-DOC-002 | CLOSED — every S2–S4 component path is current and its retired live guidance is absent | S2–S4 | accepted component lanes, including `S4-CONTEXT-ACCEPTANCE.md` |
 | R-DOC-003 | CLOSED — current Foundation, Actor, App, Daemon, Broker, Web, CLI and cleanup guidance matches the sole accepted S5 owner topology | S5 | accepted component lanes; C5/C6 acceptance records; `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md` |
 | R-DOC-004 | CLOSED — root/current architecture guidance names RoleHost and physically aggregated Role packages, not manifest/profile paths | S6 | `docs/arch/role-host-architecture.md`; S6 package/current-doc proof |
-| R-DOC-005 | migration instructions presented as current policy after completion | S7 | historical-only state |
+| R-DOC-005 | CONFIRMED — migration instructions remain active only through S7; after final acceptance the hub must mark the pack historical and remove it from current execution authority | S7 | passing frozen S7 acceptance + coordinating historical-only promotion |
 
 ## Closure rule
 
