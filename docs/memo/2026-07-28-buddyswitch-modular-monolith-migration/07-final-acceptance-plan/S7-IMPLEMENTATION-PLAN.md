@@ -23,9 +23,10 @@ non-editable BuddySwitch distribution, existing `./buddyswitch-test`.
 ```text
 Stage:               S7 / final system acceptance
 Charter:             ../07-final-acceptance.md
-State:               READY
-Executable source:   6a51244192f5bad36a4438f030183acc4c5f9529
-Source dirty diff:   none
+State:               READY — R2 VALIDATION ONLY
+Candidate checkpoint:7efd2a038e4604b0c3a20c8fb678980638113a2e
+Executable source:   unchanged from 6a51244192f5bad36a4438f030183acc4c5f9529
+Source dirty diff:   none; later packet commit may be memo-only
 Owning capability:   repository-wide acceptance only; no implementation owner
 Stage executor:      one independent session
 Migration lead:      coordinating hub

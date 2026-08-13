@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S6 ACCEPTED; S7 PREPARATION ONLY after rejected R1
-> Runtime authorization: none until the S3 guidance repair is checkpointed and S7 R2 is READY
+> Current state: S0–S6 ACCEPTED; S7 READY — R2 VALIDATION ONLY
+> Runtime authorization: validation only through `BS-MM-S7-FINAL-R2-20260813-01`
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -26,7 +26,7 @@ Read:
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
 | S5 | `05-foundation-convergence.md` | ACCEPTED |
 | S6 | `06-role-host-cutover.md` | ACCEPTED |
-| S7 | `07-final-acceptance.md` | PREPARATION ONLY |
+| S7 | `07-final-acceptance.md` | READY — R2 VALIDATION ONLY |
 
 ## Control surfaces
 
@@ -99,8 +99,8 @@ made no write and stopped correctly. The hub accepted the owning S3 repair in
 `03-task-goal-boundary-cutover-plan/S3-DOCUMENTATION-REPAIR-ACCEPTANCE.md`:
 root guidance now names `task_sys` and canonical Task object state, and the
 existing Task architecture proof enforces both positive and absence claims.
-R1 is consumed; S7 remains preparation-only until this repair is committed
-and a source-bound R2 packet is reviewed.
+R1 is consumed. Repair checkpoint `7efd2a0…` is committed and pushed; only the
+source-bound R2 packet may now execute.
 
 The S4 source refresh then separated the six lanes by real host and dependency
 boundaries. Search is stateless and needs only the existing Tool contribution.

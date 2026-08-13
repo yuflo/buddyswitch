@@ -1,9 +1,9 @@
 # S7 Final System Acceptance Charter
 
-> Current state: PREPARATION ONLY — R1 rejected; S3 guidance repair accepted
+> Current state: READY — R2 VALIDATION ONLY
 > Entry prerequisite: committed and pushed S6 acceptance checkpoint
 > Runtime changes: none; defects reopen their owning stage
-> Goal Packet: none; R1 is consumed and R2 requires the pushed repair checkpoint
+> Goal Packet: `07-final-acceptance-plan/S7-R2-GOAL-PACKET.md`
 
 ## Acceptance sentence
 
