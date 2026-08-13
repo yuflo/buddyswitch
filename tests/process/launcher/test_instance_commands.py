@@ -10,6 +10,7 @@ from contextlib import closing
 from pathlib import Path
 
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
+from buddyswitch.application.build import activate_application
 from tests.process.launcher._harness import ProcessLauncherHarness
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
@@ -26,6 +27,10 @@ HOST_CONTROL = (
     / "shell"
     / "host_control.sh"
 )
+
+
+def _expected_role_ids() -> frozenset[str]:
+    return activate_application().role_host.valid_role_ids
 
 
 class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
@@ -59,7 +64,7 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
             self.assertIn("Unknown role 'unknown'", self._output_error_text(completed))
             self.assertFalse(capture_path.exists(), "codex should not launch when role validation fails")
             self.assertFalse(shared_root.exists(), "invalid role must fail before shared root mutation")
-    def test_role_list_prints_manifest_buddies_without_runtime_mutation(self) -> None:
+    def test_role_list_prints_rolehost_roles_without_runtime_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)
             shared_root = source_home_path / ".codex-buddyswitch"
@@ -81,9 +86,7 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
             self.assertIsInstance(payload, dict)
             assert isinstance(payload, dict)
             role_ids = {row["id"] for row in payload["roles"]}
-            self.assertIn("pm", role_ids)
-            self.assertIn("dev", role_ids)
-            self.assertIn("market", role_ids)
+            self.assertEqual(role_ids, _expected_role_ids())
             self.assertFalse(shared_root.exists(), "instance roles must not create runtime state")
     def test_instance_buddies_json_is_structured_and_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
@@ -105,9 +108,7 @@ class TestInstanceCommands(ProcessLauncherHarness, unittest.TestCase):
             self.assertEqual(completed.returncode, 0, msg=self._output_error_text(completed))
             payload = self._cli_success_data(completed)
             role_ids = {row["id"] for row in payload["roles"]}
-            self.assertIn("pm", role_ids)
-            self.assertIn("dev", role_ids)
-            self.assertIn("market", role_ids)
+            self.assertEqual(role_ids, _expected_role_ids())
             for row in payload["roles"]:
                 self.assertIsInstance(row["id"], str)
                 self.assertIsInstance(row["label"], str)

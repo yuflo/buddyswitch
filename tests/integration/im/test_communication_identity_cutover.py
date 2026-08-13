@@ -16,6 +16,7 @@ from buddyswitch.foundation.identity.model import ActorIdentityProfile, Identity
 import buddyswitch.foundation.identity.profiles as identity_profiles  # noqa: E402
 from buddyswitch.modules.communication.private.state import messages as message_repo  # noqa: E402
 from buddyswitch.foundation.tool_runtime import context as runtime_context  # noqa: E402
+from buddyswitch.foundation.role_host import RoleRuntime  # noqa: E402
 from buddyswitch.foundation.daemon import client as daemon_client  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_actor_delivery  # noqa: E402
 from buddyswitch.modules.communication.private.adapters.actor import im_client as im_client_module  # noqa: E402
@@ -28,7 +29,6 @@ class _IdentityContext(dict[str, Any]):
         super().__init__(
             current_identity={"id": identity_id, "type": "actor"},
             active_role=role_id,
-            manifest={"roles": [{"id": role_id}]},
         )
         self.actor_directory = capabilities
 
@@ -100,7 +100,14 @@ class CommunicationIdentityCutoverTests(RuntimeWorkspaceTestCase):
                     "role": "dev",
                     "workspace_dir": str(self.runtime_root / "workspace"),
                 },
-                manifest={},
+                role=RoleRuntime(
+                    id="dev",
+                    artifact_templates=("brief", "note"),
+                    project_path="projects/app",
+                    source_access="write",
+                    browser_cockpit="available",
+                    search_api="available",
+                ),
             )
             context.signal_delivery.deliver_signal(
                 signal_type="track.comment.added",

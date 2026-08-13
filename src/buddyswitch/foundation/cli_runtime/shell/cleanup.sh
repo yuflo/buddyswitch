@@ -86,7 +86,6 @@ buddyswitch_cleanup_run_env_cleanup() {
   "${BUDDYSWITCH_PYTHON}" -m "${BUDDYSWITCH_CLI_RUNTIME_CLEANUP_MODULE:?}" \
     --state-root "${repo_root}" \
     --shared-root "${BUDDYSWITCH_SHARED_ROOT}" \
-    --manifest "${BUDDYSWITCH_CLI_RUNTIME_MANIFEST_PATH:?}" \
     "${target_args[@]}" \
     "${execute_args[@]}"
 }

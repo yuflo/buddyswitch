@@ -7,6 +7,9 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from buddyswitch.foundation.tool_runtime.context import ToolContext
 from buddyswitch.foundation.tool_runtime.definition import ActionDefinition, TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED, TASK_REQUIREMENT_FREE, ToolDefinition, validate_definition
+from buddyswitch.modules.artifact.public.contracts import (
+    VALID_ARTIFACT_TEMPLATES,
+)
 
 _SOURCE_REF_ITEMS_SCHEMA = {
     'type': 'object',
@@ -128,7 +131,7 @@ def _build_definition() -> ToolDefinition:
                         'template': {
                             'type': 'string',
                             'description': 'Optional artifact template filter.',
-                            'enum': ['brief', 'proposal', 'design', 'decision', 'proof', 'note'],
+                            'enum': list(VALID_ARTIFACT_TEMPLATES),
                         },
                         'q': {
                             'type': 'string',
@@ -277,7 +280,7 @@ def _build_definition() -> ToolDefinition:
                         'template': {
                             'type': 'string',
                             'description': 'Artifact template.',
-                            'enum': ['brief', 'proposal', 'design', 'decision', 'proof', 'note'],
+                            'enum': list(VALID_ARTIFACT_TEMPLATES),
                         },
                         'body': {
                             'type': 'string',
@@ -376,7 +379,7 @@ def _build_definition() -> ToolDefinition:
                         'template': {
                             'type': 'string',
                             'description': 'Optional replacement template.',
-                            'enum': ['brief', 'proposal', 'design', 'decision', 'proof', 'note'],
+                            'enum': list(VALID_ARTIFACT_TEMPLATES),
                         },
                         'body': {
                             'type': 'string',

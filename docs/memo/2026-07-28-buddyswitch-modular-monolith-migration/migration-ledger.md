@@ -20,14 +20,15 @@
 | S5 C6E acceptance | `05-foundation-convergence-plan/web-runtime/S5-C6E-ACCEPTANCE.md`; patch `05fc4a92…`; FINAL `69dd48e9e39e48c5bf232e4a8dd4552d` |
 | S5 C6F acceptance | `05-foundation-convergence-plan/cli-runtime/S5-C6F-ACCEPTANCE.md`; patch `4676cf6d…`; FINAL `f9dea78e158e473db2a89081e60cb595` |
 | S5 C7/final acceptance | `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md`; patch `2126cb32…`; FINAL `364f7e924501414a9ca48b3404645307` |
-| Active stage | S6 — RoleHost atomic cutover |
-| State | S0–S5 ACCEPTED; S6 READY — R1 ONLY |
-| Runtime migration authorized | `BS-MM-S6-ROLE-HOST-R1-20260813-01` only |
+| S6 acceptance | `06-role-host-cutover-plan/S6-ACCEPTANCE.md`; patch `58ce6aa5…`; FINAL `56b2be7f071942b89ffecad5e2891bc9` |
+| Active stage | S7 — final system acceptance preparation |
+| State | S0–S6 ACCEPTED; S7 PREPARATION UNBLOCKED |
+| Runtime migration authorized | none; S7 requires source refresh and READY review |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | independent S6 R1 execution and coordinating acceptance review |
-| Current executable truth | S1 one-package runtime plus physically aggregated, explicitly composed Demand, Task, Search, Track, Artifact, Evidence, Communication and Context modules; direct Foundation ToolHost, Web/cleanup, Browser Runtime, Identity, State, Process, Runtime Broker, Daemon, App Server, Actor Runtime, Host Control, Web Runtime and CLI Runtime owners |
+| Next gate | commit/push S6 checkpoint, then S7 source refresh and evidence-backed READY review |
+| Current executable truth | one installed package; physically aggregated explicit product modules; direct product-neutral Foundation owners; physically aggregated reviewed Role packages selected by one narrow RoleHost; no central Role/Skill/profile catalog |
 
 ## Stage ledger
 
@@ -39,8 +40,8 @@
 | S3 Task/Goal | ACCEPTED | S2 | coordinating hub | closed |
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
 | S5 Foundation | ACCEPTED | S4 | coordinating hub | closed; every S5 packet consumed |
-| S6 RoleHost | READY — R1 ONLY | S5 | coordinating hub + independent executor | atomic Role package/RoleHost replacement and return review |
-| S7 Final acceptance | BLOCKED | S6 | migration lead | frozen final candidate |
+| S6 RoleHost | ACCEPTED | S5 | coordinating hub | closed; R1 and R2 consumed |
+| S7 Final acceptance | PREPARATION UNBLOCKED | S6 | coordinating hub + migration lead | refresh frozen source, residue, proof classes and final Actor/operations plan |
 
 ## S0 completed
 
@@ -554,6 +555,8 @@ source refresh and READY preparation are unblocked.
 | 2026-08-12 | S5 C7 final Foundation handoff | READY | `final-acceptance/S5-C7-READY-REVIEW.md`; direct preservation `84becba089ea4b60b715cc257098fee5`; architecture/package `d0afd8e28dbd47beb80cdc8b6a58d7fa`; source-equivalent FINAL `f9dea78e158e473db2a89081e60cb595`; topology `S5C7P-20260812-01`; packet `BS-MM-S5-FOUNDATION-FINAL-R1-20260812-01`; D-072 | execute C7 only from the clean preparation checkpoint; S6/S7 remain blocked |
 | 2026-08-12 | S5 C7 / final Foundation acceptance | ACCEPTED | `final-acceptance/S5-C7-ACCEPTANCE.md`; patch `2126cb32…`; architecture `c07abe8fa4924f2e8784ebbeb5b34971`; cleanup/diagnostics `ee0e9c699714485da942792c48fd322e`; Broker `adccf283199c4c36ae9446d8afb61671`; consumers `4d3f802e3db747d191d7c46635c35476`; package/Application `52163438a3074689b18d4e6187f766f8`; destructive reset `9102f16350e24da6bdf014b98eee75fd`; FINAL `364f7e924501414a9ca48b3404645307` | C7/S5 accepted; consume C7 packet; commit/push S5 checkpoint; then begin S6 source refresh and READY preparation |
 | 2026-08-13 | S6 RoleHost handoff | READY — R1 ONLY | `06-role-host-cutover-plan/S6-READY-REVIEW.md`; preservation `e289d49da34a4e6c90adb9622a9bdcc3`, `dde21cf252224a7e86a2d36a0afe6323`; source-equivalent FINAL `364f7e924501414a9ca48b3404645307`; topology/runner `S6P-22d21453397022fd`; packet `BS-MM-S6-ROLE-HOST-R1-20260813-01`; D-074–D-076 | execute one atomic S6 candidate from the clean pushed preparation checkpoint; S7 remains blocked |
+| 2026-08-13 | S6 R1 return review / R2 handoff | REPLANNING — BOUNDED COMPLETION | R1 candidate preserved; hub review found global private-Skill lookup, central exact-six test matrices and unearned Foundation profile/Artifact vocabulary; packet `BS-MM-S6-ROLE-HOST-R2-20260813-01`; D-077 | consume R1; repair only the three owner boundaries in place; reprove and run one replacement FINAL; S7 remains blocked |
+| 2026-08-13 | S6 RoleHost acceptance | ACCEPTED | `06-role-host-cutover-plan/S6-ACCEPTANCE.md`; patch `58ce6aa54b04dabb933b02cdafe389867503544d2c6b3bc57392377829f29490`; private/narrow exact `285538ef4b7e4c8091d306ab2ea59ab5`; owner/Role-local `08f71401de114c05ab2c6cb9a479d5c9`; affected `af4886c1a3654524804bf5f1315561ca`; real Actor `0245baaa9b20402e845d21a77a6dbda6`; package `fd32828193b74698b17bf9d79c884065`; FINAL `56b2be7f071942b89ffecad5e2891bc9` | consume R1/R2; close R-ROLE-001–007 and R-DOC-004; commit/push S6 checkpoint; then refresh and READY-review S7 |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -575,11 +578,11 @@ Stop/replan condition:
 ## Current coordination state
 
 ```text
-Stage: S6 / RoleHost / atomic cutover
-Master state: S0–S5 ACCEPTED; S6 READY — R1 ONLY
-Goal Packet: BS-MM-S6-ROLE-HOST-R1-20260813-01
-Execution session: user-owned independent task after handoff
-Last product checkpoint: S5 accepted and pushed at b5f275dff2f2c52e09744c8fcf2c9002a67e9a84
-Next action: execute S6 R1, return the exact Result Packet, then coordinating acceptance review
+Stage: S7 / final system acceptance / source refresh
+Master state: S0–S6 ACCEPTED; S7 PREPARATION UNBLOCKED
+Goal Packet: none; S7 packet is not READY
+Execution session: none
+Last accepted product candidate: S6 patch 58ce6aa54b04dabb933b02cdafe389867503544d2c6b3bc57392377829f29490
+Next action: commit/push the S6 acceptance checkpoint, then refresh S7 source, residue and proof obligations before any handoff
 No-polling state: inactive
 ```

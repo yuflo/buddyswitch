@@ -75,13 +75,13 @@ Statuses:
 
 | ID | Current live surface | Owner | Closure proof |
 |---|---|---|---|
-| R-ROLE-001 | REMOVING — central Role/Skill catalog | S6 | RoleHost + assembled Skill exports only |
-| R-ROLE-002 | REMOVING — central Role profile/contract truth | S6 | Role package-owned descriptor/assets |
-| R-ROLE-003 | REMOVING — Role bootstrap `AGENTS` outside Role package | S6 | Role package projection |
-| R-ROLE-004 | Demand Skill path rows CLOSED through typed module exports; other shared product Skills and central Role selection remain | S2–S6 | S2 acceptance for Demand; remaining module exports and final RoleHost selection |
-| R-ROLE-005 | REMOVING — Role authority/list/start/cleanup and Broker/CLI/ToolContext bound to central manifest/path | S6 | RoleHost projections; no manifest/path argument |
-| R-ROLE-006 | REMOVING — Actor selection still resolved from central Role/Skill paths | S1/S6 | exact RoleHost workspace allowlist |
-| R-ROLE-007 | test runner lacks Role-local tier discovery and distribution proof | S6 | one runner discovers approved Role tiers once; wheel excludes tests |
+| R-ROLE-001 | CLOSED — central Role/Skill catalog is absent; Application combines reviewed Role packages with explicit component Skill exports | S6 | `06-role-host-cutover-plan/S6-ACCEPTANCE.md`; RoleHost/architecture/package/FINAL proof |
+| R-ROLE-002 | CLOSED — each Role package owns its descriptor and result-schema asset; central profiles/contracts are absent | S6 | `S6-ACCEPTANCE.md`; Role-local unit/contract proof and retired-path absence |
+| R-ROLE-003 | CLOSED — AGENTS exists only in each reviewed Role package and only the selected file reaches an Actor | S6 | real investor Actor `0245baaa9b20402e845d21a77a6dbda6`; FINAL |
+| R-ROLE-004 | CLOSED — every shared product Skill enters through an explicit component `SkillExport`; Role-private Skills remain package-local | S2–S6 | S2–S4 module acceptance; S6 private-Skill GREEN `285538ef4b7e4c8091d306ab2ea59ab5` |
+| R-ROLE-005 | CLOSED — authority/list/start/cleanup and Broker/CLI/ToolContext consume narrow Application/RoleHost projections with no manifest path | S6 | affected `af4886c1a3654524804bf5f1315561ca`; FINAL |
+| R-ROLE-006 | CLOSED — Actor bootstrap resolves only the selected package AGENTS and selected local/public Skills | S1/S6 | RoleHost exact proof and real investor Actor proof |
+| R-ROLE-007 | CLOSED — the single runner dynamically discovers Role-local approved tiers once and the wheel excludes all Role tests | S6 | runner/package `fd32828193b74698b17bf9d79c884065`; FINAL |
 
 ## Documentation/migration residue
 
@@ -90,7 +90,7 @@ Statuses:
 | R-DOC-001 | CLOSED — current architecture paths match accepted S1 installed-package truth | S1 | `01-single-package-runtime-cutover-plan/S1-ACCEPTANCE.md` |
 | R-DOC-002 | CLOSED — every S2–S4 component path is current and its retired live guidance is absent | S2–S4 | accepted component lanes, including `S4-CONTEXT-ACCEPTANCE.md` |
 | R-DOC-003 | CLOSED — current Foundation, Actor, App, Daemon, Broker, Web, CLI and cleanup guidance matches the sole accepted S5 owner topology | S5 | accepted component lanes; C5/C6 acceptance records; `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md` |
-| R-DOC-004 | root stable Role/manifest paths | S6 | final RoleHost paths |
+| R-DOC-004 | CLOSED — root/current architecture guidance names RoleHost and physically aggregated Role packages, not manifest/profile paths | S6 | `docs/arch/role-host-architecture.md`; S6 package/current-doc proof |
 | R-DOC-005 | migration instructions presented as current policy after completion | S7 | historical-only state |
 
 ## Closure rule

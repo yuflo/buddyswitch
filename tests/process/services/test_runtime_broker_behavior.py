@@ -30,7 +30,6 @@ import buddyswitch.foundation.runtime_broker.client as runtime_client  # noqa: E
 import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 
@@ -89,7 +88,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 result = self.lifecycle.start_broker_process(
                     paths,
                     instance_json_path=root / "instance.json",
-                    manifest_path=MANIFEST,
                 )
 
             self.assertEqual(result["pid"], 5432)
@@ -134,7 +132,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
         command: str,
         paths,
         instance_json: Path,
-        manifest_path: Path,
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
         broker_command = [
             sys.executable,
@@ -151,8 +148,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             str(paths.log_file),
             "--instance-json",
             str(instance_json),
-            "--manifest",
-            str(manifest_path),
         ]
         if command == "ensure":
             ResourceLedger.from_environment().register_process_descriptor(
@@ -199,14 +194,11 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             paths = self._paths(runtime_dir)
             instance_json = workspace_dir / "instance.json"
             self._write_instance_json(instance_json, workspace_dir=workspace_dir)
-            manifest_path = MANIFEST
-
             ensure_completed, ensure_payload = self._run_broker_cli(
                 workspace_dir=workspace_dir,
                 command="ensure",
                 paths=paths,
                 instance_json=instance_json,
-                manifest_path=manifest_path,
             )
             self.assertEqual(ensure_completed.returncode, 0, msg=ensure_completed.stderr)
             self.assertTrue(ensure_payload.get("ok"), msg=ensure_payload)
@@ -216,7 +208,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     command="status",
                     paths=paths,
                     instance_json=instance_json,
-                    manifest_path=manifest_path,
                 )
                 self.assertEqual(status_completed.returncode, 0, msg=status_completed.stderr)
                 self.assertTrue(status_payload.get("healthy"), msg=status_payload)
@@ -263,7 +254,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     command="stop",
                     paths=paths,
                     instance_json=instance_json,
-                    manifest_path=manifest_path,
                 )
 
     def test_live_broker_rejects_removed_message_action_without_parent_submit(self) -> None:
@@ -279,7 +269,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
             runtime_dir = workspace_dir / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
             paths = self._paths(runtime_dir)
-            manifest_path = MANIFEST
             instance_json = workspace_dir / "instance.json"
             instance_json.write_text(
                 json.dumps(
@@ -314,7 +303,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 command="ensure",
                 paths=paths,
                 instance_json=instance_json,
-                manifest_path=manifest_path,
             )
             self.assertEqual(ensure_completed.returncode, 0, msg=ensure_completed.stderr)
             self.assertTrue(ensure_payload.get("ok"), msg=ensure_payload)
@@ -348,7 +336,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                     command="stop",
                     paths=paths,
                     instance_json=instance_json,
-                    manifest_path=manifest_path,
                 )
 
     def test_status_reports_unhealthy_when_pid_live_but_socket_missing(self) -> None:
@@ -497,7 +484,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 result = self.lifecycle.ensure_broker(
                     paths,
                     instance_json_path=Path("instance.json"),
-                    manifest_path=MANIFEST,
                     expected_actor_id="act-pm-example",
                     expected_active_role="pm",
                 )
@@ -539,7 +525,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 result = self.lifecycle.ensure_broker(
                     paths,
                     instance_json_path=Path("instance.json"),
-                    manifest_path=MANIFEST,
                     expected_actor_id="act-pm-example",
                     expected_active_role="pm",
                     startup_timeout_seconds=0.05,
@@ -580,7 +565,6 @@ class RuntimeBrokerLifecycleTests(unittest.TestCase):
                 result = self.lifecycle.ensure_broker(
                     paths,
                     instance_json_path=Path("instance.json"),
-                    manifest_path=MANIFEST,
                     expected_actor_id="act-pm-example",
                     expected_active_role="pm",
                 )

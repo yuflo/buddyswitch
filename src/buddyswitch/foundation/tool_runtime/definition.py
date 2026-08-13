@@ -101,7 +101,7 @@ class AuthorizationDecision:
     reason: str
 
 
-ToolAuthorizer = Callable[[str, str, dict[str, Any]], AuthorizationDecision]
+ToolAuthorizer = Callable[[str, str], AuthorizationDecision]
 
 
 def validate_registration(registration: ToolRegistration) -> None:

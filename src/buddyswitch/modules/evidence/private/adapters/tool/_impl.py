@@ -31,8 +31,6 @@ class EvidenceServiceContext(TypedDict):
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
-    manifest: dict[str, Any]
-    manifest_path: Path | None
 
 
 def _reject_payload(*, action: str, current_identity: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:

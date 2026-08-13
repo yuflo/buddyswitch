@@ -11,6 +11,8 @@ from tests.support.paths import REPO_ROOT
 ROOT = REPO_ROOT
 
 from buddyswitch.modules.artifact.entrypoints import artifact_selection  # noqa: E402
+from buddyswitch.modules.artifact import public as artifact_public  # noqa: E402
+from buddyswitch.modules.artifact.private.state import artifacts  # noqa: E402
 
 
 class ArtifactSelectionTests(unittest.TestCase):
@@ -78,3 +80,9 @@ class ArtifactSelectionTests(unittest.TestCase):
         )
         self.assertEqual(len(selected["selected_inputs"]), 1)
         self.assertIn("Trimmed selection", "\n".join(selected["reasons"]))
+
+    def test_public_contract_owns_the_artifact_template_vocabulary(self) -> None:
+        expected = ("brief", "proposal", "design", "decision", "proof", "note")
+        vocabulary = getattr(artifact_public, "VALID_ARTIFACT_TEMPLATES", None)
+        self.assertEqual(vocabulary, expected)
+        self.assertIs(artifacts.VALID_ARTIFACT_TEMPLATES, vocabulary)

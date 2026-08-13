@@ -36,7 +36,6 @@ def application_environment(
             "BUDDYSWITCH_CLI_RUNTIME_BROWSER_PROXY_MODULE": application_input.browser_cockpit_proxy_module,
             "BUDDYSWITCH_CLI_RUNTIME_CLEANUP_MODULE": application_input.cleanup_module,
             "BUDDYSWITCH_CLI_RUNTIME_DIAGNOSTICS_MODULE": application_input.diagnostics_module,
-            "BUDDYSWITCH_CLI_RUNTIME_MANIFEST_PATH": str(application_input.manifest_path),
         }
     )
     if role_browser_capability is not None:

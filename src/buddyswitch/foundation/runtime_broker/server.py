@@ -19,7 +19,6 @@ class RuntimeBrokerConfig:
     socket_path: Path
     pid_file: Path
     instance_json_path: Path
-    manifest_path: Path
     marker_file: Path | None = None
     max_workers: int = 4
     request_body_limit_bytes: int = 1048576
@@ -40,7 +39,6 @@ class RuntimeBrokerServer:
         self._capacity = threading.BoundedSemaphore(max(1, int(config.max_workers)))
         self._session = dispatcher.RuntimeBrokerSession(
             instance_json_path=config.instance_json_path,
-            manifest_path=config.manifest_path,
             socket_path=config.socket_path,
             pid_file=config.pid_file,
         )
@@ -90,7 +88,6 @@ class RuntimeBrokerServer:
             request,
             {
                 "instance_json": self.config.instance_json_path,
-                "manifest_path": self.config.manifest_path,
                 "actor_id": None,
                 "active_role": None,
                 "payload": {},

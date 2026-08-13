@@ -1,7 +1,7 @@
 # S7 Final System Acceptance Charter
 
-> Initial state: BLOCKED
-> Blocked by: S1–S6 accepted
+> Current state: PREPARATION UNBLOCKED
+> Entry prerequisite: committed and pushed S6 acceptance checkpoint
 > Runtime changes: none; defects reopen their owning stage
 
 ## Acceptance sentence

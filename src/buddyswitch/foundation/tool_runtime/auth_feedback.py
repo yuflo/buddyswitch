@@ -33,7 +33,7 @@ def role_auth_rejection(
         permission_boundary="tool.role_authority",
         human_summary="Active role is not allowed to run this tool action.",
         why_blocked=(
-            f"Action {tool}.{action} is restricted by env.tool role-action policy. "
+            f"Action {tool}.{action} is restricted by Application Role authority. "
             f"Active role '{decision.active_role}' is not allowed; allowed roles: {allowed_roles_text}."
         ),
         impact="No env action ran and runtime state was unchanged.",
@@ -42,26 +42,26 @@ def role_auth_rejection(
         retryable=False,
         retry_guidance="Use an action allowed for this role, or ask an allowed role to perform this action.",
         allowed_next_actions=[
-            "Use context.summarize to inspect runtime policy preview for this role.",
-            "Use context.get to inspect tool payload schema and runtime policy preview.",
+            "Use context.summarize to inspect the Role action preview.",
+            "Use context.get to inspect the Tool payload schema and Role action preview.",
         ],
         alternative_capabilities=[
             tool_results.alternative_capability(
                 tool="context",
                 action="summarize",
-                condition="Inspect runtime policy preview before choosing another env.tool action.",
+                condition="Inspect the Role action preview before choosing another env.tool action.",
                 mutates_product_state=False,
             ),
             tool_results.alternative_capability(
                 tool="context",
                 action="get",
-                condition="Inspect tool payload schema and runtime policy preview before retrying.",
+                condition="Inspect Tool payload schema and Role action preview before retrying.",
                 mutates_product_state=False,
             ),
         ],
         extra={
             "category": "auth_denied",
-            "auth_source": "env.tool role-action policy",
+            "auth_source": "Application Role authority",
             "auth_stage": "pre_dispatch",
             "executed": False,
             "required_permission": decision.required_permission,

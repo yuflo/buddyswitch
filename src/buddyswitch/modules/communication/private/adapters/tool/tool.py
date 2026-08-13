@@ -37,7 +37,7 @@ def _build_definition() -> ToolDefinition:
                     'properties': {
                         'role': {
                             'type': 'string',
-                            'description': 'Optional manifest role id filter for actor discovery targets backed by actor runtime presence.',
+                            'description': 'Optional RoleHost role id filter for actor discovery targets backed by actor runtime presence.',
                         },
                     },
                 },

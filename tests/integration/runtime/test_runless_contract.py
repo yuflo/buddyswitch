@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
@@ -26,7 +25,6 @@ import buddyswitch.foundation.runtime_broker.lifecycle as runtime_lifecycle  # n
 from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -126,8 +124,6 @@ class RunlessRuntimeContractTests(unittest.TestCase):
         envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)
@@ -295,7 +291,6 @@ class RunlessRuntimeContractTests(unittest.TestCase):
                 result = runtime_lifecycle.ensure_broker(
                     paths,
                     instance_json_path=root / "instance.json",
-                    manifest_path=MANIFEST,
                     expected_actor_id="act-pm-runless",
                     expected_active_role="pm",
                     startup_timeout_seconds=0.05,

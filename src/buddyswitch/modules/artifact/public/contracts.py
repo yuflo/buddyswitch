@@ -5,6 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+VALID_ARTIFACT_TEMPLATES = (
+    "brief",
+    "proposal",
+    "design",
+    "decision",
+    "proof",
+    "note",
+)
+
+
 class ArtifactPublicError(ValueError):
     """Base error for typed Artifact Public failures."""
 

@@ -27,7 +27,7 @@ runtime owner.
 ```text
 application / Demand / Foundation Host Control / Foundation CLI Runtime
                      -> foundation Actor Runtime
-application Actor build -> resolved Role/Skill bootstrap -> Actor Runtime environment
+application RoleHost -> selected Role/Skill bootstrap -> Actor Runtime environment
 foundation Actor Runtime -> foundation App Server
 foundation Actor Runtime -> foundation Process Runtime
 ```
@@ -37,9 +37,10 @@ Foundation Actor Runtime imports only the standard library and direct
 Demand, Foundation Host Control, CLI, and shell code are consumers. Role selection,
 instance lifecycle, Process Runtime locking, Web routing,
 public CLI dispatch, and host/global cleanup orchestration remain outside this
-owner. Current central Role/Skill selection remains application-side until S6;
-it supplies one explicit resolved bootstrap projection to the environment owner
-through the application-selected Host Control start input and the stable
+owner. Application RoleHost validates the installed Role packages before
+publication and supplies one explicit selected AGENTS/Skills bootstrap
+projection to the environment owner through the application-selected Host
+Control start input and the stable
 `buddyswitch.application.entrypoints.actor_build` boundary.
 
 ## Runtime contract

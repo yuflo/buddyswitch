@@ -108,6 +108,7 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
 
     def test_tool_context_uses_identity_profile_without_actor_address(self) -> None:
         from buddyswitch.foundation.identity.model import ActorIdentityProfile
+        from buddyswitch.foundation.role_host import RoleRuntime
         from buddyswitch.foundation.tool_runtime.context import ToolContext
 
         instance_root = self.runtime_root / "instances" / "act-dev-context"
@@ -123,7 +124,14 @@ class IdentityGlobalConvergenceTests(RuntimeWorkspaceTestCase):
                 "instance_root": str(instance_root),
                 "workspace_dir": str(self.runtime_root),
             },
-            manifest={"roles": [{"id": "dev"}]},
+            role=RoleRuntime(
+                id="dev",
+                artifact_templates=("brief", "note"),
+                project_path="projects/app",
+                source_access="write",
+                browser_cockpit="available",
+                search_api="available",
+            ),
         )
 
         self.assertEqual(context.current_identity.to_payload(), {"id": "act-dev-context", "type": "actor"})

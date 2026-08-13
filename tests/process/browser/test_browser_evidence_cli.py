@@ -56,7 +56,6 @@ class TestBrowserEvidenceCli(MarketEvidenceHarness):
         paths: lifecycle.BrokerPaths,
         instance_json: Path,
     ) -> list[str]:
-        package_root = Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"])
         return [
             PYTHON,
             "-m",
@@ -72,8 +71,6 @@ class TestBrowserEvidenceCli(MarketEvidenceHarness):
             str(paths.log_file),
             "--instance-json",
             str(instance_json),
-            "--manifest",
-            str(package_root / "catalog" / "manifest.toml"),
         ]
 
     def _start_broker(

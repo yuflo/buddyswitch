@@ -32,7 +32,6 @@ class _ActorContext(dict[str, Any]):
         super().__init__(
             current_identity={"id": identity_id, "type": "actor"},
             active_role=role_id,
-            manifest={"roles": [{"id": role_id}]},
         )
         self.actor_directory = capabilities
 

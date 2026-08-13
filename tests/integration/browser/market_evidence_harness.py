@@ -13,7 +13,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
@@ -22,7 +21,6 @@ from buddyswitch.modules.artifact.private.state import artifacts as artifact_rep
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 MARKET_REQUEST = "调研 AI 日程工具 landing page 竞品表达和定位方式"
 PM_REQUEST = "给一款AI日程工具做一个简单的landing page，写一份PRD，然后创建绑定一个track"
 DESIGN_REQUEST = "基于现有 PRD 和市场简报，整理 landing page 原型方向"
@@ -191,8 +189,6 @@ class MarketEvidenceHarness(RuntimeWorkspaceTestCase):
                 "deadline_ms": 35000,
             },
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:

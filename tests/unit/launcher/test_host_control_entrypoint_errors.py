@@ -11,8 +11,7 @@ from unittest import mock
 from buddyswitch.application.build import ApplicationAssembly
 from buddyswitch.application.entrypoints import cli as cli_entrypoint
 from buddyswitch.application.entrypoints import web as web_entrypoint
-from buddyswitch.application import host_control as application_host_control
-from buddyswitch.runtime_support import env_manifest
+from buddyswitch.foundation.role_host import RoleHostError
 
 
 EMPTY_APPLICATION = ApplicationAssembly(
@@ -94,11 +93,10 @@ class HostControlEntrypointErrorTests(unittest.TestCase):
     def test_cli_malformed_role_catalog_uses_public_failure_envelope(self) -> None:
         stdout = io.StringIO()
         with (
-            mock.patch.object(cli_entrypoint, "activate_application", return_value=EMPTY_APPLICATION),
             mock.patch.object(
-                application_host_control.env_manifest,
-                "load_manifest",
-                side_effect=env_manifest.ManifestError("roles[0].id must be a non-empty string"),
+                cli_entrypoint,
+                "activate_application",
+                side_effect=RoleHostError("Role id must be a non-empty string"),
             ),
             mock.patch.object(cli_entrypoint.cli_runtime, "main") as generic_main,
             contextlib.redirect_stdout(stdout),
@@ -112,7 +110,7 @@ class HostControlEntrypointErrorTests(unittest.TestCase):
                 "ok": False,
                 "error": {
                     "code": "EXECUTION_FAILED",
-                    "message": "roles[0].id must be a non-empty string",
+                    "message": "Role id must be a non-empty string",
                     "details": {},
                 },
             },
@@ -122,11 +120,10 @@ class HostControlEntrypointErrorTests(unittest.TestCase):
     def test_web_malformed_role_catalog_uses_public_startup_error_boundary(self) -> None:
         stderr = io.StringIO()
         with (
-            mock.patch.object(web_entrypoint, "activate_application", return_value=EMPTY_APPLICATION),
             mock.patch.object(
-                application_host_control.env_manifest,
-                "load_manifest",
-                side_effect=env_manifest.ManifestError("roles[0].id must be a non-empty string"),
+                web_entrypoint,
+                "activate_application",
+                side_effect=RoleHostError("Role id must be a non-empty string"),
             ),
             mock.patch.object(web_entrypoint.web_runtime, "main") as generic_main,
             contextlib.redirect_stderr(stderr),
@@ -134,7 +131,7 @@ class HostControlEntrypointErrorTests(unittest.TestCase):
             status = web_entrypoint.main()
 
         self.assertEqual(status, 1)
-        self.assertEqual(stderr.getvalue(), "roles[0].id must be a non-empty string\n")
+        self.assertEqual(stderr.getvalue(), "Role id must be a non-empty string\n")
         self.assertNotIn("Traceback", stderr.getvalue())
         generic_main.assert_not_called()
 

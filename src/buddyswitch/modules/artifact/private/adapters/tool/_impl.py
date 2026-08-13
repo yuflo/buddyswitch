@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
+from buddyswitch.foundation.role_host import RoleRuntime
+
 from .tool import DEFINITION
 from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.modules.artifact.private.domain import (
@@ -39,7 +41,7 @@ class ArtifactServiceContext(TypedDict):
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
-    manifest: dict[str, Any]
+    role: RoleRuntime
 
 
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
@@ -94,18 +96,7 @@ def _attachment_id_field_error() -> dict[str, Any]:
 
 
 def _allowed_templates_for_active_role(context: ArtifactServiceContext) -> tuple[str, ...]:
-    active_role = context["active_role"]
-    roles = context.get("manifest", {}).get("roles", [])
-    if not isinstance(roles, list):
-        return ()
-    for role in roles:
-        if not isinstance(role, dict) or role.get("id") != active_role:
-            continue
-        templates = role.get("artifact_templates")
-        if not isinstance(templates, list):
-            return ()
-        return tuple(row for row in templates if isinstance(row, str) and row.strip())
-    return ()
+    return context["role"].artifact_templates
 
 
 def _active_identity_id(current_identity: dict[str, Any]) -> str | None:
@@ -135,7 +126,7 @@ def _reject_template_permission(
         impact="No artifact state changed.",
         state_changed=False,
         retryable=True,
-        retry_guidance="Use one template declared for the active role in manifest artifact_templates.",
+        retry_guidance="Use one template declared by the active Role package.",
         allowed_next_actions=[
             "Use context.get to inspect active role capabilities.",
             "Retry artifact.create_revision or artifact.update_metadata with an allowed template.",

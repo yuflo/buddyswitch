@@ -18,12 +18,16 @@ cleanup do not own or discover Artifact paths.
 
 Artifact Public exposes immutable facts and Artifact-owned decisions:
 
+- the single valid Artifact-template vocabulary consumed by Tool schemas,
+  durable state validation and Application Role activation;
 - publication candidate identity/template through the Track port adapter;
 - content-free reference metadata and attachment summaries;
 - readable Artifact summaries for Context;
 - Evidence target existence and active-author validation.
 
-Artifact Public does not expose Artifact storage or mutable records.
+Artifact Public does not expose Artifact storage or mutable records. Foundation
+does not copy the template vocabulary: Application supplies it to RoleHost as
+the narrow product-owned validation input.
 
 ## Track dependency
 

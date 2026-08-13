@@ -11,7 +11,6 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
@@ -26,7 +25,6 @@ _RETIRED_ACTOR_PRIVATE_FILE_ROWS_FIELD = "actor_private_" + "files"
 class RunEnvToolReplacementTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.manifest = env_manifest.load_manifest(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml")
         self.actor_id = self._runtime_actor_id(role="pm", label="act-pm-runless")
         self.instance_json = self._runtime_path("instance.json")
         self.instance_json.write_text(
@@ -53,8 +51,6 @@ class RunEnvToolReplacementTests(RuntimeWorkspaceTestCase):
             actor_id=actor_id,
             instance_json=self.instance_json,
             instance_payload={"actor_id": actor_id, "role": role, "workspace_dir": str(self.runtime_root)},
-            manifest=self.manifest,
-            manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
         )
 
     def test_registry_excludes_retired_run_and_binding_tools(self) -> None:

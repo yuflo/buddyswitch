@@ -13,7 +13,6 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
@@ -28,8 +27,6 @@ from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 class EnvLayerEndToEndTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-        self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instances: dict[str, dict[str, object]] = {}
         for role in ("pm", "design", "dev", "test", "market"):
             actor_id = self._runtime_actor_id(role=role, label="act-e2e-runless")
@@ -81,8 +78,6 @@ class EnvLayerEndToEndTests(RuntimeWorkspaceTestCase):
             actor_id=str(instance["actor_id"]),
             instance_json=instance_json,
             instance_payload=instance_payload,
-            manifest=self.manifest,
-            manifest_path=self.manifest_path,
         )
 
     def _create_track(self, track_id: str) -> dict[str, object]:

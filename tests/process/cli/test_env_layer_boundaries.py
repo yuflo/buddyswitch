@@ -13,7 +13,6 @@ from pathlib import Path
 
 from buddyswitch.application.build import build_application
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
@@ -23,7 +22,6 @@ from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
 CODEX_CONFIG = ROOT / "src" / "buddyswitch" / "foundation" / "cli_runtime" / "config.py"
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 PERMISSION_PROFILE = "buddyswitch-runtime"
 
@@ -222,8 +220,6 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                 "deadline_ms": 35000,
             },
             instance_json_path=self._instance_json(),
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:
@@ -451,10 +447,9 @@ class EnvLayerBoundaryTests(RuntimeWorkspaceTestCase):
                     + "|\\|\\s*action\\s*\\|\\s*payload"
                     + "|##\\s*`[^`]+`\\s+payload"
                 ),
-                "src/buddyswitch/skills",
+                "src/buddyswitch/roles",
                 "src/buddyswitch/modules",
                 "src/buddyswitch/contracts",
-                "src/buddyswitch/launcher/assets/roles",
             ],
             cwd=ROOT,
             text=True,

@@ -11,7 +11,6 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as tool_router  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
@@ -19,8 +18,6 @@ from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 class EnvToolIdentityTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-        self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instance_json = self._runtime_path("instance.json")
         self.actor_id = self._actor_id_for("pm")
         self.instance_payload = {
@@ -55,8 +52,6 @@ class EnvToolIdentityTests(RuntimeWorkspaceTestCase):
             actor_id=actor_id,
             instance_json=self.instance_json,
             instance_payload={**self.instance_payload, "actor_id": actor_id, "role": active_role},
-            manifest=self.manifest,
-            manifest_path=self.manifest_path,
         )
 
     def test_old_task_tool_is_not_identity_surface(self) -> None:

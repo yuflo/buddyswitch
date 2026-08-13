@@ -213,49 +213,6 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             self.assertEqual(env_data["instance_count"], 0)
             self.assertEqual(env_data["browser_state"], "inactive")
             self.assertFalse(shared_root.exists(), "read-only public status commands must not create runtime state")
-    def test_env_manifest_commands_emit_one_canonical_json_line(self) -> None:
-        cases = (
-            ["print"],
-            ["list-roles"],
-            ["show-role", "pm"],
-        )
-        for argv in cases:
-            with self.subTest(argv=argv):
-                completed = run_process(
-                    [PYTHON, "-m", "buddyswitch.application.entrypoints.env_manifest", *argv],
-                    cwd=ROOT,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
-
-                self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-                self.assertEqual(completed.stderr, "")
-                self.assertEqual(completed.stdout.count("\n"), 1, msg=completed.stdout)
-                payload = json.loads(completed.stdout)
-                self.assertEqual(completed.stdout, json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
-                self.assertIsInstance(payload, dict)
-        role_ids = {row["id"] for row in json.loads(
-            run_process(
-                [PYTHON, "-m", "buddyswitch.application.entrypoints.env_manifest", "list-roles"],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=True,
-            ).stdout
-        )["roles"]}
-        self.assertIn("pm", role_ids)
-        self.assertIn("dev", role_ids)
-    def test_env_manifest_list_roles_rejects_removed_json_flag(self) -> None:
-        removed = run_process(
-            [PYTHON, "-m", "buddyswitch.application.entrypoints.env_manifest", "list-roles", "--" + "json"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(removed.returncode, 2, msg=removed.stdout + removed.stderr)
-        self.assertEqual(removed.stdout, "")
     def test_env_cleanup_helper_is_json_only_without_json_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             repo_root = Path(temp_root) / "state"
@@ -268,8 +225,6 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                     "buddyswitch.application.entrypoints.cleanup",
                     "--state-root",
                     str(repo_root),
-                    "--manifest",
-                    str(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"),
                     "--role",
                     "pm",
                 ],
@@ -293,8 +248,6 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
                     "buddyswitch.application.entrypoints.cleanup",
                     "--state-root",
                     str(repo_root),
-                    "--manifest",
-                    str(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"),
                     "--role",
                     "pm",
                     "--" + "json",

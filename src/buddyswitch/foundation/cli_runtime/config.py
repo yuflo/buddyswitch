@@ -38,7 +38,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-root", required=True, help="BuddySwitch source checkout root")
     parser.add_argument("--shared-root", required=True, help="BuddySwitch shared root")
     parser.add_argument("--source-codex-home", help="Source Codex home that must not be writable")
-    parser.add_argument("--manifest", help="Path to env manifest TOML")
     parser.add_argument("--role", help="Active role id for instance mode")
     parser.add_argument("--instance-root", help="Active instance root path")
     parser.add_argument("--workspace-dir", help="Active workspace path")
@@ -449,30 +448,22 @@ def _build_profile_mode_filesystem(
         if args.source_codex_home
         else canonical(str(Path.home() / ".codex"))
     )
-    manifest_path = (
-        canonical(args.manifest)
-        if args.manifest
-        else application_input.manifest_path
-    )
     role_id = str(args.role).strip()
 
-    profile = application_input.resolve_role_profile(
-        role_id,
-        manifest_path=manifest_path,
-    )
+    role = application_input.resolve_role(role_id)
 
     instance_root = canonical(str(args.instance_root))
     workspace_dir = canonical(str(args.workspace_dir))
     project_workspace_dir = canonical(str(args.project_workspace_dir))
-    project_profile_path = str(profile.get("project", {}).get("path", "")).strip()
+    project_profile_path = role.project_path
     if not project_profile_path:
-        raise ValueError("env profile project.path must be a non-empty relative path")
+        raise ValueError("Role project_path must be a non-empty relative path")
     project_source_root = canonical(str(project_workspace_dir / project_profile_path))
     if not path_contains(project_workspace_dir, project_source_root):
-        raise ValueError("env profile project.path resolves outside shared project workspace")
-    source_root_access = str(profile.get("filesystem_capability", {}).get("source_root", "")).strip()
+        raise ValueError("Role project_path resolves outside shared project workspace")
+    source_root_access = role.source_access
     if source_root_access not in {"write", "read-only"}:
-        raise ValueError("env profile filesystem_capability.source_root must be 'write' or 'read-only'")
+        raise ValueError("Role source_access must be 'write' or 'read-only'")
     state_root = canonical_shared_root / "state"
     project_root = canonical_shared_root / "project"
 
@@ -606,9 +597,6 @@ def main(
         else:
             roots = build_writable_roots(args)
     except Exception as exc:
-        if exc.__class__.__name__ == "EnvProfileError":
-            print(f"Env profile invalid: {exc}", file=sys.stderr)
-            return 2
         print(f"refusing writable root: {exc}", file=sys.stderr)
         return 2
     unix_sockets = _build_profile_mode_unix_sockets(args) if profile_mode else []

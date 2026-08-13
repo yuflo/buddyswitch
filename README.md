@@ -94,7 +94,8 @@ Root launchers are thin stable interfaces. `pyproject.toml` is the sole
 package/build declaration.
 
 - `pyproject.toml` for package build and installed-distribution ownership.
-- `src/buddyswitch/catalog/manifest.toml` for the environment manifest.
+- `src/buddyswitch/foundation/role_host/` for reviewed Role discovery, validation, and immutable consumer projections.
+- `src/buddyswitch/roles/<package_name>/` for each Role's descriptor, AGENTS, private Skills, assets, and local tests.
 - `src/buddyswitch/foundation/tool_runtime/definition.py` for `ToolDefinition` / `ActionDefinition` protocol and schema validation.
 - `src/buddyswitch/foundation/tool_runtime/context.py` for host-owned `ToolContext` capabilities that gate runtime-state access.
 - `src/buddyswitch/foundation/tool_runtime/results.py` for canonical env.tool result/rejection shaping.
@@ -114,8 +115,5 @@ package/build declaration.
 - `src/buddyswitch/foundation/web_runtime/` for the generic Web host, passive contribution contracts, and packaged Web UI assets.
 - `src/buddyswitch/foundation/cli_runtime/` for the generic public CLI host, Codex config and shell adapters, with `src/buddyswitch/foundation/cli_runtime/contracts.py` as the shared machine-first envelope and passive CLI contribution contract.
 - `src/buddyswitch/foundation/cli_runtime/diagnostics.py` for runless status and Tool-catalog diagnostics.
-- `src/buddyswitch/application/role_source.py` for the current Application-owned Role projections supplied to Foundation until S6.
 - `src/buddyswitch/contracts/prepare-turn-context.json` for the context payload contract.
-- `src/buddyswitch/contracts/{pm,design,dev,market,test}.md` for role-specific runtime boundaries.
-- `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md` for Role bootstrap guidance.
 - `tests/` for behavior and consistency gates.

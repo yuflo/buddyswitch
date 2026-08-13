@@ -11,7 +11,6 @@ ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_ROOT = ROOT / "src" / "buddyswitch"
 OWNER_ROOT = PACKAGE_ROOT / "foundation" / "cli_runtime"
 LAUNCHER_ROOT = PACKAGE_ROOT / "launcher"
-ROLE_ASSETS_ROOT = LAUNCHER_ROOT / "assets" / "roles"
 APPLICATION_ASSEMBLY = PACKAGE_ROOT / "application" / "cli_runtime.py"
 RETIRED_OWNERS = (
     LAUNCHER_ROOT / "cli.py",
@@ -89,14 +88,7 @@ def test_cli_runtime_has_one_direct_owner_and_launcher_is_inert() -> None:
         path.relative_to(LAUNCHER_ROOT).as_posix()
         for path in LAUNCHER_ROOT.rglob("*")
         if path.is_file()
-    } == {
-        "__init__.py",
-        "assets/roles/design/AGENTS.md",
-        "assets/roles/dev/AGENTS.md",
-        "assets/roles/market/AGENTS.md",
-        "assets/roles/pm/AGENTS.md",
-        "assets/roles/test/AGENTS.md",
-    }
+    } == {"__init__.py"}
 
 
 def test_cli_runtime_embeds_no_upward_executable_root() -> None:
@@ -156,4 +148,4 @@ def test_cli_runtime_shells_have_owner_local_package_projection() -> None:
         "tool"
     ]["setuptools"]["package-data"]
     assert package_data["buddyswitch.foundation.cli_runtime"] == ["shell/*.sh"]
-    assert package_data["buddyswitch.launcher"] == ["assets/**/*.md"]
+    assert package_data["buddyswitch.launcher"] == ["assets/docs/*.md"]

@@ -6,9 +6,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, TypedDict
 
-from buddyswitch.runtime_support import env_profiles
 from buddyswitch.foundation.tool_runtime import registry as tool_registry
-from buddyswitch.runtime_support import role_auth
+from buddyswitch.foundation.role_host import RoleRuntime
 from buddyswitch.foundation.tool_runtime import results as tool_results
 from buddyswitch.modules.artifact import public as artifact_public
 from buddyswitch.modules.task import public as task_public
@@ -91,8 +90,7 @@ class ContextServiceContext(TypedDict):
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
-    manifest: dict[str, Any]
-    manifest_path: Path | None
+    role: RoleRuntime
 
 
 def _reject_payload(*, action: str, current_identity: dict[str, Any], active_role: str, message: str) -> dict[str, Any]:
@@ -146,13 +144,6 @@ def _require_allowed_fields(action: str, args: dict[str, Any], current_identity:
     return None
 
 
-def _package_root_from_manifest_path(manifest_path: Path) -> Path:
-    resolved = manifest_path.resolve(strict=False)
-    if len(resolved.parents) < 2:
-        raise ValueError(f"manifest path is not under expected repo layout: {resolved}")
-    return resolved.parent.parent
-
-
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -202,22 +193,6 @@ def _source_root_from_runtime_projection(
     return resolved_source_root
 
 
-def _load_active_env_profile(
-    context: ContextServiceContext,
-    active_role: str,
-) -> dict[str, Any]:
-    manifest_path_raw = context.get("manifest_path")
-    if manifest_path_raw is None:
-        raise ValueError("manifest_path is required for source_workspace profile resolution")
-    manifest_path = Path(str(manifest_path_raw)).expanduser().resolve(strict=False)
-    package_root = _package_root_from_manifest_path(manifest_path)
-    return env_profiles.require_env_profile(
-        active_role,
-        manifest_path=manifest_path,
-        package_root=package_root,
-    )
-
-
 def _classify_source_root(root: Path, *, limit: int = 20) -> tuple[str, list[str], bool]:
     if not root.exists() or not root.is_dir():
         return "missing", [], False
@@ -252,10 +227,10 @@ def _source_workspace_rejection(
         impact="Context did not guess source-root facts and did not mutate state.",
         state_changed=False,
         retryable=True,
-        retry_guidance="Fix env profile/runtime workspace wiring, then retry context discovery.",
+        retry_guidance="Fix Role runtime/workspace wiring, then retry context discovery.",
         allowed_next_actions=[
-            "Check env profile validation and project.path/source_root settings.",
-            "Retry context.summarize or context.get after runtime profile resolution is fixed.",
+            "Check RoleHost validation and project path/source-root settings.",
+            "Retry context.summarize or context.get after Role runtime resolution is fixed.",
         ],
     )
 
@@ -267,13 +242,13 @@ def _build_source_workspace(
     context: ContextServiceContext,
     include_resolved_path: bool,
 ) -> dict[str, Any]:
-    profile = _load_active_env_profile(context, active_role)
-    project_path = str(profile.get("project", {}).get("path", "")).strip()
+    role = context["role"]
+    project_path = role.project_path
     if not project_path:
-        raise ValueError("env profile project.path is missing")
-    source_root_access = str(profile.get("filesystem_capability", {}).get("source_root", "")).strip()
+        raise ValueError("Role project_path is missing")
+    source_root_access = role.source_access
     if source_root_access not in {"write", "read-only"}:
-        raise ValueError("env profile filesystem_capability.source_root must be 'write' or 'read-only'")
+        raise ValueError("Role source_access must be 'write' or 'read-only'")
 
     workspace_key = "workspace" + "_dir"
     runtime_workspace_raw = instance_payload.get(workspace_key)
@@ -282,7 +257,7 @@ def _build_source_workspace(
     runtime_workspace = Path(runtime_workspace_raw).expanduser().resolve(strict=False)
     runtime_source_raw = runtime_workspace / project_path
     if not _is_relative_to(runtime_source_raw, runtime_workspace):
-        raise ValueError("profile project.path resolves outside runtime workspace")
+        raise ValueError("Role project_path resolves outside runtime workspace")
     project_workspace = _launcher_project_workspace_from_context(
         context=context,
         runtime_workspace=runtime_workspace,
@@ -302,7 +277,7 @@ def _build_source_workspace(
         "state": state,
         "top_level_entries": entries,
         "top_level_entries_truncated": truncated,
-        "source_of_truth": "env_profile.project.path + env_profile.filesystem_capability.source_root + workspace_projection",
+        "source_of_truth": "RoleRuntime.project_path + RoleRuntime.source_access + workspace_projection",
         "permission_boundary": (
             "context is read-only; filesystem writes are enforced by sandbox profile; "
             "context does not configure roots or grant write access"
@@ -334,11 +309,7 @@ def _capability_snapshot(*, context: ContextServiceContext) -> dict[str, Any]:
     operation_semantics = _parent_operation_semantics()
     affordances = tool_registry.compact_tool_affordances()
     artifact_create = operation_semantics["artifact.create_revision"]
-    runtime_policy_preview = role_auth.role_action_summary(
-        context["active_role"],
-        context["manifest"],
-        operation_semantics,
-    )
+    runtime_policy_preview = tool_registry.role_action_summary(context["active_role"])
     return {
         "runtime_policy_preview": runtime_policy_preview,
         "task_visibility": "Demand-bound Task objectives, native Goal bindings, and terminal Task results",
@@ -576,7 +547,7 @@ def context_sources_desc() -> dict[str, dict[str, Any]]:
         "source_workspace": {
             "description": "Runtime product source root facts for the active role.",
             "scope": "read-only source orientation",
-            "source_of_truth": "env profile project.path/access and instance workspace projection",
+            "source_of_truth": "Role runtime project/access and instance workspace projection",
             "mutates_product_state": False,
             "grants_write_authority": False,
             "configures_source_root": False,

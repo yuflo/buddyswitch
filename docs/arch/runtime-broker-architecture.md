@@ -57,7 +57,7 @@ Allowed:
 
 ```text
 application runtime_broker entrypoint -> Runtime Broker owner
-application current manifest loader --> Runtime Broker dispatcher
+application RoleHost activation ------> ToolHost RoleRuntime resolver
 Tool/Browser/Evidence adapter --------> Runtime Broker client
 Runtime Broker -----------------------> process-runtime framing + identity
 Runtime Broker -----------------------> state + ToolHost + Browser operations
@@ -73,10 +73,11 @@ Forbidden:
 - ToolHost, Browser, or Daemon ownership of Runtime Broker lifecycle;
 - a second write path, protocol version, or retired `runtime_kernel` root.
 
-The manifest path remains part of the existing Broker process/session
-contract. Its loader is a required callable supplied by the stable
-`src/buddyswitch/application/entrypoints/runtime_broker.py` entrypoint;
-Foundation has no default loader or concrete Role import.
+The Broker process/session contract carries no Role package path. The stable
+`src/buddyswitch/application/entrypoints/runtime_broker.py` entrypoint activates
+Application once; Tool dispatch resolves the active immutable `RoleRuntime`
+through the Application-configured ToolHost capability. Foundation has no
+Role fallback, loader, or concrete Role import.
 
 ## Terminal and lifecycle invariants
 

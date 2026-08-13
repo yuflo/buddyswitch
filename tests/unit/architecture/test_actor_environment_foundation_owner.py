@@ -63,16 +63,11 @@ def test_actor_environment_has_one_direct_foundation_owner() -> None:
 def test_application_resolves_one_bootstrap_before_direct_publication() -> None:
     entrypoint_imports = _imports(ENTRYPOINT)
     assert "buddyswitch.foundation.actor_runtime.environment" in entrypoint_imports
-    assert "buddyswitch.runtime_support.runtime_skills" in entrypoint_imports
-    assert "buddyswitch.runtime_support.env_manifest" in entrypoint_imports
+    assert "buddyswitch.application.build" in entrypoint_imports
     assert RETIRED_MODULE not in entrypoint_imports
-
-    runtime_skill_source = (
-        PACKAGE_ROOT / "runtime_support" / "runtime_skills.py"
-    ).read_text(encoding="utf-8")
-    assert "resolve_runtime_skills" in runtime_skill_source
-    assert "install_runtime_skills" not in runtime_skill_source
-    assert "validate_runtime_skills" not in runtime_skill_source
+    entrypoint_source = ENTRYPOINT.read_text(encoding="utf-8")
+    assert "application.role_host.actor_bootstrap(" in entrypoint_source
+    assert "runtime_support" not in entrypoint_source
 
 
 def test_stable_host_control_build_boundary_is_application_supplied() -> None:

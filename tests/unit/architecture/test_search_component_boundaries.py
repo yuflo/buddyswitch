@@ -37,8 +37,8 @@ TOOL_CONTEXT = Path("src/buddyswitch/foundation/tool_runtime/context.py")
 ALLOWED_SEARCH_IMPORT_PREFIXES = (
     "buddyswitch.foundation.tool_runtime",
     "buddyswitch.foundation.composition",
+    "buddyswitch.foundation.role_host",
     "buddyswitch.modules.search.private.adapters.tool",
-    "buddyswitch.runtime_support.env_profiles",
 )
 
 

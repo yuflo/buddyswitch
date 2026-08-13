@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 import unittest
 
-from buddyswitch.runtime_support import env_manifest
 from tests.support.python import PYTHON
 
 from tests.support.paths import REPO_ROOT
@@ -37,10 +36,7 @@ class PrepareRuntimeContextRunlessTests(unittest.TestCase):
         payload = parse_json_stdout(completed)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["runtime_mode"], "runless")
-        self.assertEqual(
-            payload["manifest_path"],
-            str(env_manifest.DEFAULT_MANIFEST),
-        )
+        self.assertNotIn("manifest_path", payload)
         env_tools = payload.get("env_tools", {})
         self.assertIn("context", env_tools)
         self.assertNotIn("memory", env_tools)

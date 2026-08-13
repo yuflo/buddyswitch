@@ -11,7 +11,7 @@ The current path is:
 ```text
 Actor env.tool request
   -> explicitly composed Search Tool registration
-  -> Search-private validation and profile read
+  -> Search-private validation and selected RoleRuntime read
   -> status metadata, rejection, or target URL plan
 ```
 
@@ -29,7 +29,7 @@ Search has one live capability root:
 - `src/buddyswitch/modules/search/private/adapters/tool/tool.py` owns the Tool
   definition and invocation entrypoint.
 - `src/buddyswitch/modules/search/private/adapters/tool/_impl.py` owns Search
-  validation, profile projection, and URL planning.
+  validation, RoleRuntime projection, and URL planning.
 - `src/buddyswitch/modules/search/tests/integration` contains the owned
   behavior and response-contract tests.
 
@@ -54,7 +54,7 @@ Allowed Search dependencies are:
 ```text
 Search module -> ModuleAssembly + ToolRegistration
 Search Tool -> public Tool runtime contracts and results
-Search implementation -> generic ToolContext facts + runtime profile reads
+Search implementation -> generic ToolContext + selected RoleRuntime facts
 ```
 
 Search does not import another component's private package, Browser
@@ -64,7 +64,7 @@ owner. Generic hosts do not import Search private code.
 ## Preserved contract
 
 `search.status` projects configured Browser and `search_api` availability from
-the active role profile and instance facts. `search.request` requires an
+the selected immutable Role runtime and instance facts. `search.request` requires an
 explicit backend and non-empty query, validates the optional engine, and
 returns the existing Google/Web/Reddit/X target URL contract.
 

@@ -6,7 +6,6 @@ import io
 import json
 import unittest
 from dataclasses import FrozenInstanceError, replace
-from pathlib import Path
 
 from buddyswitch.application import cli_runtime as application_cli_runtime
 from buddyswitch.application.build import activate_application
@@ -51,10 +50,7 @@ class CliRuntimeContractTests(unittest.TestCase):
             application_input.diagnostics_module,
             application_cli_runtime.DIAGNOSTICS_MODULE,
         )
-        self.assertEqual(
-            application_input.manifest_path,
-            application_cli_runtime.env_manifest.DEFAULT_MANIFEST,
-        )
+        self.assertEqual(application_input.resolve_role("dev").source_access, "write")
         self.assertEqual(
             application_input.parent_disabled_tools,
             ("demand_sys__resolve_inbound",),
@@ -69,10 +65,8 @@ class CliRuntimeContractTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "web module"):
             replace(application_input, web_module="")
-        with self.assertRaisesRegex(ValueError, "manifest not found"):
-            replace(application_input, manifest_path=Path("/missing/manifest.toml"))
         with self.assertRaisesRegex(ValueError, "resolver must be callable"):
-            replace(application_input, role_profile_resolver=None)  # type: ignore[arg-type]
+            replace(application_input, role_runtime_resolver=None)  # type: ignore[arg-type]
 
     def test_cli_runtime_shell_environment_projects_current_role_fact(self) -> None:
         application_input = application_cli_runtime.assemble_cli_runtime(

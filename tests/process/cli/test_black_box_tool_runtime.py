@@ -76,12 +76,9 @@ from pathlib import Path
 
 from buddyswitch.application.build import activate_application
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
-from buddyswitch.runtime_support import env_manifest
 
 root = Path.cwd()
 activate_application()
-manifest_path = root / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-manifest = env_manifest.load_manifest(manifest_path)
 
 class BlockMessageImpl(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
@@ -99,8 +96,6 @@ base = {
         "role": "dev",
         "workspace_dir": str(root),
     },
-    "manifest": manifest,
-    "manifest_path": manifest_path,
 }
 context = dispatch_env_tool_request(
     payload={"tool": "context", "action": "list_sources", "args": {}},

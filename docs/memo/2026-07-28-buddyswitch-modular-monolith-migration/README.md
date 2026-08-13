@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S5 ACCEPTED; S6 READY — R1 ONLY
-> Runtime authorization: `BS-MM-S6-ROLE-HOST-R1-20260813-01`
+> Current state: S0–S6 ACCEPTED; S7 PREPARATION UNBLOCKED
+> Runtime authorization: none; S7 requires a source-bound READY decision
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -25,8 +25,8 @@ Read:
 | S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
 | S5 | `05-foundation-convergence.md` | ACCEPTED |
-| S6 | `06-role-host-cutover.md` | READY — R1 ONLY |
-| S7 | `07-final-acceptance.md` | BLOCKED |
+| S6 | `06-role-host-cutover.md` | ACCEPTED |
+| S7 | `07-final-acceptance.md` | PREPARATION UNBLOCKED |
 
 ## Control surfaces
 
@@ -321,8 +321,14 @@ literal, package, test and current-doc consumers. Preservation runs
 `S6P-22d21453397022fd` pass. D-074–D-076 select one atomic narrow RoleHost
 cutover, physically local Role packages and one runner that also discovers
 Role-local approved tiers. The structured plan is at
-`06-role-host-cutover-plan/README.md`; only packet
-`BS-MM-S6-ROLE-HOST-R1-20260813-01` is executable. S7 remains blocked.
+`06-role-host-cutover-plan/README.md`. R1 completed the broad cutover but hub
+review rejected its global private-Skill namespace, central exact-Role test
+matrices and unearned Foundation fields. R2 corrected those three owner
+boundaries, passed direct/affected/real-Actor/package proof and replacement
+FINAL `56b2be7f071942b89ffecad5e2891bc9`. S6 is accepted at
+`06-role-host-cutover-plan/S6-ACCEPTANCE.md`; both packets are consumed. S7
+source refresh and READY preparation are unblocked, but no S7 execution is
+authorized.
 
 Do not hand the whole program to one executor. The handoff unit is one current
 stage or owner-bounded lane with an outcome, semantic authority boundary,

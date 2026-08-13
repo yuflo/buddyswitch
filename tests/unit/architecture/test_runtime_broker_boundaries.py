@@ -156,11 +156,11 @@ def test_current_consumers_and_guidance_name_only_the_final_broker_owner() -> No
     )
     application_imports = _buddyswitch_imports(application_entrypoint)
     assert "buddyswitch.foundation.runtime_broker.broker" in application_imports
-    assert "buddyswitch.runtime_support.env_manifest" in application_imports
-    assert (
-        "broker.main(manifest_loader=env_manifest.load_manifest)"
-        in application_entrypoint.read_text(encoding="utf-8")
+    assert not any(
+        imported.startswith("buddyswitch.runtime_support")
+        for imported in application_imports
     )
+    assert "broker.main()" in application_entrypoint.read_text(encoding="utf-8")
 
     for path in BROKER_CLIENT_CONSUMERS:
         assert "buddyswitch.foundation.runtime_broker.client.RuntimeBrokerError" in _buddyswitch_imports(path)

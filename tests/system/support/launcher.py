@@ -331,7 +331,7 @@ class SystemLauncherHarness(LauncherTestSupport):
 
     def _assert_runtime_workspace_excludes_source_surfaces(self, workspace_dir: Path) -> None:
         for relative_path in (
-            "buddyswitch/skills",
+            "buddyswitch/roles",
             "tools",
             "tests",
             "docs",

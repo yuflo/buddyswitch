@@ -60,7 +60,6 @@ class _Context(dict[str, Any]):
         super().__init__(
             current_identity={"id": "act-market-tool", "type": "actor"},
             active_role="market",
-            manifest={"roles": [{"id": "market"}, {"id": "pm"}]},
         )
         self.im_client = client
         self.repos = _Repos()
@@ -72,7 +71,6 @@ class _RealImContext(dict[str, Any]):
         super().__init__(
             current_identity={"id": identity_id, "type": "actor"},
             active_role=role_id,
-            manifest={"roles": [{"id": role_id}, {"id": "pm"}]},
         )
         self.actor_directory = capabilities
 

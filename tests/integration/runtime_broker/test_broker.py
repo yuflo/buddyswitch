@@ -10,7 +10,6 @@ import tempfile
 import unittest
 import contextlib
 import importlib
-import shutil
 import socket
 import subprocess
 import threading
@@ -20,7 +19,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support.cli import pid_alive, wait_until
 from tests.support.fake_cdp import FakeCdpServer, write_fake_chrome
 from tests.support.processes import ResourceLedger
@@ -32,7 +30,6 @@ import buddyswitch.foundation.runtime_broker.client as runtime_client  # noqa: E
 import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -129,8 +126,6 @@ class RuntimeBrokerTests(unittest.TestCase):
         envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)
@@ -625,7 +620,7 @@ class RuntimeBrokerTests(unittest.TestCase):
         dispatcher = _require_module("buddyswitch.foundation.runtime_broker.dispatcher")
         instance_json = self._instance_json()
         active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
-        session = dispatcher.RuntimeBrokerSession(instance_json_path=instance_json, manifest_path=MANIFEST)
+        session = dispatcher.RuntimeBrokerSession(instance_json_path=instance_json)
         seen_repo_roots: list[str | None] = []
 
         def fake_dispatch_env_tool_request(**_kwargs: object) -> dict[str, object]:
@@ -654,64 +649,10 @@ class RuntimeBrokerTests(unittest.TestCase):
             response = dispatcher.dispatch_runtime_request(
                 request,
                 session,
-                manifest_loader=env_manifest.load_manifest,
             )
 
         self.assertTrue(response["ok"], msg=response)
         self.assertEqual(seen_repo_roots, [None])
-
-    def test_env_tool_dispatch_accepts_projected_manifest_without_source_locator(self) -> None:
-        dispatcher = _require_module("buddyswitch.foundation.runtime_broker.dispatcher")
-        instance_json = self._instance_json()
-        active_actor_id = json.loads(instance_json.read_text(encoding="utf-8"))["actor_id"]
-        projected_workspace = self.workspace.path("projected-runtime-workspace")
-        projected_manifest = projected_workspace / "buddyswitch" / "manifest.toml"
-        projected_manifest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(MANIFEST, projected_manifest)
-        session = dispatcher.RuntimeBrokerSession(
-            instance_json_path=instance_json,
-            manifest_path=projected_manifest,
-        )
-        seen_repo_roots: list[str | None] = []
-        loaded_manifest_paths: list[Path] = []
-
-        def load_projected_manifest(path: Path) -> dict[str, object]:
-            loaded_manifest_paths.append(path)
-            return env_manifest.load_manifest(path)
-
-        def fake_dispatch_env_tool_request(**_kwargs: object) -> dict[str, object]:
-            seen_repo_roots.append(os.environ.get("BUDDYSWITCH_REPO_ROOT"))
-            return {"ok": True, "tool": "context", "action": "context.summarize"}
-
-        request = {
-            "protocol": BROKER_V2_PROTOCOL,
-            "request_id": "req-env-tool-explicit-repo-root",
-            "method": "env.tool",
-            "params": {
-                "actor_id": active_actor_id,
-                "active_role": "pm",
-                "tool": "context",
-                "action": "summarize",
-                "args": {},
-            },
-            "deadline_ms": 35000,
-        }
-
-        os.environ.pop("BUDDYSWITCH_REPO_ROOT", None)
-        with patch(
-            "buddyswitch.foundation.runtime_broker.dispatcher.dispatch_env_tool_request",
-            side_effect=fake_dispatch_env_tool_request,
-        ):
-            response = dispatcher.dispatch_runtime_request(
-                request,
-                session,
-                manifest_loader=load_projected_manifest,
-            )
-
-        self.assertTrue(response["ok"], msg=response)
-        self.assertEqual(loaded_manifest_paths, [projected_manifest])
-        self.assertEqual(seen_repo_roots, [None])
-        self.assertFalse(hasattr(session, "repo_root_path"))
 
     def test_rejects_wrong_actor_id(self) -> None:
         instance_json = self._instance_json()
@@ -859,7 +800,6 @@ class RuntimeBrokerServerIsolationTests(unittest.TestCase):
             socket_path=root / "runtime-broker.sock",
             pid_file=root / "runtime-broker.pid",
             instance_json_path=root / "instance.json",
-            manifest_path=MANIFEST,
             max_workers=max_workers,
         )
         broker = server_module.RuntimeBrokerServer(config=config, dispatch_fn=dispatch_fn)
@@ -1289,11 +1229,10 @@ class RuntimeBrokerPersistIdempotencyTests(unittest.TestCase):
             "params": {"context": {}, "result": {}},
             "deadline_ms": 35000,
         }
-        session = dispatcher.RuntimeBrokerSession(instance_json_path=self._instance_json(), manifest_path=MANIFEST)
+        session = dispatcher.RuntimeBrokerSession(instance_json_path=self._instance_json())
         response = dispatcher.dispatch_runtime_request(
             request,
             session,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertFalse(response["ok"], msg=response)
         self.assertEqual(response["error"]["code"], "E_RUNTIME_BROKER_PROTOCOL")
@@ -1344,8 +1283,6 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
             envelope = runtime_broker.dispatch_runtime_request(
                 request=request,
                 instance_json_path=instance_json,
-                manifest_path=MANIFEST,
-                manifest_loader=env_manifest.load_manifest,
             )
 
         self.assertFalse(envelope.get("ok"), msg=envelope)
@@ -1372,7 +1309,7 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        session = dispatcher.RuntimeBrokerSession(instance_json_path=instance_json, manifest_path=MANIFEST)
+        session = dispatcher.RuntimeBrokerSession(instance_json_path=instance_json)
         for request in (
             {
                 "protocol": BROKER_V2_PROTOCOL,
@@ -1405,7 +1342,6 @@ class RuntimeBrokerV2AcceptanceTests(unittest.TestCase):
                 response = dispatcher.dispatch_runtime_request(
                     request,
                     session,
-                    manifest_loader=env_manifest.load_manifest,
                 )
                 self.assertFalse(response["ok"], msg=response)
                 self.assertIs(response["error"]["retriable"], False)

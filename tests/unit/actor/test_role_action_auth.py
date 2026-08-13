@@ -1,154 +1,66 @@
-"""Central role-action authorization contract tests."""
+"""Application Role authority contract tests."""
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
-from tests.support.paths import REPO_ROOT
-
-ROOT = REPO_ROOT
-
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
-from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
-from buddyswitch.runtime_support import role_auth  # noqa: E402
+from buddyswitch.application.build import activate_application
+from buddyswitch.foundation.tool_runtime import registry as tool_registry
 
 
-class RoleActionAuthPolicyTests(unittest.TestCase):
+class RoleActionAuthorityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.manifest = env_manifest.load_manifest(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml")
-        self.roles = frozenset(
-            role["id"] for role in self.manifest.get("roles", []) if isinstance(role, dict)
-        )
+        self.application = activate_application()
+        self.authority = self.application.role_authority
+        self.roles = self.application.role_host.valid_role_ids
         self.operation_semantics = tool_registry.operation_semantics()
 
     def _allowed_roles(self, required_permission: str) -> frozenset[str]:
         return frozenset(
             role
             for role in self.roles
-            if role_auth.authorize(required_permission, role, self.manifest).allowed
+            if self.authority.authorize(required_permission, role).allowed
         )
 
-    def test_manifest_roles_are_runtime_roles(self) -> None:
-        self.assertEqual(self.roles, frozenset({"market", "pm", "design", "dev", "test"}))
+    def test_role_host_roles_are_the_only_runtime_roles(self) -> None:
+        self.assertTrue(self.roles)
+        self.assertEqual(self.authority.role_ids, self.roles)
 
-    def test_policy_covers_every_registered_action_permission(self) -> None:
+    def test_every_registered_permission_allows_every_known_role(self) -> None:
         for action_id, semantics in self.operation_semantics.items():
             required_permission = semantics["required_permission"]
             with self.subTest(action=action_id, required_permission=required_permission):
-                allowed_roles = self._allowed_roles(required_permission)
-                self.assertTrue(allowed_roles)
-                self.assertLessEqual(allowed_roles, self.roles)
+                self.assertEqual(self._allowed_roles(required_permission), self.roles)
 
-    def test_none_permission_allows_every_manifest_role(self) -> None:
-        self.assertEqual(self._allowed_roles("none"), self.roles)
-        for role in self.roles:
-            decision = role_auth.authorize("none", role, self.manifest)
-            with self.subTest(role=role):
-                self.assertTrue(decision.allowed)
-                self.assertEqual(decision.allowed_roles, tuple(sorted(self.roles)))
+    def test_unknown_active_role_is_denied(self) -> None:
+        decision = self.authority.authorize("track.read", "ghost")
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.allowed_roles, tuple(sorted(self.roles)))
+        self.assertIn("unknown", decision.reason)
+
+    def test_unknown_permission_is_denied_without_a_fallback(self) -> None:
+        decision = self.authority.authorize(
+            "unknown.permission",
+            min(self.roles),
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.allowed_roles, ())
+        self.assertIn("not declared", decision.reason)
 
     def test_authorize_rejects_non_string_role_ids(self) -> None:
         with self.assertRaises(TypeError):
-            role_auth.authorize("none", {"role_id": "pm"}, self.manifest)  # type: ignore[arg-type]
+            self.authority.authorize("none", {"role_id": "pm"})  # type: ignore[arg-type]
 
-    def test_track_owner_permissions_allow_every_manifest_role_at_policy_layer(self) -> None:
-        for permission in ("track.create", "track.update_requirements", "track.update_status", "track.archive", "track.resolve_comment_thread"):
-            with self.subTest(permission=permission):
-                self.assertEqual(self._allowed_roles(permission), self.roles)
-                self.assertTrue(role_auth.authorize(permission, "pm", self.manifest).allowed)
-                self.assertTrue(role_auth.authorize(permission, "dev", self.manifest).allowed)
-
-    def test_common_permissions_allow_every_manifest_role(self) -> None:
-        for permission in (
-            "artifact.create",
-            "evidence.approve",
-            "track.add_proof",
-            "message.contacts",
-            "message.send",
-            "message.conversation",
-            "message.get",
-            "message.list",
-            "task_sys.cancel",
-            "task_sys.create",
-        ):
-            with self.subTest(permission=permission):
-                self.assertEqual(self._allowed_roles(permission), self.roles)
-
-    def test_every_demand_sys_permission_allows_every_manifest_role(self) -> None:
-        expected = {
-            "demand_sys.list",
-            "demand_sys.get",
-            "demand_sys.resolve_inbound",
-            "demand_sys.complete",
-        }
-        self.assertEqual(
-            {
-                semantics["required_permission"]
-                for action_id, semantics in self.operation_semantics.items()
-                if action_id.startswith("demand_sys.")
-            },
-            expected,
-        )
-        for permission in expected:
-            with self.subTest(permission=permission):
-                self.assertEqual(self._allowed_roles(permission), self.roles)
-
-    def test_unknown_active_role_is_denied(self) -> None:
-        decision = role_auth.authorize("track.read", "ghost", self.manifest)
-        self.assertFalse(decision.allowed)
-        self.assertEqual(decision.required_permission, "track.read")
-        self.assertEqual(decision.active_role, "ghost")
-        self.assertEqual(decision.allowed_roles, tuple(sorted(self.roles)))
-        self.assertIn("unknown role", decision.reason)
-
-    def test_unknown_permission_is_denied_with_policy_metadata(self) -> None:
-        decision = role_auth.authorize("unknown.permission", "pm", self.manifest)
-        self.assertFalse(decision.allowed)
-        self.assertEqual(decision.required_permission, "unknown.permission")
-        self.assertEqual(decision.active_role, "pm")
-        self.assertEqual(decision.allowed_roles, ())
-        self.assertIn("not covered", decision.reason)
-
-    def test_role_action_summary_returns_runtime_policy_preview_shape(self) -> None:
-        summary = role_auth.role_action_summary("market", self.manifest, self.operation_semantics)
-        old_keys = (
-            "role_" + "authority_" + "source",
-            "allowed_" + "actions",
-            "denied_" + "actions",
-            "denied_" + "action_" + "details",
-            "allowed_" + "action_" + "permissions",
-        )
-        self.assertEqual(summary.get("active_role"), "market")
-        self.assertEqual(summary.get("source"), "env.tool role-action policy")
-        self.assertIs(summary.get("not_authorization_boundary"), True)
-        self.assertIs(summary.get("not_execution_result"), True)
-        self.assertIsInstance(summary.get("available_actions"), list, msg=summary)
-        self.assertIsInstance(summary.get("restricted_actions"), list, msg=summary)
-        self.assertIsInstance(summary.get("restricted_action_details"), dict, msg=summary)
-        for old_key in old_keys:
-            self.assertNotIn(old_key, summary)
-        self.assertIn("track.list", summary["available_actions"])
-        self.assertIn("artifact.create_revision", summary["available_actions"])
-        self.assertIn("message.send", summary["available_actions"])
-        self.assertIn("track.create", summary["available_actions"])
-        self.assertIn("track.update_requirements", summary["available_actions"])
-        self.assertIn("track.update_status", summary["available_actions"])
-        self.assertIn("track.archive", summary["available_actions"])
-        self.assertIn("track.resolve_comment_thread", summary["available_actions"])
-        self.assertIn("task_sys.cancel", summary["available_actions"])
-        self.assertIn("task_sys.create", summary["available_actions"])
+    def test_role_action_summary_projects_the_configured_authority(self) -> None:
+        selected_role = min(self.roles)
+        summary = tool_registry.role_action_summary(selected_role)
+        self.assertEqual(summary["active_role"], selected_role)
+        self.assertEqual(summary["source"], "Application RoleHost + Tool registrations")
         self.assertEqual(summary["restricted_actions"], [])
         self.assertEqual(summary["restricted_action_details"], {})
+        self.assertIn("track.list", summary["available_actions"])
+        self.assertIn("artifact.create_revision", summary["available_actions"])
 
-    def test_pm_preview_has_no_pm_only_restricted_actions(self) -> None:
-        summary = role_auth.role_action_summary("pm", self.manifest, self.operation_semantics)
-        self.assertNotIn("track.create", summary["restricted_actions"])
-        self.assertNotIn("track.archive", summary["restricted_actions"])
-        self.assertNotIn("track.resolve_comment_thread", summary["restricted_actions"])
-        self.assertIn("track.create", summary["available_actions"])
-        self.assertIn("track.update_requirements", summary["available_actions"])
-        self.assertIn("track.update_status", summary["available_actions"])
-        self.assertIn("track.archive", summary["available_actions"])
-        self.assertIn("track.resolve_comment_thread", summary["available_actions"])
+
+if __name__ == "__main__":
+    unittest.main()

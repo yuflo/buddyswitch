@@ -25,7 +25,7 @@ Context has one live capability root:
 
 Context has no Public package, state, Daemon, Web, CLI, Skill, cleanup,
 inbound, or module-local test surface. Its behavior tests remain root-owned
-because they cross component, Runtime Broker, package, profile, and process
+because they cross component, Runtime Broker, package, Role, and process
 boundaries.
 
 ## Application composition
@@ -48,14 +48,14 @@ Application composition
       -> Task Public
       -> Artifact Public
       -> Communication Public
-      -> generic Tool registry, Role authorization, runtime profile, and ToolContext facts
+      -> generic Tool registry, Application Role authority, selected RoleRuntime, and ToolContext facts
 ```
 
 Context Private consumes Track, Task, Artifact, and Communication only through
 their accepted Public operations. It may also consume generic Tool runtime
-definitions, registry projections, Role authorization, Tool results, runtime
-profile facts, and host-provided identity, manifest, invocation, and workspace
-facts. It does not import another component's Private package.
+definitions, registry projections, Role authorization, Tool results, selected
+`RoleRuntime` facts, and host-provided identity, invocation, and workspace facts.
+It does not import another component's Private package.
 
 Application composition is the only consumer of the Context module. No
 consumer imports Context Private, and no Context Public facade exists.
@@ -68,6 +68,7 @@ decision orientation. `context.list_sources` returns source descriptors.
 
 All three actions are read-only, runless, non-durable, and resource-free.
 Role-policy preview is projected directly through the generic Role
-authorization contract using the host-provided Role and manifest facts.
+authorization contract using the selected `RoleRuntime` and Application Tool
+authority.
 Context does not configure source roots, grant write authority, reserve runs,
 write product state, or expose a second registration or compatibility path.

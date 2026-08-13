@@ -13,21 +13,15 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from buddyswitch.foundation.tool_runtime import results as tool_results  # noqa: E402
 from buddyswitch.modules.task import public as task_public  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-
-
 class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.manifest_path = MANIFEST
-        self.manifest = env_manifest.load_manifest(self.manifest_path)
 
     def _instance(
         self,
@@ -72,8 +66,6 @@ class EnvToolActiveTaskGateTests(RuntimeWorkspaceTestCase):
             actor_id=str(instance["actor_id"]),
             instance_json=instance["instance_json"],
             instance_payload=instance["instance_payload"],
-            manifest=self.manifest,
-            manifest_path=self.manifest_path,
         )
         self.assertIsInstance(response, dict)
         return response

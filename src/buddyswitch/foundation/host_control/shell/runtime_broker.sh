@@ -28,15 +28,6 @@ buddyswitch_runtime_broker_socket_marker_file() {
   printf '%s/runtime/runtime-broker.socket\n' "${BUDDYSWITCH_INSTANCE_ROOT}"
 }
 
-_buddyswitch_runtime_broker_manifest_path() {
-  local manifest_path="${BUDDYSWITCH_PACKAGE_ROOT}/catalog/manifest.toml"
-  if [[ ! -f "${manifest_path}" ]]; then
-    echo "Runtime broker manifest missing from installed package: ${manifest_path}" >&2
-    return 1
-  fi
-  printf '%s\n' "${manifest_path}"
-}
-
 _buddyswitch_runtime_broker_effective_socket() {
   local default_socket marker_path marker_value fallback_socket
   marker_path="$(buddyswitch_runtime_broker_socket_marker_file)"
@@ -72,8 +63,6 @@ _buddyswitch_runtime_broker_lifecycle_json() {
   local pid_file="$3"
   local marker_file="$4"
   local log_file="$5"
-  local manifest_path
-  manifest_path="$(_buddyswitch_runtime_broker_manifest_path)" || return 1
   (
     cd "${BUDDYSWITCH_INSTANCE_ROOT}"
     export BUDDYSWITCH_STATE_ROOT="${BUDDYSWITCH_SHARED_ROOT}/state"
@@ -82,8 +71,7 @@ _buddyswitch_runtime_broker_lifecycle_json() {
       --pid-file "${pid_file}" \
       --marker-file "${marker_file}" \
       --log-file "${log_file}" \
-      --instance-json "${BUDDYSWITCH_INSTANCE_JSON}" \
-      --manifest "${manifest_path}"
+      --instance-json "${BUDDYSWITCH_INSTANCE_JSON}"
   )
 }
 
@@ -95,7 +83,7 @@ _buddyswitch_runtime_broker_cleanup_local_files() {
 }
 
 _buddyswitch_runtime_broker_lifecycle_available() {
-  [[ -f "${BUDDYSWITCH_PACKAGE_ROOT}/catalog/manifest.toml" ]]
+  [[ -n "${BUDDYSWITCH_HOST_CONTROL_RUNTIME_BROKER_MODULE:-}" ]]
 }
 
 buddyswitch_runtime_broker_is_active() {

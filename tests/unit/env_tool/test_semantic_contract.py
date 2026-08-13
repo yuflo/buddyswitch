@@ -11,12 +11,11 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.application.build import activate_application  # noqa: E402
 from buddyswitch.foundation.tool_runtime.definition import ActionDefinition  # noqa: E402
 from buddyswitch.foundation.tool_runtime.definition import ToolDefinition  # noqa: E402
 from buddyswitch.foundation.tool_runtime.definition import validate_definition  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as catalog  # noqa: E402
-from buddyswitch.runtime_support import role_auth  # noqa: E402
 
 _EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 _EXPECTED_ACTIONS_BY_TOOL = {
@@ -368,23 +367,19 @@ class EnvToolSemanticContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "task_requirement"):
             validate_definition(invalid_definition)
 
-    def test_operation_semantics_permissions_are_covered_by_role_policy(self) -> None:
-        manifest = env_manifest.load_manifest(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml")
-        manifest_roles = frozenset(
-            role["id"]
-            for role in manifest.get("roles", [])
-            if isinstance(role, dict) and isinstance(role.get("id"), str)
-        )
+    def test_operation_semantics_permissions_are_covered_by_role_authority(self) -> None:
+        application = activate_application()
+        role_ids = application.role_host.valid_role_ids
         for key, row in catalog.operation_semantics().items():
             required_permission = row["required_permission"]
             allowed_roles = frozenset(
                 role
-                for role in manifest_roles
-                if role_auth.authorize(required_permission, role, manifest).allowed
+                for role in role_ids
+                if application.role_authority.authorize(required_permission, role).allowed
             )
             with self.subTest(action=key, required_permission=required_permission):
                 self.assertTrue(allowed_roles)
-                self.assertLessEqual(allowed_roles, manifest_roles)
+                self.assertLessEqual(allowed_roles, role_ids)
 
     def test_operation_semantics_remain_role_neutral(self) -> None:
         forbidden_role_fields = {
@@ -610,8 +605,6 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             actor_id="act-market-5e0000000001",
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={},
-            manifest={"roles": [{"id": "market"}]},
-            manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
         )
         self.assertFalse(hyphenated.get("ok"), msg=hyphenated)
         self.assertEqual((hyphenated.get("error") or {}).get("code"), "E_ENV_TOOL")
@@ -623,8 +616,6 @@ class EnvToolSemanticContractTests(unittest.TestCase):
             actor_id="act-market-5e0000000001",
             instance_json=ROOT / "tmp" / "does-not-matter.json",
             instance_payload={"browser_port": None},
-            manifest={"roles": [{"id": "market"}]},
-            manifest_path=ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml",
         )
         self.assertFalse(canonical.get("ok"), msg=canonical)
         self.assertEqual((canonical.get("error") or {}).get("code"), "E_ENV_TOOL", msg=canonical)

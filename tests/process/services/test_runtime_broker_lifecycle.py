@@ -43,8 +43,6 @@ def _command(paths: lifecycle.BrokerPaths, root: Path) -> list[str]:
         str(paths.log_file),
         "--instance-json",
         str(root / "instance.json"),
-        "--manifest",
-        str(Path(os.environ["BUDDYSWITCH_PACKAGE_ROOT"]) / "catalog" / "manifest.toml"),
     ]
 
 
@@ -71,7 +69,7 @@ def test_broker_command_uses_only_installed_module_and_explicit_state_paths(
     ]
     assert "--repo-root" not in command
     assert not [argument for argument in command if argument.endswith(".py")]
-    assert str(REPO_ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml") not in command
+    assert "--manifest" not in command
 
 
 @pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])

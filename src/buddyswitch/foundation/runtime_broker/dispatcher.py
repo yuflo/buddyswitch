@@ -7,7 +7,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Iterator
 
 import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.foundation.tool_runtime import results as tool_results
@@ -15,13 +15,9 @@ from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_reque
 from buddyswitch.foundation.browser_runtime import runtime as browser_runtime
 
 
-ManifestLoader = Callable[[Path], dict[str, Any]]
-
-
 @dataclass(frozen=True)
 class RuntimeBrokerSession:
     instance_json_path: Path
-    manifest_path: Path
     socket_path: Path | None = None
     pid_file: Path | None = None
 
@@ -161,12 +157,9 @@ def _env_tool_dispatch(
     *,
     params: dict[str, Any],
     session: RuntimeBrokerSession,
-    manifest_path: Path,
     instance_json_path: Path,
     instance_record: dict[str, Any],
-    manifest_loader: ManifestLoader,
 ) -> dict[str, Any]:
-    manifest = manifest_loader(manifest_path)
     actor_id = str(instance_record["actor_id"]).strip()
     active_role = str(instance_record["role"]).strip()
     payload = dict(params)
@@ -180,8 +173,6 @@ def _env_tool_dispatch(
         actor_id=actor_id,
         instance_json=instance_json_path,
         instance_payload=dict(instance_record),
-        manifest=manifest,
-        manifest_path=manifest_path,
         invocation=payload.get("invocation"),
     )
 
@@ -349,8 +340,6 @@ def _browser_dispatch(
 def dispatch_runtime_request(
     request: dict[str, Any],
     session: RuntimeBrokerSession,
-    *,
-    manifest_loader: ManifestLoader,
 ) -> dict[str, Any]:
     try:
         method_raw = request.get("method")
@@ -409,10 +398,8 @@ def dispatch_runtime_request(
                 return _env_tool_dispatch(
                     params=params,
                     session=session,
-                    manifest_path=session.manifest_path,
                     instance_json_path=session.instance_json_path,
                     instance_record=instance_record,
-                    manifest_loader=manifest_loader,
                 )
             if method == "ping":
                 return _ping_dispatch(session=session, instance_record=instance_record)

@@ -17,7 +17,7 @@ the shell adapters are packaged only from their owner-local directory.
 ## Application input and dependency direction
 
 ```text
-Application executable + manifest + current Role-profile facts
+Application executable + current RoleHost facts
   -> one frozen CliRuntimeApplicationInput
   -> Foundation CLI Runtime / config / shell adapters
   -> Host Control / Actor Session / Web / Browser / cleanup owners
@@ -26,7 +26,7 @@ Application executable + manifest + current Role-profile facts
 
 `src/buddyswitch/application/cli_runtime.py` selects the concrete Web,
 Actor-build, Browser Runtime, environment MCP, Browser proxy, cleanup and
-diagnostics modules, the current manifest, the current Role-profile resolver,
+diagnostics modules, the current RoleRuntime resolver,
 and the parent Tool projection. The public CLI and Host-start entrypoints each
 assemble that same required input. Foundation validates it and projects only
 the supplied facts into its owner-local shell environment; it has no default,
@@ -37,13 +37,13 @@ interfaces. Generic cleanup execution is owned by
 `src/buddyswitch/foundation/state/cleanup.py`; runless status and Tool-catalog
 projection are owned by
 `src/buddyswitch/foundation/cli_runtime/diagnostics.py`. Application supplies
-their required current Role-source facts directly.
+their required current Role facts directly.
 
 Foundation CLI Runtime imports or embeds no Application, Launcher, component,
-runtime-support or concrete Role implementation. Current Role assets remain
-unchanged under `src/buddyswitch/launcher/assets/roles/` as an Application/S6
-input. The Launcher package root remains inert and contains no executable
-owner.
+retired central Role support or concrete Role implementation. Application
+supplies one `RoleRuntime` resolver from RoleHost; CLI Runtime uses only its
+source-access and Browser facts. The Launcher package root remains inert and
+contains no executable owner.
 
 ## Preserved public contract
 

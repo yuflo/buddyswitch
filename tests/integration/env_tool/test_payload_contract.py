@@ -12,15 +12,11 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
+from buddyswitch.application.build import activate_application  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as catalog  # noqa: E402
-from buddyswitch.runtime_support import role_auth  # noqa: E402
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
-
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-
 
 class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
     def _instance_json(self, *, role: str = "dev") -> Path:
@@ -69,8 +65,6 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             actor_id=actor_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
-            manifest=env_manifest.load_manifest(MANIFEST),
-            manifest_path=MANIFEST,
         )
 
     def test_catalog_payload_fields_match_definitions(self) -> None:
@@ -98,23 +92,18 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
                     )
 
     def test_every_action_rejects_unregistered_payload_field_without_state_change(self) -> None:
-        manifest = env_manifest.load_manifest(MANIFEST)
-        manifest_roles = {
-            role["id"]
-            for role in manifest.get("roles", [])
-            if isinstance(role, dict) and isinstance(role.get("id"), str)
-        }
+        application = activate_application()
+        role_ids = application.role_host.valid_role_ids
         for tool in sorted(catalog.supported_tools()):
             for action in sorted(catalog.supported_actions(tool)):
                 with self.subTest(tool=tool, action=action):
                     action_def = catalog.get_action_definition(tool, action)
                     allowed_roles = {
                         role
-                        for role in manifest_roles
-                        if role_auth.authorize(
+                        for role in role_ids
+                        if application.role_authority.authorize(
                             action_def.required_permission,
                             role,
-                            manifest,
                         ).allowed
                     }
                     self.assertTrue(allowed_roles, msg=f"{tool}.{action}")
@@ -143,7 +132,7 @@ class EnvToolPayloadContractTests(RuntimeWorkspaceTestCase):
             "src/buddyswitch/modules/communication/private/adapters/tool/tool.py",
             "src/buddyswitch/modules/communication/private/adapters/tool/_impl.py",
             "src/buddyswitch/modules/communication/private/adapters/actor/im_client.py",
-            "src/buddyswitch/runtime_support/role_auth.py",
+            "src/buddyswitch/application/role_authority.py",
             "src/buddyswitch/modules/communication/private/adapters/web/external_im_session.py",
             "src/buddyswitch/modules/communication/private/adapters/web/im_http_router.py",
             "src/buddyswitch/modules/task/private/adapters/goal/handler.py",

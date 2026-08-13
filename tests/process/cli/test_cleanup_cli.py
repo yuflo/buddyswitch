@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,10 +16,6 @@ class CleanupCliTests(unittest.TestCase):
     def test_cleanup_cli_reports_active_categories_as_default_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             repo_root = Path(temp_root) / "state"
-            manifest_path = repo_root / "buddyswitch" / "manifest.toml"
-            manifest_path.parent.mkdir(parents=True)
-            shutil.copy2(REPO_ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml", manifest_path)
-
             completed = run_process(
                 [
                     PYTHON,
@@ -28,8 +23,6 @@ class CleanupCliTests(unittest.TestCase):
                     "buddyswitch.application.entrypoints.cleanup",
                     "--state-root",
                     str(repo_root),
-                    "--manifest",
-                    str(manifest_path),
                     "--role",
                     "pm",
                 ],

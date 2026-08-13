@@ -14,12 +14,10 @@ from tests.support.processes import run_process
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.python import PYTHON  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 EXPECTED_TOOLS = {"track", "artifact", "context", "demand_sys", "evidence", "search", "message", "task_sys"}
 
 
@@ -72,7 +70,6 @@ class EnvToolRouterTests(RuntimeWorkspaceTestCase):
         role: str = "dev",
     ) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role=role, label=actor_id)
-        manifest = env_manifest.load_manifest(MANIFEST)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return tool_registry.dispatch_env_tool_request(
             payload=payload,
@@ -80,8 +77,6 @@ class EnvToolRouterTests(RuntimeWorkspaceTestCase):
             actor_id=actor_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
-            manifest=manifest,
-            manifest_path=MANIFEST,
         )
 
     def _assert_role_auth_receipt(
@@ -131,11 +126,9 @@ class BlockMessageImpl(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockMessageImpl())
 
 from buddyswitch.application.build import activate_application
-from buddyswitch.runtime_support import env_manifest
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 
 activate_application()
-manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
@@ -144,8 +137,6 @@ response = dispatch_env_tool_request(
     actor_id=instance_payload["actor_id"],
     instance_json=instance_json,
     instance_payload=instance_payload,
-    manifest=env_manifest.load_manifest(manifest_path),
-    manifest_path=manifest_path,
 )
 print(json.dumps(response, sort_keys=True))
 """
@@ -181,11 +172,9 @@ class BlockSelectedImpl(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockSelectedImpl())
 
 from buddyswitch.application.build import activate_application
-from buddyswitch.runtime_support import env_manifest
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 
 activate_application()
-manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
@@ -194,8 +183,6 @@ response = dispatch_env_tool_request(
     actor_id=instance_payload["actor_id"],
     instance_json=instance_json,
     instance_payload=instance_payload,
-    manifest=env_manifest.load_manifest(manifest_path),
-    manifest_path=manifest_path,
 )
 loaded = sorted(
     name
@@ -340,7 +327,6 @@ import sys
 from pathlib import Path
 
 from buddyswitch.application.build import activate_application
-from buddyswitch.runtime_support import env_manifest
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request
 
 application = activate_application()
@@ -355,7 +341,6 @@ component_private_tool_roots = tuple(
     f"{{registration.invoke.__module__.rsplit('.', 1)[0]}}."
     for registration in application.tools
 )
-manifest_path = Path({str(MANIFEST)!r})
 instance_json = Path({str(instance_json)!r})
 instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
 response = dispatch_env_tool_request(
@@ -364,8 +349,6 @@ response = dispatch_env_tool_request(
     actor_id=instance_payload["actor_id"],
     instance_json=instance_json,
     instance_payload=instance_payload,
-    manifest=env_manifest.load_manifest(manifest_path),
-    manifest_path=manifest_path,
 )
 loaded = sorted(
     name

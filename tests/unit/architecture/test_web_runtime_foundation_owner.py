@@ -193,5 +193,5 @@ def test_web_assets_have_owner_local_package_data() -> None:
         "assets/**/LICENSE*",
     ]
     assert package_data["buddyswitch.launcher"] == [
-        "assets/**/*.md",
+        "assets/docs/*.md",
     ]

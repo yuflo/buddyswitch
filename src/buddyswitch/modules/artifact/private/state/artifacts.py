@@ -12,8 +12,10 @@ from typing import Any
 
 from buddyswitch.foundation.identity.model import IdentityRef
 import buddyswitch.foundation.state.runtime as state_runtime
+from buddyswitch.modules.artifact.public.contracts import (
+    VALID_ARTIFACT_TEMPLATES,
+)
 
-VALID_ARTIFACT_TEMPLATES = ("brief", "proposal", "design", "decision", "proof", "note")
 _LEGACY_SOURCE_RUN = "source" + "_run_id"
 _LEGACY_ARTIFACT_FIELDS = {
     "task_id",

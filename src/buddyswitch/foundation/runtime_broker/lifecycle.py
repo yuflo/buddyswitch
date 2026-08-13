@@ -501,7 +501,6 @@ def start_broker_process(
     paths: BrokerPaths,
     *,
     instance_json_path: Path,
-    manifest_path: Path,
 ) -> dict[str, Any]:
     command = [
         sys.executable,
@@ -518,8 +517,6 @@ def start_broker_process(
         str(paths.log_file),
         "--instance-json",
         str(instance_json_path),
-        "--manifest",
-        str(manifest_path),
     ]
     paths.log_file.parent.mkdir(parents=True, exist_ok=True)
     with paths.log_file.open("a", encoding="utf-8") as log_handle:
@@ -539,7 +536,6 @@ def ensure_broker(
     paths: BrokerPaths,
     *,
     instance_json_path: Path,
-    manifest_path: Path,
     expected_actor_id: str,
     expected_active_role: str,
     expected_workspace_root: Path | None = None,
@@ -583,7 +579,6 @@ def ensure_broker(
     started = start_broker_process(
         paths,
         instance_json_path=instance_json_path,
-        manifest_path=manifest_path,
     )
     if started.get("ok") is not True:
         cleanup_stale_broker_state(paths)

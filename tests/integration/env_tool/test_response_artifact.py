@@ -32,7 +32,6 @@ from buddyswitch.foundation.tool_runtime import results as tool_results  # noqa:
 from buddyswitch.foundation.tool_runtime import context as runtime_context  # noqa: E402
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 

@@ -25,7 +25,6 @@ buddyswitch_patch_codex_config() {
   if [[ -n "${active_role}" ]]; then
     temp_root_args=(--temp-root "${BUDDYSWITCH_INSTANCE_TMP}")
     patch_args+=(
-      --manifest "${BUDDYSWITCH_PACKAGE_ROOT}/catalog/manifest.toml"
       --role "${active_role}"
       --instance-root "${BUDDYSWITCH_INSTANCE_ROOT}"
       --workspace-dir "${BUDDYSWITCH_WORKSPACE_DIR}"

@@ -704,7 +704,7 @@ web_search = "cached"
             self.assertNotEqual(pm_write.returncode, 0, msg=pm_write.stdout + pm_write.stderr)
             self.assertFalse(pm_blocked_path.exists())
 
-    def test_missing_profile_returns_2_and_leaves_config_unchanged(self) -> None:
+    def test_unknown_role_returns_2_and_leaves_config_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             shared_root = temp_root / "shared"
@@ -727,5 +727,5 @@ web_search = "cached"
                 xdg_config_home=instance_root / "xdg-config",
             )
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("Env profile invalid:", completed.stderr)
+            self.assertIn("Unknown Role 'unknown'", completed.stderr)
             self.assertEqual(config_path.read_text(encoding="utf-8"), initial)

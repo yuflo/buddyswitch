@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from buddyswitch.application.composition import (
     ACTIVE_TASK_PROBE,
@@ -29,6 +30,9 @@ from buddyswitch.foundation.web_runtime.contracts import (
     validate_web_route_registrations,
 )
 from buddyswitch.foundation.state.cleanup import validate_cleanup_contributions
+from buddyswitch.foundation.role_host import RoleHost
+from buddyswitch.application.role_authority import RoleAuthority
+from buddyswitch.modules.artifact import public as artifact_public
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,14 @@ class ApplicationAssembly:
     inbound_sources: tuple[InboundSourceRegistration, ...]
     web_routes: tuple[WebRouteRegistration, ...]
     web_workers: tuple[WebWorkerRegistration, ...]
+
+
+@dataclass(frozen=True)
+class ApplicationRuntime(ApplicationAssembly):
+    """Activated application plus its one validated RoleHost and authority."""
+
+    role_host: RoleHost
+    role_authority: RoleAuthority
 
 
 def _text(value: object, *, label: str) -> str:
@@ -234,19 +246,45 @@ def activate_application(
     *,
     daemon_handler_order: tuple[str, ...] = DAEMON_HANDLER_ORDER,
     active_task_probe=ACTIVE_TASK_PROBE,
-) -> ApplicationAssembly:
+) -> ApplicationRuntime:
     from buddyswitch.foundation.tool_runtime import registry
     from buddyswitch.foundation.web_runtime import runtime as web_runtime
-    from buddyswitch.runtime_support import env_manifest, role_auth
-
-    application = build_application(
+    assembly = build_application(
         modules,
         daemon_handler_order=daemon_handler_order,
     )
-    registry.configure_authorizer(role_auth.authorize)
+    package_root = Path(__file__).resolve().parent.parent
+    role_host = RoleHost.discover(
+        package_root=package_root,
+        component_skills=assembly.skills,
+        valid_artifact_templates=artifact_public.VALID_ARTIFACT_TEMPLATES,
+    )
+    role_authority = RoleAuthority(
+        role_ids=role_host.valid_role_ids,
+        permissions=frozenset(
+            action.required_permission
+            for registration in assembly.tools
+            for action in registration.definition.actions
+        ),
+    )
+    application = ApplicationRuntime(
+        modules=assembly.modules,
+        daemon_handlers=assembly.daemon_handlers,
+        tools=assembly.tools,
+        cli_commands=assembly.cli_commands,
+        skills=assembly.skills,
+        cleanup=assembly.cleanup,
+        actor_console_sections=assembly.actor_console_sections,
+        inbound_sources=assembly.inbound_sources,
+        web_routes=assembly.web_routes,
+        web_workers=assembly.web_workers,
+        role_host=role_host,
+        role_authority=role_authority,
+    )
+    registry.configure_authorizer(application.role_authority.authorize)
+    registry.configure_role_runtime_resolver(application.role_host.runtime)
     registry.configure_tool_registrations(application.tools)
     registry.configure_active_task_probe(active_task_probe)
-    env_manifest.configure_skill_exports(application.skills)
     web_runtime.configure_actor_console_sections(
         application.actor_console_sections
     )

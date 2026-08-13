@@ -4,31 +4,26 @@ from __future__ import annotations
 
 import json
 import hashlib
-import shutil
 import tempfile
 import unittest
 import uuid
 from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
-from buddyswitch.application.role_source import load_valid_role_ids  # noqa: E402
 from buddyswitch.foundation.state import cleanup as state_cleanup  # noqa: E402
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
+from buddyswitch.application.build import activate_application  # noqa: E402
 from buddyswitch.modules.artifact.private.domain import source_refs  # noqa: E402
 from buddyswitch.foundation.tool_runtime import registry as tool_catalog  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-
-
 class MemoryRemovalContractTests(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -102,8 +97,6 @@ class MemoryRemovalContractTests(unittest.TestCase):
                 "deadline_ms": 35000,
             },
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertEqual(envelope.get("protocol"), PROTOCOL)
         if envelope.get("ok") is True:
@@ -125,12 +118,6 @@ class MemoryRemovalContractTests(unittest.TestCase):
                 continue
             payload[key] = value
         return payload
-
-    def _copy_manifest_into_runtime(self) -> Path:
-        runtime_manifest = self._runtime_path("catalog/manifest.toml")
-        runtime_manifest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(MANIFEST, runtime_manifest)
-        return runtime_manifest
 
     def _write_old_memory_file(self, *, memory_id: str = "mem-old", role: str = "pm") -> None:
         memory_path = self._state_path(f"buddyswitch/objects/memories/{memory_id}.json")
@@ -190,15 +177,13 @@ class MemoryRemovalContractTests(unittest.TestCase):
                     )
 
     def test_cleanup_ignores_old_memory_files(self) -> None:
-        runtime_manifest = self._copy_manifest_into_runtime()
         self._write_old_memory_file(memory_id="mem-old-projection", role="pm")
 
         cleanup_plan = state_cleanup.build_cleanup_plan(
             scope="all-data",
             role=None,
             repo_root=self.runtime_root,
-            manifest_path=runtime_manifest,
-            valid_role_ids_loader=load_valid_role_ids,
+            valid_role_ids=activate_application().role_host.valid_role_ids,
         )
         self.assertNotIn("memory_object_ids", cleanup_plan)
         self.assertNotIn("handoff_object_ids", cleanup_plan)

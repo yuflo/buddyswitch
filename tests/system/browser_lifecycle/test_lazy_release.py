@@ -38,7 +38,6 @@ from buddyswitch.foundation.runtime_broker import protocol  # noqa: E402
 import buddyswitch.foundation.process_runtime.json_framing as json_framing  # noqa: E402
 
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROXY = BROWSER_RUNTIME / "cockpit_proxy.py"
 DAEMON_CORE = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "instance.py"
 DAEMON_MAILBOX = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "mailbox.py"

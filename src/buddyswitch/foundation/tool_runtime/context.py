@@ -12,6 +12,7 @@ import uuid
 from buddyswitch.foundation.identity.model import ActorIdentityProfile as _ActorIdentityProfile
 from buddyswitch.foundation.identity.model import IdentityRef as _IdentityRef
 from buddyswitch.foundation.identity.model import actor_identity as _actor_identity
+from buddyswitch.foundation.role_host import RoleRuntime
 import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.foundation.daemon import client as daemon_client
 import re
@@ -93,9 +94,8 @@ class ToolContext(Mapping[str, Any]):
     role_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
-    manifest: dict[str, Any]
+    role: RoleRuntime
     actor_private_root: Path
-    manifest_path: Path | None = None
     invocation: InvocationFact = field(default_factory=InvocationFact)
 
     def __post_init__(self) -> None:
@@ -119,8 +119,7 @@ class ToolContext(Mapping[str, Any]):
         actor_identity_profile: _ActorIdentityProfile,
         instance_json: Path,
         instance_payload: dict[str, Any],
-        manifest: dict[str, Any],
-        manifest_path: Path | None = None,
+        role: RoleRuntime,
         invocation: InvocationFact | None = None,
     ) -> "ToolContext":
         return cls(
@@ -129,11 +128,10 @@ class ToolContext(Mapping[str, Any]):
             role_id=actor_identity_profile.role_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
-            manifest=manifest,
+            role=role,
             actor_private_root=state_runtime.actor_private_dir(
                 instance_payload
             ).resolve(strict=False),
-            manifest_path=manifest_path,
             invocation=invocation or InvocationFact(),
         )
 
@@ -149,10 +147,8 @@ class ToolContext(Mapping[str, Any]):
             return self.instance_json
         if key == "instance_payload":
             return self.instance_payload
-        if key == "manifest":
-            return self.manifest
-        if key == "manifest_path":
-            return self.manifest_path
+        if key == "role":
+            return self.role
         raise KeyError(key)
 
     def __iter__(self) -> Iterator[str]:
@@ -160,11 +156,10 @@ class ToolContext(Mapping[str, Any]):
         yield "active_role"
         yield "instance_json"
         yield "instance_payload"
-        yield "manifest"
-        yield "manifest_path"
+        yield "role"
 
     def __len__(self) -> int:
-        return 6
+        return 5
 
     def get(self, key: str, default: Any = None) -> Any:
         try:

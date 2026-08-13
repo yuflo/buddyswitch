@@ -44,7 +44,6 @@ class TrackServiceContext(TypedDict):
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
-    manifest: dict[str, Any]
 
 
 class _TrackInvocationContext:

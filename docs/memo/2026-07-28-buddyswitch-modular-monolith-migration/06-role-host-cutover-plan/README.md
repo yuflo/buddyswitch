@@ -1,7 +1,8 @@
 # S6 RoleHost Cutover Plan
 
-> State: `READY — S6 R1 ONLY`
-> Packet: `BS-MM-S6-ROLE-HOST-R1-20260813-01`
+> State: `ACCEPTED`
+> Acceptance: `S6-ACCEPTANCE.md`
+> Packets: R1 and R2 consumed
 > Merge unit: one atomic Role/Skill truth replacement
 
 ## Acceptance sentence
@@ -30,7 +31,8 @@ intermediate architecture.
 3. `S6-BOUNDARY-DESIGN-AND-PREFLIGHT.md`;
 4. `S6-IMPLEMENTATION-PLAN.md`;
 5. `S6-READY-REVIEW.md`;
-6. `S6-GOAL-PACKET.md`.
+6. `S6-GOAL-PACKET.md`;
+7. `S6-ACCEPTANCE.md`.
 
 ## Selected topology
 
@@ -62,5 +64,6 @@ through budget pools, player qualification, evidence, valuation and entry
 odds. It does not add trading automation, a market-data service, a new product
 module, a Daemon handler, Tool, Web route or host lifecycle.
 
-S7 remains blocked until the coordinating hub accepts the returned S6
-candidate and pushes its checkpoint.
+The coordinating hub accepted the R2 candidate after closing R1's escaped
+private-Skill, central-test and Foundation-contract defects. S7 source refresh
+and READY preparation begin only from the committed and pushed S6 checkpoint.

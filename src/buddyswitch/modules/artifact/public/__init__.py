@@ -9,6 +9,7 @@ from buddyswitch.modules.artifact.public.contracts import (
     AttachmentSummary,
     EvidenceTarget,
     PublicationCandidate,
+    VALID_ARTIFACT_TEMPLATES,
 )
 from buddyswitch.modules.artifact.public.operations import (
     list_readable_summaries,
@@ -28,6 +29,7 @@ __all__ = (
     "AttachmentSummary",
     "EvidenceTarget",
     "PublicationCandidate",
+    "VALID_ARTIFACT_TEMPLATES",
     "list_readable_summaries",
     "read_reference_metadata",
     "resolve_evidence_target",

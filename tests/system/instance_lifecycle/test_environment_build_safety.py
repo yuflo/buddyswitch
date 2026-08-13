@@ -13,6 +13,9 @@ from pathlib import Path
 from tests.system.support.launcher import SystemLauncherHarness
 from tests.support.paths import REPO_ROOT
 from tests.support.processes import run_process
+from buddyswitch.roles.secondary_market_investor.role import (
+    ROLE as SECONDARY_MARKET_INVESTOR_ROLE,
+)
 
 
 LAUNCHER = REPO_ROOT / "buddyswitch-codex"
@@ -33,6 +36,52 @@ def _activated_runtime_identity() -> dict[str, object]:
 
 
 class TestEnvironmentBuildSafety(SystemLauncherHarness, unittest.TestCase):
+    def test_directory_only_investor_role_starts_with_only_selected_bootstrap(self) -> None:
+        with ExitStack() as cleanup:
+            temp_root = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
+            source_home = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))
+            ctx = self._start_service_instance(
+                temp_root,
+                source_home,
+                cleanup_stack=cleanup,
+                role="secondary-market-investor",
+            )
+            completed = ctx["completed"]
+            assert isinstance(completed, subprocess.CompletedProcess)
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=self._output_error_text(completed),
+            )
+
+            instance_payload = ctx["instance_payload"]
+            assert isinstance(instance_payload, dict)
+            self.assertEqual(
+                instance_payload["role"],
+                "secondary-market-investor",
+            )
+            workspace = Path(str(ctx["instance_root"])) / "workspace"
+            self.assertEqual(
+                (workspace / "AGENTS.md").read_text(encoding="utf-8"),
+                (
+                    REPO_ROOT
+                    / "src"
+                    / "buddyswitch"
+                    / "roles"
+                    / "secondary_market_investor"
+                    / "AGENTS.md"
+                ).read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                {
+                    path.name
+                    for path in (workspace / ".agents" / "skills").iterdir()
+                },
+                set(SECONDARY_MARKET_INVESTOR_ROLE.skills),
+            )
+            self._assert_runtime_workspace_excludes_source_surfaces(workspace)
+            self._stop_service_instance(ctx)
+
     def test_started_actor_is_code_free_and_runtime_attributable(self) -> None:
         with ExitStack() as cleanup:
             temp_root = Path(cleanup.enter_context(tempfile.TemporaryDirectory()))

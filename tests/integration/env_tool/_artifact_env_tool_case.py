@@ -9,7 +9,6 @@ import uuid
 from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
@@ -20,7 +19,6 @@ from tests.support import object_builders
 import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -83,8 +81,6 @@ class ArtifactEnvToolCase(RuntimeWorkspaceTestCase):
         envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)

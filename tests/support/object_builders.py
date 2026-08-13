@@ -10,13 +10,10 @@ from buddyswitch.modules.track.private.state import track_comments, tracks
 from buddyswitch.modules.artifact import public as artifact_public
 
 
-KNOWN_ROLE_IDS = frozenset({"pm", "design", "dev", "market", "test"})
-
-
 def role_identity_id(role_id: str) -> str:
-    if role_id not in KNOWN_ROLE_IDS:
-        raise ValueError(f"unknown test role: {role_id}")
-    return f"act-{role_id}-fixture"
+    if not isinstance(role_id, str) or not role_id.strip():
+        raise ValueError("test role must be a non-empty string")
+    return f"act-{role_id.strip()}-fixture"
 
 
 def identity_id(value: dict[str, Any] | str) -> str:

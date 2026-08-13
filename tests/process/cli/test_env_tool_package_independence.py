@@ -79,7 +79,8 @@ from buddyswitch.foundation.tool_runtime.definition import (
     ToolDefinition,
     ToolRegistration,
 )
-from buddyswitch.runtime_support import role_auth
+from buddyswitch.application.role_authority import RoleAuthority
+from buddyswitch.foundation.role_host import RoleRuntime
 
 definition = ToolDefinition(
     id="probe",
@@ -138,7 +139,22 @@ def invoke(*, action, args, context):
         extra={"echo": args.get("message")},
     )
 
-registry.configure_authorizer(role_auth.authorize)
+registry.configure_authorizer(
+    RoleAuthority(
+        role_ids=frozenset({"dev"}),
+        permissions=frozenset({"none"}),
+    ).authorize
+)
+registry.configure_role_runtime_resolver(
+    lambda role_id: RoleRuntime(
+        id=role_id,
+        artifact_templates=("brief",),
+        project_path="projects/app",
+        source_access="write",
+        browser_cockpit="available",
+        search_api="available",
+    )
+)
 registry.configure_tool_registrations(
     (ToolRegistration(definition=definition, invoke=invoke),)
 )
@@ -148,7 +164,6 @@ response = registry.dispatch_env_tool_request(
     actor_id="act-dev-explicit-probe",
     instance_json=Path("instance.json"),
     instance_payload={"workspace_dir": str(Path.cwd())},
-    manifest={"roles": [{"id": "dev"}]},
 )
 print(json.dumps({
     "tools": sorted(registry.supported_tools()),

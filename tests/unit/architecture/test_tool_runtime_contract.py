@@ -14,7 +14,7 @@ ROOT = REPO_ROOT
 
 FINAL_TOOL_RUNTIME_ROOT = ROOT / "src" / "buddyswitch" / "foundation" / "tool_runtime"
 FINAL_DAEMON_CLIENT = ROOT / "src" / "buddyswitch" / "foundation" / "daemon" / "client.py"
-FINAL_ROLE_POLICY = ROOT / "src" / "buddyswitch" / "runtime_support" / "role_auth.py"
+FINAL_ROLE_POLICY = ROOT / "src" / "buddyswitch" / "application" / "role_authority.py"
 RETIRED_TOOL_RUNTIME_ROOT = ROOT / "src" / "buddyswitch" / "env" / "tool_runtime"
 RETIRED_TOOL_PACKAGE_ROOT = ROOT / "src" / "buddyswitch" / "env" / "tools"
 
@@ -89,7 +89,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
         from buddyswitch.foundation.tool_runtime import native_mcp
         from buddyswitch.foundation.tool_runtime import registry
         from buddyswitch.foundation.tool_runtime import results
-        from buddyswitch.runtime_support import role_auth
+        from buddyswitch.application import role_authority
 
         self.assertEqual(set(tool_runtime.__all__), set())
         self.assertEqual(set(context.__all__), {"InvocationFact", "ToolContext"})
@@ -116,12 +116,14 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
                 "compact_tool_affordances",
                 "configure_active_task_probe",
                 "configure_authorizer",
+                "configure_role_runtime_resolver",
                 "configure_tool_registrations",
                 "dispatch_env_tool_request",
                 "env_tools_description",
                 "get_action_definition",
                 "get_definition",
                 "operation_semantics",
+                "role_action_summary",
                 "supported_actions",
                 "supported_tools",
                 "tool_catalog_errors",
@@ -140,7 +142,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
             set(results.__all__),
             {"alternative_capability", "next_action_option", "rejection", "success"},
         )
-        self.assertEqual(set(role_auth.__all__), {"authorize", "role_action_summary"})
+        self.assertTrue(hasattr(role_authority, "RoleAuthority"))
 
         for module, names in (
             (
@@ -173,13 +175,12 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
             ),
             (results, ("follow_up_affordance", "tool_affordance")),
             (
-                role_auth,
+                role_authority,
                 (
                     "COMMON_ROLE_PERMISSIONS",
                     "ROLE_PERMISSION_ADDITIONS",
                     "allowed_permissions_for_role",
                     "allowed_roles_for_permission",
-                    "manifest_role_ids",
                 ),
             ),
         ):
@@ -215,7 +216,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
             "buddyswitch.env.tool_runtime",
             "buddyswitch.env.tools",
             "buddyswitch.modules",
-            "buddyswitch.runtime_support.role_auth",
+            "buddyswitch.application.role_authority",
         )
         for path in sorted(FINAL_TOOL_RUNTIME_ROOT.glob("*.py")):
             source = path.read_text(encoding="utf-8")
@@ -245,7 +246,7 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
 
         self.assertEqual(violations, [], msg="\n".join(violations))
 
-    def test_application_injects_role_policy_and_adapters_use_narrow_context(self) -> None:
+    def test_application_injects_role_authority_and_adapters_use_narrow_context(self) -> None:
         application_source = (
             ROOT / "src/buddyswitch/application/build.py"
         ).read_text(encoding="utf-8")
@@ -256,7 +257,8 @@ class ToolRuntimeArchitectureTests(unittest.TestCase):
             ROOT / "src/buddyswitch/modules/evidence/private/adapters/tool/_impl.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("registry.configure_authorizer(role_auth.authorize)", application_source)
+        self.assertIn("registry.configure_authorizer(application.role_authority.authorize)", application_source)
+        self.assertIn("registry.configure_role_runtime_resolver(application.role_host.runtime)", application_source)
         self.assertIn("context.actor_private_root", artifact_source)
         self.assertNotIn("context.repos", artifact_source)
         self.assertIn("context.now()", evidence_source)

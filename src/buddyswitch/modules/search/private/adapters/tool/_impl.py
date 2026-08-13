@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, TypedDict
 from urllib.parse import urlencode
 
-from buddyswitch.runtime_support import env_profiles
+from buddyswitch.foundation.role_host import RoleRuntime
 from .tool import DEFINITION
 from buddyswitch.foundation.tool_runtime import results as tool_results
 
@@ -14,6 +13,7 @@ ALLOWED_BACKENDS = ("browser", "search_api")
 ALLOWED_ENGINES = ("google", "web", "reddit", "x")
 SEARCH_API_PROVIDER_AVAILABLE = False
 REQUIRED_COCKPIT_TOOL = "chrome-devtools-cockpit"
+NATIVE_CODEX_WEB_SEARCH = "disabled"
 
 
 _ACTION_DEFINITION_MAP = {
@@ -36,26 +36,16 @@ class SearchServiceContext(TypedDict):
     actor_id: str
     instance_json: Path
     instance_payload: dict[str, Any]
-    manifest: dict[str, Any]
-    manifest_path: Path | None
+    role: RoleRuntime
 
 
 def _load_search_boundary(context: SearchServiceContext) -> dict[str, Any]:
-    manifest_path = context.get("manifest_path")
-    if manifest_path is None:
-        profile = env_profiles.require_env_profile(context["active_role"])
-    else:
-        profile = env_profiles.require_env_profile(
-            context["active_role"],
-            manifest_path=manifest_path,
-        )
-    tool_capability = profile.get("tool_capability")
-    if not isinstance(tool_capability, dict):
-        raise ValueError("env profile tool_capability must be an object")
-    search = tool_capability.get("search")
-    if not isinstance(search, dict):
-        raise ValueError("env profile tool_capability.search must be an object")
-    return dict(search)
+    role = context["role"]
+    return {
+        "native_codex_web_search": NATIVE_CODEX_WEB_SEARCH,
+        "browser_cockpit": role.browser_cockpit,
+        "search_api": role.search_api,
+    }
 
 
 def _normalize_query(args: dict[str, Any]) -> str | None:
@@ -315,7 +305,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
             message="search_api requires explicit user approval and no BuddySwitch-managed search API provider is configured",
             permission_boundary="search.search_api.user_approved_only",
             human_summary="search_api backend is blocked without explicit user-approved downgrade path.",
-            why_blocked="No managed search_api provider is configured and profile marks search_api as user-approved-only.",
+            why_blocked="No managed search_api provider is configured and the selected Role requires user approval.",
             impact="No external request was sent and no runtime state changed.",
             state_changed=False,
             retryable=True,
@@ -353,7 +343,7 @@ def _search_api_unavailable(*, context: SearchServiceContext, boundary: dict[str
         code="E_SEARCH_BACKEND_UNAVAILABLE",
         message="search_api backend is unavailable",
         permission_boundary="search.search_api",
-        human_summary="search_api backend is unavailable in this runtime profile.",
+        human_summary="search_api backend is unavailable for this selected Role.",
         why_blocked="No BuddySwitch-managed search_api provider is configured.",
         impact="No external request was sent and no runtime state changed.",
         state_changed=False,
@@ -410,7 +400,7 @@ def _status_payload(context: SearchServiceContext, boundary: dict[str, Any]) -> 
     if search_api_available:
         available_backends.append("search_api")
     return {
-        "native_codex_web_search": "disabled",
+        "native_codex_web_search": NATIVE_CODEX_WEB_SEARCH,
         "available_backends": available_backends,
         "backend_status": {
             "browser": {
@@ -448,7 +438,7 @@ def status_for_active_instance(*, args: dict[str, Any], context: SearchServiceCo
         ],
         extra={
             **_status_payload(context, boundary),
-            "permission_boundary": "search.profile",
+            "permission_boundary": "search.role",
         },
     )
 
@@ -475,7 +465,7 @@ def request_for_active_instance(*, args: dict[str, Any], context: SearchServiceC
         return _browser_unavailable(
             action="search.request",
             context=context,
-            reason="profile search browser_cockpit is unavailable",
+            reason="Role search browser_cockpit is unavailable",
         )
     target_url = _build_search_url(query, engine)
     return tool_results.success(

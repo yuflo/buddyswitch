@@ -17,18 +17,21 @@ from buddyswitch.foundation.tool_runtime import results as tool_results
 _EXPLICIT_REGISTRATIONS: dict[str, ToolRegistration] = {}
 _ACTIVE_TASK_PROBE: Callable[[Any], bool] | None = None
 _AUTHORIZER: ToolAuthorizer | None = None
+_ROLE_RUNTIME_RESOLVER: Callable[[str], Any] | None = None
 
 __all__ = (
     "action_mutates",
     "compact_tool_affordances",
     "configure_active_task_probe",
     "configure_authorizer",
+    "configure_role_runtime_resolver",
     "configure_tool_registrations",
     "dispatch_env_tool_request",
     "env_tools_description",
     "get_action_definition",
     "get_definition",
     "operation_semantics",
+    "role_action_summary",
     "supported_actions",
     "supported_tools",
     "tool_catalog_errors",
@@ -56,6 +59,13 @@ def configure_authorizer(authorizer: ToolAuthorizer) -> None:
         raise ValueError("ToolHost authorizer must be callable")
     global _AUTHORIZER
     _AUTHORIZER = authorizer
+
+
+def configure_role_runtime_resolver(resolver: Callable[[str], Any]) -> None:
+    if not callable(resolver):
+        raise ValueError("ToolHost Role runtime resolver must be callable")
+    global _ROLE_RUNTIME_RESOLVER
+    _ROLE_RUNTIME_RESOLVER = resolver
 
 
 def configure_active_task_probe(
@@ -232,6 +242,36 @@ def operation_semantics(*, exclude_tools: set[str] | None = None) -> dict[str, d
                 "risk_hints": dict(action.risk_hints),
             }
     return rows
+
+
+def role_action_summary(role_id: str) -> dict[str, Any]:
+    if _AUTHORIZER is None:
+        raise RuntimeError("ToolHost authorizer is not configured")
+    available_actions: list[str] = []
+    restricted_actions: list[str] = []
+    restricted_action_details: dict[str, dict[str, Any]] = {}
+    for action_id, semantics in sorted(operation_semantics().items()):
+        required_permission = str(semantics.get("required_permission", ""))
+        decision = _AUTHORIZER(required_permission, role_id)
+        if decision.allowed:
+            available_actions.append(action_id)
+            continue
+        restricted_actions.append(action_id)
+        restricted_action_details[action_id] = {
+            "required_permission": required_permission,
+            "active_role": role_id,
+            "restricted_to_roles": list(decision.allowed_roles),
+            "reason": decision.reason,
+        }
+    return {
+        "active_role": role_id,
+        "source": "Application RoleHost + Tool registrations",
+        "not_authorization_boundary": True,
+        "not_execution_result": True,
+        "available_actions": available_actions,
+        "restricted_actions": restricted_actions,
+        "restricted_action_details": restricted_action_details,
+    }
 
 
 def compact_tool_affordances(*, exclude_tools: set[str] | None = None) -> dict[str, dict[str, Any]]:
@@ -418,8 +458,6 @@ def dispatch_env_tool_request(
     actor_id: str,
     instance_json: Path,
     instance_payload: dict[str, Any],
-    manifest: dict[str, Any],
-    manifest_path: Path | None = None,
     invocation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runtime_actor = _actor_identity_profile_from_dispatch(actor_id=actor_id, active_role=active_role)
@@ -517,7 +555,6 @@ def dispatch_env_tool_request(
     auth_decision = _AUTHORIZER(
         action_definition.required_permission,
         runtime_actor.role_id,
-        manifest,
     )
     if not auth_decision.allowed:
         return auth_feedback.role_auth_rejection(
@@ -571,12 +608,13 @@ def dispatch_env_tool_request(
             value.strip() if isinstance(value, str) else None
         )
 
+    if _ROLE_RUNTIME_RESOLVER is None:
+        raise RuntimeError("ToolHost Role runtime resolver is not configured")
     context = ToolContext.from_identity_profile(
         actor_identity_profile=runtime_actor,
         instance_json=instance_json,
         instance_payload=dict(instance_payload),
-        manifest=dict(manifest),
-        manifest_path=manifest_path,
+        role=_ROLE_RUNTIME_RESOLVER(runtime_actor.role_id),
         invocation=InvocationFact(**normalized_invocation),
     )
     if action_definition.task_requirement == TASK_REQUIREMENT_ACTIVE_TASK_REQUIRED:

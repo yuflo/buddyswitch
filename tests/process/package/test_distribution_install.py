@@ -11,11 +11,9 @@ from tests.support.paths import REPO_ROOT
 
 
 REQUIRED_CUTOVER_RESOURCES = {
-    "buddyswitch/catalog/manifest.toml",
-    "buddyswitch/catalog/env-profiles/dev.json",
     "buddyswitch/modules/artifact/assets/artifact-selection-v1.json",
     "buddyswitch/modules/artifact/assets/artifact-selection-v2.json",
-    "buddyswitch/contracts/schemas/dev/dev-result.json",
+    "buddyswitch/contracts/prepare-turn-context.json",
     "buddyswitch/foundation/app_server/shell/app_server.sh",
     "buddyswitch/foundation/cli_runtime/shell/env.sh",
     "buddyswitch/foundation/cli_runtime/shell/cleanup.sh",
@@ -26,7 +24,6 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/foundation/host_control/shell/daemon.sh",
     "buddyswitch/foundation/host_control/shell/runtime_broker.sh",
     "buddyswitch/foundation/browser_runtime/assets/chrome-devtools-mcp-1.1.1-tools.json",
-    "buddyswitch/launcher/assets/roles/dev/AGENTS.md",
     "buddyswitch/foundation/web_runtime/assets/web-management/index.html",
     "buddyswitch/foundation/web_runtime/assets/web-management/vendor/dompurify/LICENSE",
     "buddyswitch/foundation/web_runtime/assets/web-management/vendor/dompurify/LICENSE-MPL",
@@ -37,7 +34,6 @@ REQUIRED_CUTOVER_RESOURCES = {
     "buddyswitch/modules/artifact/skills/artifact-tool/SKILL.md",
     "buddyswitch/modules/track/skills/track-tool/SKILL.md",
     "buddyswitch/modules/track/skills/triage-track/SKILL.md",
-    "buddyswitch/skills/dev/implement-scoped-change/SKILL.md",
 }
 REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/actor_runtime/__init__.py",
@@ -61,6 +57,7 @@ REQUIRED_FOUNDATION_MODULE_FILES = {
     "buddyswitch/foundation/identity/__init__.py",
     "buddyswitch/foundation/identity/model.py",
     "buddyswitch/foundation/identity/profiles.py",
+    "buddyswitch/foundation/role_host/__init__.py",
     "buddyswitch/foundation/state/__init__.py",
     "buddyswitch/foundation/state/runtime.py",
     "buddyswitch/foundation/state/actor_private.py",
@@ -85,6 +82,12 @@ RETIRED_GENERIC_RUNTIME_SUPPORT_FILES = {
     "buddyswitch/runtime_support/skill_contracts.py",
     "buddyswitch/runtime_support/turn_runtime.py",
 }
+RETIRED_CENTRAL_ROLE_PREFIXES = (
+    "buddyswitch/catalog/",
+    "buddyswitch/runtime_support/",
+    "buddyswitch/skills/",
+    "buddyswitch/launcher/assets/roles/",
+)
 
 
 def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path) -> None:
@@ -121,6 +124,9 @@ def test_clean_source_builds_one_noneditable_runtime_distribution(tmp_path: Path
     assert "buddyswitch/launcher/shell/cleanup.sh" not in names
     assert "buddyswitch/launcher/shell/browser_cockpit.sh" not in names
     assert RETIRED_GENERIC_RUNTIME_SUPPORT_FILES.isdisjoint(names)
+    assert not [
+        name for name in names if name.startswith(RETIRED_CENTRAL_ROLE_PREFIXES)
+    ]
     assert not any(
         name.startswith("buddyswitch/launcher/assets/web-management/")
         for name in names
@@ -151,6 +157,12 @@ from pathlib import Path
 import sys
 import buddyswitch
 
+def spec_exists(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
 current_modules = (
     "buddyswitch.foundation.actor_runtime",
     "buddyswitch.foundation.actor_runtime.capability",
@@ -169,6 +181,7 @@ current_modules = (
     "buddyswitch.foundation.host_control.state",
     "buddyswitch.foundation.identity.model",
     "buddyswitch.foundation.identity.profiles",
+    "buddyswitch.foundation.role_host",
     "buddyswitch.foundation.state.runtime",
     "buddyswitch.foundation.state.actor_private",
     "buddyswitch.foundation.state.cleanup",
@@ -196,8 +209,11 @@ print(json.dumps({
     "sys_path": sys.path,
     "module_files": module_files,
     "retired_specs": {
-        "buddyswitch.env": importlib.util.find_spec("buddyswitch.env") is not None,
-        "buddyswitch.runtime_kernel": importlib.util.find_spec("buddyswitch.runtime_kernel") is not None,
+        "buddyswitch.env": spec_exists("buddyswitch.env"),
+        "buddyswitch.runtime_kernel": spec_exists("buddyswitch.runtime_kernel"),
+        "buddyswitch.catalog": spec_exists("buddyswitch.catalog"),
+        "buddyswitch.runtime_support": spec_exists("buddyswitch.runtime_support"),
+        "buddyswitch.skills": spec_exists("buddyswitch.skills"),
         "buddyswitch.launcher.actor_capability": importlib.util.find_spec("buddyswitch.launcher.actor_capability") is not None,
         "buddyswitch.launcher.codex_runtime": importlib.util.find_spec("buddyswitch.launcher.codex_runtime") is not None,
         "buddyswitch.launcher.actor_session": importlib.util.find_spec("buddyswitch.launcher.actor_session") is not None,
@@ -212,9 +228,9 @@ print(json.dumps({
         "buddyswitch.launcher.cli_contract": importlib.util.find_spec("buddyswitch.launcher.cli_contract") is not None,
         "buddyswitch.launcher.cli": importlib.util.find_spec("buddyswitch.launcher.cli") is not None,
         "buddyswitch.launcher.codex_config": importlib.util.find_spec("buddyswitch.launcher.codex_config") is not None,
-        "buddyswitch.runtime_support.env_cleanup": importlib.util.find_spec("buddyswitch.runtime_support.env_cleanup") is not None,
-        "buddyswitch.runtime_support.skill_contracts": importlib.util.find_spec("buddyswitch.runtime_support.skill_contracts") is not None,
-        "buddyswitch.runtime_support.turn_runtime": importlib.util.find_spec("buddyswitch.runtime_support.turn_runtime") is not None,
+        "buddyswitch.runtime_support.env_cleanup": spec_exists("buddyswitch.runtime_support.env_cleanup"),
+        "buddyswitch.runtime_support.skill_contracts": spec_exists("buddyswitch.runtime_support.skill_contracts"),
+        "buddyswitch.runtime_support.turn_runtime": spec_exists("buddyswitch.runtime_support.turn_runtime"),
     },
 }, sort_keys=True))
 """
@@ -247,6 +263,9 @@ print(json.dumps({
     assert payload["retired_specs"] == {
         "buddyswitch.env": False,
         "buddyswitch.runtime_kernel": False,
+        "buddyswitch.catalog": False,
+        "buddyswitch.runtime_support": False,
+        "buddyswitch.skills": False,
         "buddyswitch.launcher.actor_capability": False,
         "buddyswitch.launcher.codex_runtime": False,
         "buddyswitch.launcher.actor_session": False,
@@ -283,6 +302,7 @@ print(json.dumps({
         "buddyswitch.foundation.host_control.state",
         "buddyswitch.foundation.identity.model",
         "buddyswitch.foundation.identity.profiles",
+        "buddyswitch.foundation.role_host",
         "buddyswitch.foundation.state.runtime",
         "buddyswitch.foundation.state.actor_private",
         "buddyswitch.foundation.state.cleanup",
@@ -355,7 +375,22 @@ def test_atomic_cutover_distribution_contains_every_required_runtime_resource(
         and "__pycache__" not in path.relative_to(package_source).parts
         and path.suffix != ".pyc"
     }
+    source_role_directories = tuple(
+        path
+        for path in sorted((package_source / "roles").iterdir())
+        if path.is_dir() and not path.name.startswith("_")
+    )
 
     assert REQUIRED_CUTOVER_RESOURCES <= wheel_package_files
+    assert source_role_directories
+    for role_directory in source_role_directories:
+        role_prefix = (
+            f"buddyswitch/roles/{role_directory.name}/"
+        )
+        assert {
+            f"{role_prefix}role.py",
+            f"{role_prefix}AGENTS.md",
+            f"{role_prefix}assets/result-schema.json",
+        } <= wheel_package_files
     assert wheel_package_files == source_package_files
     assert "buddyswitch/launcher/assets/chrome-devtools-mcp-1.1.1-tools.json" not in wheel_package_files

@@ -27,13 +27,12 @@ RETIRED_PATHS = (
 ALLOWED_CONTEXT_IMPORT_PREFIXES = (
     "buddyswitch.foundation.tool_runtime",
     "buddyswitch.foundation.composition",
+    "buddyswitch.foundation.role_host",
     "buddyswitch.modules.artifact.public",
     "buddyswitch.modules.communication.public",
     "buddyswitch.modules.context",
     "buddyswitch.modules.task.public",
     "buddyswitch.modules.track.public",
-    "buddyswitch.runtime_support.env_profiles",
-    "buddyswitch.runtime_support.role_auth",
 )
 
 

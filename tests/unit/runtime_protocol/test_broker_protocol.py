@@ -29,7 +29,6 @@ import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E
 import buddyswitch.foundation.runtime_broker.client as runtime_client  # noqa: E402
 import buddyswitch.foundation.process_runtime.process_identity as process_identity  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 BROKER_V2_PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -240,7 +239,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
         def dispatch_fn(request, session):
             return {"ok": True, "method": request["method"]}
 
-        session = {"instance_json": Path("instance.json"), "manifest_path": MANIFEST}
+        session = {"instance_json": Path("instance.json")}
         with patch(
             "buddyswitch.foundation.runtime_broker.coordinator._hold_product_runtime_lock",
             side_effect=fake_lock,
@@ -276,7 +275,7 @@ class RuntimeBrokerCoordinatorTests(unittest.TestCase):
             "params": {"tool": "task_sys", "action": "close", "args": {"task_id": "task-missing"}},
             "deadline_ms": 35000,
         }
-        session = {"instance_json": Path("instance.json"), "manifest_path": MANIFEST}
+        session = {"instance_json": Path("instance.json")}
         with patch(
             "buddyswitch.foundation.runtime_broker.coordinator._hold_product_runtime_lock",
             side_effect=timeout_lock,

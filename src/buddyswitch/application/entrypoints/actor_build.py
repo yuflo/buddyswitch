@@ -6,10 +6,9 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
-import re
 import sys
 
-from buddyswitch.application.build import ApplicationAssembly, activate_application
+from buddyswitch.application.build import ApplicationRuntime, activate_application
 from buddyswitch.application.cli_runtime import assemble_cli_runtime
 from buddyswitch.foundation.actor_runtime.environment import (
     ActorEnvironmentBuilder,
@@ -17,23 +16,15 @@ from buddyswitch.foundation.actor_runtime.environment import (
     ActorEnvironmentResult,
     ActorEnvironmentSpec,
     ResolvedActorBootstrap,
-    ResolvedActorSkill,
 )
 from buddyswitch.foundation.process_runtime.invocation import (
     current_runtime_identity,
     run_verified,
 )
 from buddyswitch.foundation.cli_runtime import config as codex_config
-from buddyswitch.runtime_support import runtime_skills
-from buddyswitch.runtime_support.env_manifest import DEFAULT_MANIFEST, ManifestError
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-ROLE_ASSETS_ROOT = PACKAGE_ROOT / "launcher" / "assets" / "roles"
-_ROLE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-
-
-def _base_codex_config(application: ApplicationAssembly) -> str:
+def _base_codex_config(application: ApplicationRuntime) -> str:
     disabled_skills = [
         export.id
         for export in application.skills
@@ -60,29 +51,17 @@ def _base_codex_config(application: ApplicationAssembly) -> str:
 def resolve_actor_bootstrap(
     role_id: str,
     *,
-    application: ApplicationAssembly,
+    application: ApplicationRuntime,
 ) -> ResolvedActorBootstrap:
-    """Resolve the current central Role/Skill truth exactly once."""
+    """Resolve one validated RoleHost Actor projection exactly once."""
 
-    if not _ROLE_ID_RE.fullmatch(role_id):
-        raise ActorEnvironmentBuildError(f"invalid role id: {role_id}")
     try:
-        resolved_skills = runtime_skills.resolve_runtime_skills(
-            manifest_path=DEFAULT_MANIFEST,
-            role_id=role_id,
-            package_root=PACKAGE_ROOT,
+        return application.role_host.actor_bootstrap(
+            role_id,
+            codex_config=_base_codex_config(application),
         )
-    except (ManifestError, runtime_skills.RuntimeSkillsError) as exc:
+    except ValueError as exc:
         raise ActorEnvironmentBuildError(f"invalid runtime role surface: {exc}") from exc
-    return ResolvedActorBootstrap(
-        source_root=PACKAGE_ROOT,
-        agents_source=ROLE_ASSETS_ROOT / role_id / "AGENTS.md",
-        skills=tuple(
-            ResolvedActorSkill(skill_id=skill.skill_id, source=skill.source)
-            for skill in resolved_skills
-        ),
-        codex_config=_base_codex_config(application),
-    )
 
 
 def _result_payload(result: ActorEnvironmentResult) -> dict[str, object]:

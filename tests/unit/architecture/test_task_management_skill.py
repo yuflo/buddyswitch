@@ -5,45 +5,37 @@ from __future__ import annotations
 from pathlib import Path
 
 from buddyswitch.foundation.tool_runtime import registry as tool_registry
-from buddyswitch.runtime_support.env_manifest import load_manifest
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 TRIAGE = ROOT / "src/buddyswitch/modules/demand/skills/demand-triage/SKILL.md"
 ORCHESTRATION = ROOT / "src/buddyswitch/modules/demand/skills/demand-orchestration/SKILL.md"
 RETIRED_TASK_SKILL = ROOT / "src/buddyswitch/skills/shared/task-management/SKILL.md"
-ROLE_AGENTS = tuple(sorted((ROOT / "src/buddyswitch/launcher/assets/roles").glob("*/AGENTS.md")))
+ROLE_ROOT = ROOT / "src/buddyswitch/roles"
+ROLE_AGENTS = tuple(sorted(ROLE_ROOT.glob("*/AGENTS.md")))
 TRIAGE_HANDLER = ROOT / "src/buddyswitch/modules/demand/private/adapters/daemon/demand_triage_handler.py"
 ORCHESTRATION_HANDLER = ROOT / "src/buddyswitch/modules/demand/private/adapters/daemon/demand_orchestration_handler.py"
 
 
-def _manifest() -> dict:
-    return load_manifest(MANIFEST)
-
-
-def _active_skill_files(manifest: dict) -> list[Path]:
-    rows: list[Path] = []
-    for skill in manifest.get("skills", []):
-        if not isinstance(skill, dict) or not isinstance(skill.get("path"), str):
-            continue
-        rows.append(ROOT / "src" / "buddyswitch" / skill["path"] / "SKILL.md")
-    return rows
+def _active_skill_files() -> list[Path]:
+    return sorted(
+        {
+            *ROLE_ROOT.rglob("SKILL.md"),
+            *(ROOT / "src/buddyswitch/modules").glob("*/skills/*/SKILL.md"),
+        }
+    )
 
 
 def test_task_management_is_not_an_active_skill_or_role_dependency() -> None:
-    manifest = _manifest()
-    skill_ids = {
-        row.get("id")
-        for row in manifest.get("skills", [])
-        if isinstance(row, dict)
-    }
+    from buddyswitch.application.build import activate_application
 
-    assert "task-management" not in skill_ids
-    for role in manifest.get("roles", []):
-        if isinstance(role, dict):
-            assert "task-management" not in set(role.get("skills", []))
-            assert "demand-orchestration" in set(role.get("skills", []))
+    application = activate_application()
+    assert "task-management" not in {export.id for export in application.skills}
+    for role_id in application.role_host.valid_role_ids:
+        bootstrap = application.role_host.actor_bootstrap(role_id, codex_config="")
+        selected = {skill.skill_id for skill in bootstrap.skills}
+        assert "task-management" not in selected
+        assert "demand-orchestration" in selected
 
 
 def test_demand_orchestration_skill_owns_terminal_reconciliation_and_bounded_selection() -> None:
@@ -181,7 +173,6 @@ def test_prompt_skill_and_role_layers_do_not_duplicate_tool_catalog_contracts() 
 
 
 def test_active_skills_teach_no_retired_task_execution_model() -> None:
-    manifest = _manifest()
     retired = (
         "task_sys.side_frame",
         "task_sys.parent_frame",
@@ -191,7 +182,7 @@ def test_active_skills_teach_no_retired_task_execution_model() -> None:
         "task progress check",
         "recoverable_tasks",
     )
-    for path in _active_skill_files(manifest):
+    for path in _active_skill_files():
         text = path.read_text(encoding="utf-8").lower()
         for token in retired:
             assert token not in text, (path, token)
@@ -231,9 +222,4 @@ def test_actor_task_tool_surface_is_exactly_minimal() -> None:
 
 
 def test_retired_task_skill_is_not_treated_as_current_policy() -> None:
-    if RETIRED_TASK_SKILL.exists():
-        assert "task-management" not in {
-            row.get("id")
-            for row in _manifest().get("skills", [])
-            if isinstance(row, dict)
-        }
+    assert not RETIRED_TASK_SKILL.exists()

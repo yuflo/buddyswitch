@@ -20,7 +20,7 @@ from buddyswitch.application import cli_runtime as application_cli_runtime
 from buddyswitch.application.entrypoints import actor_build
 from buddyswitch.foundation.cli_runtime import config as codex_config
 from buddyswitch.foundation.cli_runtime import runtime as cli_runtime
-from buddyswitch.runtime_support import env_manifest
+from buddyswitch.roles.pm.role import ROLE as PM_ROLE
 
 ROOT = REPO_ROOT
 LAUNCHER = ROOT / "buddyswitch-codex"
@@ -43,17 +43,15 @@ class TestLauncherBootstrapConfig(ProcessLauncherHarness, unittest.TestCase):
             "pm",
             application=application,
         )
-        manifest = env_manifest.load_manifest()
-        role = env_manifest.require_role(manifest, "pm")
         package_root = Path(actor_build.__file__).resolve().parents[2]
         self.assertEqual(projection.source_root, package_root)
         self.assertEqual(
             projection.agents_source,
-            package_root / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md",
+            package_root / "roles" / "pm" / "AGENTS.md",
         )
         self.assertEqual(
             tuple(skill.skill_id for skill in projection.skills),
-            tuple(role["skills"]),
+            PM_ROLE.skills,
         )
         self.assertTrue(all(skill.source.is_dir() for skill in projection.skills))
         existing = (

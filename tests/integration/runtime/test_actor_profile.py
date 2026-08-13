@@ -18,6 +18,7 @@ from buddyswitch.foundation.identity.model import actor_identity  # noqa: E402
 from buddyswitch.foundation.identity.model import external_identity  # noqa: E402
 from buddyswitch.foundation.tool_runtime import context as context_module  # noqa: E402
 from buddyswitch.foundation.tool_runtime.context import ToolContext  # noqa: E402
+from buddyswitch.foundation.role_host import RoleRuntime  # noqa: E402
 from tests.support.runtime import RuntimeTestWorkspace  # noqa: E402
 
 
@@ -42,8 +43,14 @@ class IdentityRuntimeTests(unittest.TestCase):
                 "instance_root": str(instance_root),
                 "workspace_dir": str(self.runtime_root),
             },
-            manifest={"roles": [{"id": role_id}, {"id": "pm"}]},
-            manifest_path=None,
+            role=RoleRuntime(
+                id=role_id,
+                artifact_templates=("brief",),
+                project_path="projects/app",
+                source_access="write" if role_id == "dev" else "read-only",
+                browser_cockpit="available",
+                search_api="available",
+            ),
         )
 
     def test_identity_ref_serializes_stable_payload_and_validates_type(self) -> None:

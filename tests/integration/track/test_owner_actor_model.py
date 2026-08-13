@@ -9,7 +9,6 @@ import uuid
 from pathlib import Path
 
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
@@ -18,12 +17,12 @@ from buddyswitch.modules.track.private.state import track_comments as track_comm
 from buddyswitch.modules.track.private.state import tracks as track_repo
 from tests.support import object_builders
 import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
+from buddyswitch.application.build import activate_application  # noqa: E402
 from buddyswitch.modules.track.private.adapters.tool.tool import DEFINITION as TRACK_DEFINITION  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
-ALL_ROLES = ("pm", "design", "dev", "market", "test")
+ALL_ROLES = tuple(sorted(activate_application().role_host.valid_role_ids))
 OLD_TRACK_FIELDS = ("owner_role", "created_by_actor", "health", "appetite")
 
 
@@ -86,8 +85,6 @@ class TrackOwnerActorModelTests(RuntimeWorkspaceTestCase):
         envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)

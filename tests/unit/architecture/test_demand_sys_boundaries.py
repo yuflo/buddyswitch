@@ -17,7 +17,7 @@ REPOSITORY = Path("src/buddyswitch/env/repos/demands.py")
 TOOL_ROOT = Path("src/buddyswitch/env/tools/demand_sys")
 CONTEXT = Path("src/buddyswitch/foundation/tool_runtime/context.py")
 CLI = Path("src/buddyswitch/foundation/cli_runtime/runtime.py")
-ROLE_AUTH = Path("src/buddyswitch/runtime_support/role_auth.py")
+ROLE_AUTH = Path("src/buddyswitch/application/role_authority.py")
 CONTEXT_IMPL = Path(
     "src/buddyswitch/modules/context/private/adapters/tool/_impl.py"
 )
@@ -25,8 +25,7 @@ DAEMON_ADAPTER = Path("src/buddyswitch/launcher/demand_sys_daemon_adapter.py")
 DEMAND_TRIAGE_HANDLER = Path("src/buddyswitch/launcher/demand_triage_handler.py")
 DEMAND_ORCHESTRATION_HANDLER = Path("src/buddyswitch/launcher/demand_orchestration_handler.py")
 ARCH_ROOT = Path("docs/arch")
-SKILLS_ROOT = Path("src/buddyswitch/skills")
-ROLE_ROOT = Path("src/buddyswitch/launcher/assets/roles")
+ROLE_ROOT = Path("src/buddyswitch/roles")
 GENERIC_DAEMON_PATHS = (
     Path("src/buddyswitch/foundation/daemon/contracts.py"),
     Path("src/buddyswitch/foundation/daemon/state.py"),
@@ -54,7 +53,6 @@ COMPOSED_HOST_IMPLEMENTATIONS = (
     Path("src/buddyswitch/foundation/tool_runtime/mcp_server.py"),
     Path("src/buddyswitch/foundation/runtime_broker/broker.py"),
     Path("src/buddyswitch/foundation/actor_runtime/environment.py"),
-    Path("src/buddyswitch/runtime_support/runtime_skills.py"),
     Path("src/buddyswitch/foundation/state/cleanup.py"),
     Path("src/buddyswitch/foundation/tool_runtime/client.py"),
     Path("src/buddyswitch/foundation/cli_runtime/diagnostics.py"),
@@ -223,8 +221,6 @@ def test_hosts_receive_typed_contributions_and_consumers_use_demand_public() -> 
         Path("src/buddyswitch/foundation/cli_runtime/config.py"),
         Path("src/buddyswitch/foundation/actor_runtime/environment.py"),
         Path("src/buddyswitch/foundation/state/cleanup.py"),
-        Path("src/buddyswitch/runtime_support/env_manifest.py"),
-        Path("src/buddyswitch/runtime_support/runtime_skills.py"),
     )
     for relative in host_paths:
         imports = _imports(relative)
@@ -322,7 +318,7 @@ def _current_demand_surfaces() -> tuple[Path, ...]:
         FINAL_DAEMON_ROOT / "demand_orchestration_handler.py",
         FINAL_SKILLS_ROOT / "demand-orchestration/SKILL.md",
         *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / ARCH_ROOT).glob("*.md"))),
-        *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / SKILLS_ROOT).rglob("SKILL.md"))),
+        *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / ROLE_ROOT).rglob("SKILL.md"))),
         *tuple(path.relative_to(REPO_ROOT) for path in sorted((REPO_ROOT / ROLE_ROOT).glob("*/AGENTS.md"))),
     )
 

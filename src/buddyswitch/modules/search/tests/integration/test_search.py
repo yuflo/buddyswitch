@@ -6,21 +6,17 @@ import json
 import unittest
 from pathlib import Path
 
-from tests.support.paths import REPO_ROOT
-
-ROOT = REPO_ROOT
-
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 import buddyswitch.modules.search.private.adapters.tool._impl as search_impl  # noqa: E402
+from buddyswitch.application.build import activate_application  # noqa: E402
 from buddyswitch.foundation.tool_runtime.registry import dispatch_env_tool_request  # noqa: E402
+from tests.support.paths import REPO_ROOT  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
-
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 
 
 class SearchEnvToolTests(RuntimeWorkspaceTestCase):
     def setUp(self) -> None:
         super().setUp()
+        self.application = activate_application()
 
     def _instance_json(
         self,
@@ -68,7 +64,6 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
         role: str = "market",
     ) -> dict[str, object]:
         actor_id = self._runtime_actor_id(role=role, label=actor_id)
-        manifest = env_manifest.load_manifest(MANIFEST)
         instance_payload = json.loads(instance_json.read_text(encoding="utf-8"))
         return dispatch_env_tool_request(
             payload={"tool": "search", "action": action, "args": args},
@@ -76,8 +71,6 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
             actor_id=actor_id,
             instance_json=instance_json,
             instance_payload=instance_payload,
-            manifest=manifest,
-            manifest_path=MANIFEST,
         )
 
     def _start_cdp_server(self, state: dict[str, object]) -> tuple[HTTPServer, threading.Thread, int]:
@@ -131,7 +124,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
 
 
 
-    def test_search_status_reports_market_profile_backend_and_cockpit_search_boundary(self) -> None:
+    def test_search_status_reports_market_role_backend_and_cockpit_search_boundary(self) -> None:
         instance_json = self._instance_json(role="market", browser_port=9222)
 
         response = self._dispatch(action="status", args={}, instance_json=instance_json, role="market")
@@ -308,7 +301,7 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
 
     def test_search_source_has_no_direct_json_new_page_open(self) -> None:
         source_path = (
-            ROOT
+            REPO_ROOT
             / "src"
             / Path(*search_impl.__name__.split(".")).with_suffix(".py")
         )
@@ -324,7 +317,15 @@ class SearchEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertNotIn("scripts/env/client.py", text)
         self.assertNotIn("cdp_background_page.py", text)
         self.assertNotIn("Target." + "createTarget", text)
-        self.assertFalse((ROOT / "src" / "buddyswitch" / "launcher" / "cdp_background_page.py").exists())
+        self.assertFalse(
+            (
+                REPO_ROOT
+                / "src"
+                / "buddyswitch"
+                / "launcher"
+                / "cdp_background_page.py"
+            ).exists()
+        )
 
     def test_search_rejects_empty_query_and_unknown_engine(self) -> None:
         instance_json = self._instance_json()

@@ -249,7 +249,7 @@ def _build_definition() -> ToolDefinition:
                 result_content_level="track comment row and delivery metadata",
                 success_effect="Adds one durable Track-scoped comment and emits track.comment.added to mentions or reply target actors.",
                 failure_state_guarantee=write_failure,
-                reads=("one non-archived Track page", "optional parent Track comment", "manifest role ids"),
+                reads=("one non-archived Track page", "optional parent Track comment", "RoleHost role ids"),
                 writes=("track comment row", "track.comment.added delivery signal when targets exist"),
                 does_not_write=("artifact body", "track timeline", "track lifecycle", "task state", "direct message state"),
                 preconditions=("track_id references an existing non-archived Track",),

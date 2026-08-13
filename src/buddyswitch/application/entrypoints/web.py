@@ -11,10 +11,10 @@ PUBLIC_ATTACH_CLI_MODULE = "buddyswitch.application.entrypoints.cli"
 
 
 def main() -> int:
-    application = activate_application()
     try:
+        application = activate_application()
         host_control = assemble_host_control(application)
-    except HostControlError as exc:
+    except (HostControlError, ValueError) as exc:
         return web_runtime.emit_startup_failure(exc)
     return web_runtime.main(
         host_control=host_control,

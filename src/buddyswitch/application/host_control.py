@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from buddyswitch.application.build import ApplicationAssembly
+from buddyswitch.application.build import ApplicationRuntime
 from buddyswitch.foundation.host_control.runtime import (
     HostControl,
     HostControlApplicationInput,
     HostControlError,
     HostControlRole,
 )
-from buddyswitch.runtime_support import env_manifest
 
 
 START_MODULE = "buddyswitch.application.entrypoints.host_control_start"
@@ -18,20 +17,19 @@ INSTANCE_DAEMON_MODULE = "buddyswitch.application.entrypoints.instance_daemon"
 RUNTIME_BROKER_MODULE = "buddyswitch.application.entrypoints.runtime_broker"
 
 
-def assemble_host_control(application: ApplicationAssembly) -> HostControl:
+def assemble_host_control(application: ApplicationRuntime) -> HostControl:
     """Build the concrete lifecycle capability from current application truth."""
 
-    if not isinstance(application, ApplicationAssembly):
-        raise ValueError("Host Control assembly requires ApplicationAssembly")
+    if not isinstance(application, ApplicationRuntime):
+        raise ValueError("Host Control assembly requires ApplicationRuntime")
     try:
-        manifest = env_manifest.load_manifest()
         roles = tuple(
             HostControlRole(
-                id=role["id"],
-                label=role["label"],
-                scope=role["scope"],
+                id=role.id,
+                label=role.label,
+                scope=role.scope,
             )
-            for role in manifest["roles"]
+            for role in application.role_host.roles
         )
         application_input = HostControlApplicationInput(
             roles=roles,
@@ -40,7 +38,7 @@ def assemble_host_control(application: ApplicationAssembly) -> HostControl:
             instance_daemon_module=INSTANCE_DAEMON_MODULE,
             runtime_broker_module=RUNTIME_BROKER_MODULE,
         )
-    except (env_manifest.ManifestError, KeyError, TypeError, ValueError) as exc:
+    except (TypeError, ValueError) as exc:
         raise HostControlError(
             "COMMAND_FAILED",
             str(exc),

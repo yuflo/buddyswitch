@@ -33,7 +33,6 @@ from buddyswitch.foundation.tool_runtime import context as runtime_context  # no
 from buddyswitch.foundation.cli_runtime import diagnostics  # noqa: E402
 from tests.integration.env_tool._response_case import EnvToolResponseCase
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -89,7 +88,10 @@ class EnvToolResponseRegistryTests(EnvToolResponseCase):
             "allowed_" + "action_" + "permissions",
         )
         self.assertEqual(preview.get("active_role"), "pm")
-        self.assertEqual(preview.get("source"), "env.tool role-action policy")
+        self.assertEqual(
+            preview.get("source"),
+            "Application RoleHost + Tool registrations",
+        )
         self.assertIs(preview.get("not_authorization_boundary"), True)
         self.assertIs(preview.get("not_execution_result"), True)
         for old_key in old_keys:

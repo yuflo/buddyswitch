@@ -188,12 +188,7 @@ def append_warning(warnings: list[str] | None, message: str) -> None:
         warnings.append(message)
 
 
-def _valid_role_ids(
-    manifest_path: Path,
-    *,
-    loader: Callable[[Path], frozenset[str]],
-) -> frozenset[str]:
-    role_ids = loader(manifest_path)
+def _valid_role_ids(role_ids: frozenset[str]) -> frozenset[str]:
     if not isinstance(role_ids, frozenset) or not role_ids or not all(
         isinstance(role_id, str) and bool(role_id) and role_id.strip() == role_id
         for role_id in role_ids
@@ -587,16 +582,12 @@ def build_cleanup_plan(
     scope: str,
     role: str | None,
     repo_root: Path = ROOT,
-    manifest_path: Path,
-    valid_role_ids_loader: Callable[[Path], frozenset[str]],
+    valid_role_ids: frozenset[str],
     shared_root: Path | None = None,
     contributions: tuple[CleanupContribution, ...] = (),
 ) -> dict[str, Any]:
     contributions = validate_cleanup_contributions(contributions)
-    valid_roles = _valid_role_ids(
-        manifest_path,
-        loader=valid_role_ids_loader,
-    )
+    valid_roles = _valid_role_ids(valid_role_ids)
     if scope == "role" and (role is None or role not in valid_roles):
         raise ValueError(f"Invalid role '{role}'. Check the installed BuddySwitch role catalog.")
 
@@ -1002,7 +993,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Shared BuddySwitch root used to discover instance workspaces for instance-local cleanup.",
     )
-    parser.add_argument("--manifest", type=Path, help="Manifest path. Defaults to the installed package manifest.")
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--role")
     target.add_argument("--all-data", action="store_true")
@@ -1045,8 +1035,7 @@ def resolve_state_root_arg(*, state_root_arg: Path | None, shared_root: Path | N
 def main(
     *,
     contributions: tuple[CleanupContribution, ...],
-    default_manifest_path: Path,
-    valid_role_ids_loader: Callable[[Path], frozenset[str]],
+    valid_role_ids: frozenset[str],
 ) -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -1056,14 +1045,12 @@ def main(
         if shared_root is not None and shared_root.is_symlink():
             raise ValueError(f"Refusing cleanup: shared root argument is a symlink ({shared_root}).")
         repo_root = resolve_state_root_arg(state_root_arg=args.state_root, shared_root=shared_root)
-        manifest_path = args.manifest.resolve() if args.manifest else default_manifest_path
         scope, role = resolve_scope(args)
         plan = build_cleanup_plan(
             scope=scope,
             role=role,
             repo_root=repo_root,
-            manifest_path=manifest_path,
-            valid_role_ids_loader=valid_role_ids_loader,
+            valid_role_ids=valid_role_ids,
             shared_root=shared_root,
             contributions=contributions,
         )

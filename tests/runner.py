@@ -89,13 +89,18 @@ def _target_file(target: str) -> Path:
     return candidate.resolve(strict=False)
 
 
-def _module_test_tier_roots() -> dict[str, tuple[Path, ...]]:
-    modules_root = REPO_ROOT / "src" / "buddyswitch" / "modules"
+def _local_test_tier_roots() -> dict[str, tuple[Path, ...]]:
+    package_root = REPO_ROOT / "src" / "buddyswitch"
+    owner_roots = (
+        package_root / "modules",
+        package_root / "roles",
+    )
     roots: dict[str, tuple[Path, ...]] = {}
     for tier in ("unit", "contract", "integration"):
         roots[tier] = tuple(
             path.resolve(strict=True)
-            for path in sorted(modules_root.glob(f"*/tests/{tier}"))
+            for owner_root in owner_roots
+            for path in sorted(owner_root.glob(f"*/tests/{tier}"))
             if path.is_dir()
         )
     return roots
@@ -115,7 +120,7 @@ def _validate_focused_targets(
         tier: (tests_root / tier).resolve(strict=True)
         for tier in ("unit", "integration", "process", "system")
     }
-    module_tier_roots = _module_test_tier_roots()
+    local_tier_roots = _local_test_tier_roots()
     for target in targets:
         path = _target_file(target)
         if not path.exists():
@@ -125,7 +130,7 @@ def _validate_focused_targets(
         ]
         matching_tiers.extend(
             tier
-            for tier, roots in module_tier_roots.items()
+            for tier, roots in local_tier_roots.items()
             for root in roots
             if path == root or path.is_relative_to(root)
         )
@@ -136,7 +141,7 @@ def _validate_focused_targets(
                     f"{target}"
                 )
             raise RunnerUsageError(
-                "focused target must be inside exactly one root or module test tier: "
+                "focused target must be inside exactly one root or local test tier: "
                 f"{target}"
             )
         if path == system_root or path.is_relative_to(system_root):
@@ -290,7 +295,7 @@ def _run_focused(
 
 def _run_full(run: RunEnvironment, ledger: ResourceLedger) -> int:
     phases: list[tuple[str, list[str], bool]] = []
-    module_tier_roots = _module_test_tier_roots()
+    local_tier_roots = _local_test_tier_roots()
     for tier in ("unit", "integration", "process", "system"):
         tier_path = REPO_ROOT / "tests" / tier
         if not tier_path.is_dir():
@@ -298,7 +303,7 @@ def _run_full(run: RunEnvironment, ledger: ResourceLedger) -> int:
         tier_targets = [tier_path.relative_to(REPO_ROOT).as_posix()]
         tier_targets.extend(
             path.relative_to(REPO_ROOT).as_posix()
-            for path in module_tier_roots.get(tier, ())
+            for path in local_tier_roots.get(tier, ())
         )
         phases.append((tier, _pytest_command(tier_targets, durations=25), tier == "system"))
         if tier == "unit":
@@ -310,7 +315,7 @@ def _run_full(run: RunEnvironment, ledger: ResourceLedger) -> int:
                 phases.append(("unit-javascript", _node_command(javascript, None), False))
             contract_targets = [
                 path.relative_to(REPO_ROOT).as_posix()
-                for path in module_tier_roots.get("contract", ())
+                for path in local_tier_roots.get("contract", ())
             ]
             if contract_targets:
                 phases.append(

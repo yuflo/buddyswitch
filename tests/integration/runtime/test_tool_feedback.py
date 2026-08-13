@@ -12,7 +12,6 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
@@ -68,8 +67,6 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
         self.workspace = RuntimeTestWorkspace()
         self.addCleanup(self.workspace.close)
         self.runtime_root = self.workspace.root
-        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-        self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.instance_json = self.workspace.path("instance.json")
         self.actor_id = self.workspace.actor_id(role="pm", label="act-feedback-runless")
         self.instance_payload = {
@@ -103,8 +100,6 @@ class RuntimeToolFeedbackTests(unittest.TestCase):
             actor_id=actor_id,
             instance_json=self.instance_json,
             instance_payload={**self.instance_payload, "actor_id": actor_id, "role": role},
-            manifest=self.manifest,
-            manifest_path=self.manifest_path,
         )
 
     def _assert_rejection_contract(self, payload: dict[str, object]) -> None:

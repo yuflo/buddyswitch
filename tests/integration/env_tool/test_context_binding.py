@@ -14,12 +14,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 
 ROOT = REPO_ROOT
 
 import buddyswitch.foundation.state.runtime as state_runtime
 from buddyswitch.foundation.identity.model import ActorIdentityProfile, IdentityRef
+from buddyswitch.foundation.role_host import RoleRuntime
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
@@ -31,7 +31,6 @@ from buddyswitch.foundation.tool_runtime import context as runtime_context  # no
 from buddyswitch.foundation.tool_runtime import registry as tool_registry  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 _EXPECTED_TOOLS = {"demand_sys", "task_sys", "track", "artifact", "context", "evidence", "search", "message"}
 
@@ -51,7 +50,14 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
             actor_identity_profile=profile,
             instance_json=self.runtime_root / "instances" / "act-dev-capability" / "instance.json",
             instance_payload={"actor_id": "act-dev-capability", "role": "dev"},
-            manifest={},
+            role=RoleRuntime(
+                id="dev",
+                artifact_templates=("brief", "note"),
+                project_path="projects/app",
+                source_access="write",
+                browser_cockpit="available",
+                search_api="available",
+            ),
         )
 
         self.assertEqual(set(runtime_context.__all__), {"InvocationFact", "ToolContext"})
@@ -64,8 +70,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
                 "instance_json",
                 "instance_payload",
                 "invocation",
-                "manifest",
-                "manifest_path",
+                "role",
                 "role_id",
             },
         )
@@ -83,8 +88,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
                 "invocation",
                 "items",
                 "keys",
-                "manifest",
-                "manifest_path",
+                "role",
                 "now",
                 "role_id",
                 "signal_delivery",
@@ -98,8 +102,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
                 "current_identity",
                 "instance_json",
                 "instance_payload",
-                "manifest",
-                "manifest_path",
+                "role",
             },
         )
         self.assertEqual(context.role_id, "dev")
@@ -250,8 +253,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)
@@ -470,7 +471,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIsInstance(preview, dict, msg=snapshot)
         assert isinstance(preview, dict)
         self.assertEqual(preview.get("active_role"), "dev")
-        self.assertEqual(preview.get("source"), "env.tool role-action policy")
+        self.assertEqual(
+            preview.get("source"),
+            "Application RoleHost + Tool registrations",
+        )
         self.assertIs(preview.get("not_authorization_boundary"), True)
         self.assertIs(preview.get("not_execution_result"), True)
         self.assertIn("track.list", preview.get("available_actions", []))
@@ -856,7 +860,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(source.get("state"), "readme_only")
         self.assertEqual(source.get("top_level_entries"), ["README.md"])
         self.assertIs(source.get("top_level_entries_truncated"), False)
-        self.assertIn("env_profile", str(source.get("source_of_truth")))
+        self.assertEqual(
+            source.get("source_of_truth"),
+            "RoleRuntime.project_path + RoleRuntime.source_access + workspace_projection",
+        )
         boundary = str(source.get("permission_boundary", "")).lower()
         self.assertIn("read-only", boundary)
         self.assertIn("does not configure", boundary)
@@ -981,7 +988,10 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIsInstance(source_workspace, dict, msg=sources)
         assert isinstance(source_workspace, dict)
         self.assertIn("read-only", str(source_workspace.get("scope", "")).lower())
-        self.assertIn("env profile", str(source_workspace.get("source_of_truth", "")).lower())
+        self.assertEqual(
+            source_workspace.get("source_of_truth"),
+            "Role runtime project/access and instance workspace projection",
+        )
         self.assertFalse(source_workspace.get("mutates_product_state"))
         self.assertFalse(source_workspace.get("grants_write_authority"))
         self.assertFalse(source_workspace.get("configures_source_root"))
@@ -1070,7 +1080,7 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertIn("artifact.list_attachments", operation_semantics)
         self.assertIn("artifact.get_attachment", operation_semantics)
 
-    def test_context_source_workspace_uses_profile_not_agents_text_and_profile_failure_is_explicit(self) -> None:
+    def test_context_source_workspace_uses_role_runtime_not_agents_text(self) -> None:
         instance_json = self._instance_json(role="dev")
         source_root = self._runtime_path("projects/app")
         source_root.mkdir(parents=True, exist_ok=True)
@@ -1088,12 +1098,6 @@ class ContextBindingEnvToolTests(RuntimeWorkspaceTestCase):
         self.assertEqual(source.get("path"), "projects/app")
         self.assertEqual(source.get("access"), "write")
         self.assertIs(source.get("can_write_source"), True)
-
-        with patch("buddyswitch.modules.context.private.adapters.tool._impl.env_profiles.require_env_profile", side_effect=RuntimeError("boom")):
-            rejected = self._dispatch(instance_json=instance_json, tool="context", action="summarize", args={}, role="dev")
-        self.assertFalse(rejected.get("ok"), msg=rejected)
-        self.assertEqual((rejected.get("error") or {}).get("code"), "E_CONTEXT_SOURCE_WORKSPACE")
-        self.assertNotEqual(((rejected.get("source_workspace") or {}).get("state")), "missing")
 
     def test_context_get_applies_filters(self) -> None:
         self._seed_context_state()

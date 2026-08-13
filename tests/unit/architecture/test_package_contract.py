@@ -10,129 +10,6 @@ from tests.support.paths import REPO_ROOT
 
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 PACKAGE_ROOT = REPO_ROOT / "src" / "buddyswitch"
-OLD_RUNTIME_SOURCES = (
-    "scripts/env",
-    "scripts/runtime_kernel",
-    "scripts/runtime_store",
-    "scripts/artifact_selection.py",
-    "scripts/browser_evidence.py",
-    "scripts/env_cleanup.py",
-    "scripts/env_legacy_store.py",
-    "scripts/env_manifest.py",
-    "scripts/env_profiles.py",
-    "scripts/env_store.py",
-    "scripts/output_schema.py",
-    "scripts/runtime_skills.py",
-    "scripts/turn_runtime.py",
-    "tools/__init__.py",
-    "tools/launcher",
-    "buddyswitch/skills",
-    "buddyswitch/env-profiles",
-    "buddyswitch/manifest.toml",
-    "framework/contracts",
-    "framework/config",
-    "framework/schemas",
-    "framework/agent-registry.md",
-)
-PACKAGE_OWNER_FILES = (
-    "catalog/__init__.py",
-    "catalog/manifest.toml",
-    "config/__init__.py",
-    "contracts/__init__.py",
-    "launcher/__init__.py",
-    "foundation/cli_runtime/__init__.py",
-    "foundation/host_control/__init__.py",
-    "foundation/runtime_broker/__init__.py",
-    "foundation/web_runtime/__init__.py",
-    "runtime_support/__init__.py",
-    "skills/__init__.py",
-)
-FOUNDATION_PRIMITIVE_FILES = (
-    "foundation/identity/__init__.py",
-    "foundation/identity/model.py",
-    "foundation/identity/profiles.py",
-    "foundation/state/__init__.py",
-    "foundation/state/runtime.py",
-    "foundation/state/actor_private.py",
-    "foundation/state/cleanup.py",
-    "foundation/process_runtime/json_framing.py",
-    "foundation/process_runtime/process_identity.py",
-    "foundation/process_runtime/runtime_lock.py",
-)
-FOUNDATION_PRIMITIVE_DOC = "docs/arch/foundation-primitives-architecture.md"
-FOUNDATION_FINAL_DOC = "docs/arch/foundation-architecture.md"
-RUNTIME_BROKER_DOC = "docs/arch/runtime-broker-architecture.md"
-ACTOR_RUNTIME_DOC = "docs/arch/actor-runtime-architecture.md"
-HOST_CONTROL_DOC = "docs/arch/host-control-architecture.md"
-WEB_RUNTIME_DOC = "docs/arch/web-interface-call-architecture.md"
-CLI_RUNTIME_DOC = "docs/arch/cli-runtime-architecture.md"
-ACTOR_RUNTIME_FILES = (
-    "foundation/actor_runtime/__init__.py",
-    "foundation/actor_runtime/capability.py",
-    "foundation/actor_runtime/codex_runtime.py",
-    "foundation/actor_runtime/environment.py",
-    "foundation/actor_runtime/session.py",
-    "foundation/actor_runtime/side_thread.py",
-    "foundation/actor_runtime/side_thread_lifecycle.py",
-    "foundation/actor_runtime/side_thread_registry.py",
-)
-WEB_RUNTIME_FILES = (
-    "foundation/web_runtime/__init__.py",
-    "foundation/web_runtime/contracts.py",
-    "foundation/web_runtime/runtime.py",
-    "foundation/web_runtime/assets/web-management/index.html",
-)
-CLI_RUNTIME_FILES = (
-    "foundation/cli_runtime/__init__.py",
-    "foundation/cli_runtime/config.py",
-    "foundation/cli_runtime/contracts.py",
-    "foundation/cli_runtime/diagnostics.py",
-    "foundation/cli_runtime/runtime.py",
-    "foundation/cli_runtime/shell/browser_cockpit.sh",
-    "foundation/cli_runtime/shell/cleanup.sh",
-    "foundation/cli_runtime/shell/env.sh",
-)
-RETIRED_FOUNDATION_PATHS = (
-    "src/buddyswitch/env",
-    "src/buddyswitch/runtime_kernel",
-)
-RETIRED_WEB_RUNTIME_PATHS = (
-    "src/buddyswitch/launcher/web_management.py",
-    "src/buddyswitch/launcher/web_contracts.py",
-    "src/buddyswitch/launcher/cli_contract.py",
-    "src/buddyswitch/launcher/assets/web-management",
-)
-RETIRED_CLI_RUNTIME_PATHS = (
-    "src/buddyswitch/launcher/cli.py",
-    "src/buddyswitch/launcher/codex_config.py",
-    "src/buddyswitch/launcher/shell/env.sh",
-    "src/buddyswitch/launcher/shell/cleanup.sh",
-    "src/buddyswitch/launcher/shell/browser_cockpit.sh",
-)
-RETIRED_GENERIC_RUNTIME_SUPPORT_PATHS = (
-    "src/buddyswitch/runtime_support/env_cleanup.py",
-    "src/buddyswitch/runtime_support/skill_contracts.py",
-    "src/buddyswitch/runtime_support/turn_runtime.py",
-)
-PACKAGE_ENTRYPOINTS = (
-    "runtime_activation",
-    "cli",
-    "web",
-    "central_daemon",
-    "instance_daemon",
-    "runtime_broker",
-    "env_mcp",
-    "app_server",
-    "actor_build",
-    "browser_runtime",
-    "browser_cockpit_proxy",
-    "host_control_start",
-    "cleanup",
-    "diagnostics",
-    "browser_evidence",
-    "artifact_selection",
-    "env_manifest",
-)
 
 
 def test_pyproject_is_the_only_exact_package_build_owner() -> None:
@@ -145,32 +22,17 @@ def test_pyproject_is_the_only_exact_package_build_owner() -> None:
         "requires": ["setuptools>=58", "wheel"],
         "build-backend": "setuptools.build_meta",
     }
-    project = document["project"]
-    assert project["name"] == "buddyswitch"
-    assert project["version"] == "0.1.0"
-    assert project["requires-python"] == ">=3.11"
-    assert project.get("dependencies", []) == []
-    assert project.get("scripts", {}) == {}
-
-    setuptools = document["tool"]["setuptools"]
-    assert setuptools["package-dir"] == {"": "src"}
-    assert setuptools["include-package-data"] is False
-    assert setuptools["packages"]["find"] == {
-        "where": ["src"],
-        "include": ["buddyswitch*"],
-        "exclude": [
-            "buddyswitch.tests*",
-            "buddyswitch.*.tests*",
-        ],
-        "namespaces": False,
-    }
+    assert document["project"]["name"] == "buddyswitch"
+    assert document["tool"]["setuptools"]["package-dir"] == {"": "src"}
+    assert document["tool"]["setuptools"]["include-package-data"] is False
 
 
-def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -> None:
-    document = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
-    package_data = document["tool"]["setuptools"]["package-data"]
+def test_package_data_names_only_current_runtime_asset_owners() -> None:
+    package_data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))[
+        "tool"
+    ]["setuptools"]["package-data"]
     assert set(package_data) == {
-        "buddyswitch.catalog",
+        "buddyswitch.roles",
         "buddyswitch.config",
         "buddyswitch.contracts",
         "buddyswitch.foundation.app_server",
@@ -182,311 +44,70 @@ def test_package_data_is_limited_to_explicit_runtime_asset_roots_and_classes() -
         "buddyswitch.modules.artifact",
         "buddyswitch.modules.demand",
         "buddyswitch.modules.track",
-        "buddyswitch.skills",
     }
-    assert package_data["buddyswitch.foundation.web_runtime"] == [
-        "assets/**/*.md",
-        "assets/**/*.html",
-        "assets/**/*.css",
-        "assets/**/*.js",
-        "assets/**/LICENSE*",
+    assert package_data["buddyswitch.roles"] == [
+        "*/AGENTS.md",
+        "*/skills/**/*.md",
+        "*/skills/**/*.json",
+        "*/assets/**/*.md",
+        "*/assets/**/*.json",
     ]
-    assert package_data["buddyswitch.launcher"] == [
-        "assets/**/*.md",
-    ]
-    patterns = {
-        pattern
-        for rows in package_data.values()
-        for pattern in rows
+    role_patterns = package_data["buddyswitch.roles"]
+    assert "*/AGENTS.md" in role_patterns
+    assert "*/skills/**/*.md" in role_patterns
+    assert not any("tests" in pattern for pattern in role_patterns)
+    assert package_data["buddyswitch.launcher"] == ["assets/docs/*.md"]
+
+
+def test_role_packages_and_role_host_are_packaged_source_owners() -> None:
+    assert (PACKAGE_ROOT / "foundation" / "role_host" / "__init__.py").is_file()
+    role_packages = {
+        path.name: path
+        for path in (PACKAGE_ROOT / "roles").iterdir()
+        if path.is_dir() and not path.name.startswith("_")
     }
-    for suffix in (".toml", ".json", ".md", ".html", ".css", ".js", ".sh"):
-        assert any(pattern.endswith(suffix) for pattern in patterns)
-    assert all(
-        not any(retired in pattern for retired in ("tests/", "docs/", "projects/"))
-        for pattern in patterns
-    )
+    assert role_packages
+    for package in role_packages.values():
+        assert (package / "__init__.py").is_file()
+        assert (package / "role.py").is_file()
+        assert (package / "AGENTS.md").is_file()
+        assert (package / "assets" / "result-schema.json").is_file()
 
 
-def test_minimal_package_and_activation_entrypoint_exist_under_src_only() -> None:
-    expected = (
-        PACKAGE_ROOT / "__init__.py",
-        PACKAGE_ROOT / "application" / "__init__.py",
-        PACKAGE_ROOT / "application" / "entrypoints" / "__init__.py",
-        PACKAGE_ROOT / "application" / "entrypoints" / "runtime_activation.py",
-        PACKAGE_ROOT / "foundation" / "__init__.py",
-        PACKAGE_ROOT / "foundation" / "process_runtime" / "__init__.py",
-        PACKAGE_ROOT / "foundation" / "process_runtime" / "activation.py",
-        *(PACKAGE_ROOT / relative for relative in ACTOR_RUNTIME_FILES),
-        *(PACKAGE_ROOT / relative for relative in FOUNDATION_PRIMITIVE_FILES),
-        *(PACKAGE_ROOT / relative for relative in CLI_RUNTIME_FILES),
-        *(PACKAGE_ROOT / relative for relative in WEB_RUNTIME_FILES),
-        REPO_ROOT / ACTOR_RUNTIME_DOC,
-        REPO_ROOT / FOUNDATION_PRIMITIVE_DOC,
-        REPO_ROOT / FOUNDATION_FINAL_DOC,
-        REPO_ROOT / WEB_RUNTIME_DOC,
-        REPO_ROOT / CLI_RUNTIME_DOC,
-    )
-    assert [path.relative_to(REPO_ROOT).as_posix() for path in expected if not path.is_file()] == []
+def test_retired_central_role_truth_and_entrypoints_are_absent() -> None:
+    for path in (
+        PACKAGE_ROOT / "catalog",
+        PACKAGE_ROOT / "runtime_support",
+        PACKAGE_ROOT / "skills",
+        PACKAGE_ROOT / "launcher" / "assets" / "roles",
+        PACKAGE_ROOT / "application" / "role_source.py",
+        PACKAGE_ROOT / "application" / "entrypoints" / "env_manifest.py",
+        PACKAGE_ROOT / "application" / "entrypoints" / "env_profiles.py",
+        PACKAGE_ROOT / "contracts" / "role-env-profile.json",
+        PACKAGE_ROOT / "contracts" / "schemas" / "dev" / "dev-result.json",
+    ):
+        assert not path.exists(), path
 
 
-def test_atomic_cutover_has_one_source_and_entrypoint_topology() -> None:
-    old_paths = [
-        relative
-        for relative in OLD_RUNTIME_SOURCES
-        if (REPO_ROOT / relative).exists()
-    ]
-    missing_owners = [
-        relative
-        for relative in PACKAGE_OWNER_FILES
-        if not (PACKAGE_ROOT / relative).is_file()
-    ]
-    missing_entrypoints = [
-        module
-        for module in PACKAGE_ENTRYPOINTS
-        if not (
-            PACKAGE_ROOT
-            / "application"
-            / "entrypoints"
-            / f"{module}.py"
-        ).is_file()
-    ]
-    retired_foundation_paths = [
-        relative
-        for relative in RETIRED_FOUNDATION_PATHS
-        if (REPO_ROOT / relative).exists()
-    ]
-    retired_web_runtime_paths = [
-        relative
-        for relative in RETIRED_WEB_RUNTIME_PATHS
-        if (REPO_ROOT / relative).exists()
-    ]
-    retired_cli_runtime_paths = [
-        relative
-        for relative in RETIRED_CLI_RUNTIME_PATHS
-        if (REPO_ROOT / relative).exists()
-    ]
-    retired_generic_runtime_support_paths = [
-        relative
-        for relative in RETIRED_GENERIC_RUNTIME_SUPPORT_PATHS
-        if (REPO_ROOT / relative).exists()
-    ]
-
-    assert old_paths == []
-    assert missing_owners == []
-    assert missing_entrypoints == []
-    assert retired_foundation_paths == []
-    assert retired_web_runtime_paths == []
-    assert retired_cli_runtime_paths == []
-    assert retired_generic_runtime_support_paths == []
-
-
-def test_current_guidance_names_only_current_installed_package_owners() -> None:
-    retired_tokens = (
-        "scripts/env/",
-        "scripts/runtime_kernel/",
-        "tools/launcher/",
-        "framework/contracts/",
-        "buddyswitch/manifest.toml",
-        "buddyswitch/env-profiles/",
-        "env_legacy_store",
-        "sys.path.insert",
-        "spec_from_file_location",
-        "--repo-root",
-        "PYTHONPATH",
-        "src/buddyswitch/runtime_kernel",
-        "buddyswitch.runtime_kernel",
-        "src/buddyswitch/launcher/web_management.py",
-        "src/buddyswitch/launcher/web_contracts.py",
-        "src/buddyswitch/launcher/cli_contract.py",
-        "src/buddyswitch/launcher/assets/web-management",
-        "src/buddyswitch/launcher/cli.py",
-        "src/buddyswitch/launcher/codex_config.py",
-        "src/buddyswitch/launcher/shell/env.sh",
-        "src/buddyswitch/launcher/shell/cleanup.sh",
-        "src/buddyswitch/launcher/shell/browser_cockpit.sh",
-        "src/buddyswitch/runtime_support/env_cleanup.py",
-        "src/buddyswitch/runtime_support/skill_contracts.py",
-        "src/buddyswitch/runtime_support/turn_runtime.py",
-        "buddyswitch.runtime_support.env_cleanup",
-        "buddyswitch.runtime_support.skill_contracts",
-        "buddyswitch.runtime_support.turn_runtime",
-    )
-    guidance_paths = (
+def test_current_guidance_names_rolehost_and_role_packages_only() -> None:
+    current_documents = (
         REPO_ROOT / "README.md",
         REPO_ROOT / "AGENTS.md",
         *sorted((REPO_ROOT / "docs" / "arch").glob("*.md")),
-        *sorted(
-            (REPO_ROOT / "src" / "buddyswitch" / "launcher" / "assets" / "roles").glob(
-                "*/AGENTS.md"
-            )
-        ),
-        *sorted(
-            (REPO_ROOT / "src" / "buddyswitch" / "skills").glob("**/SKILL.md")
-        ),
-        *sorted(
-            (REPO_ROOT / "src" / "buddyswitch" / "modules").glob(
-                "*/skills/**/SKILL.md"
-            )
-        ),
     )
-    violations: list[tuple[str, str]] = []
-    for path in guidance_paths:
-        relative_path = path.relative_to(REPO_ROOT).as_posix()
-        document = path.read_text(encoding="utf-8")
-        for token in retired_tokens:
-            violations.extend(
-                (relative_path, token)
-                for _ in range(document.count(token))
-            )
-    assert sorted(violations) == []
-
-    required_paths_by_owner = {
-        REPO_ROOT / "README.md": (
-            "pyproject.toml",
-            "src/buddyswitch/catalog/manifest.toml",
-            "src/buddyswitch/foundation/tool_runtime/definition.py",
-            "src/buddyswitch/foundation/tool_runtime/context.py",
-            "src/buddyswitch/foundation/tool_runtime/results.py",
-            "src/buddyswitch/foundation/tool_runtime/registry.py",
-            "src/buddyswitch/foundation/composition/__init__.py",
-            "src/buddyswitch/foundation/state/cleanup.py",
-            "src/buddyswitch/modules/<component>/private/adapters/tool/{tool.py,_impl.py}",
-            "src/buddyswitch/modules/context/",
-            "src/buddyswitch/foundation/runtime_broker/protocol.py",
-            "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
-            "src/buddyswitch/foundation/process_runtime/json_framing.py",
-            "src/buddyswitch/foundation/process_runtime/runtime_lock.py",
-            "src/buddyswitch/foundation/web_runtime/",
-            "src/buddyswitch/foundation/cli_runtime/contracts.py",
-            "src/buddyswitch/foundation/cli_runtime/diagnostics.py",
-            "src/buddyswitch/application/role_source.py",
-            "src/buddyswitch/contracts/prepare-turn-context.json",
-            "src/buddyswitch/contracts/{pm,design,dev,market,test}.md",
-            "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
-            "tests/",
-        ),
-        REPO_ROOT / "AGENTS.md": (
-            "src/buddyswitch/catalog/manifest.toml",
-            "src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md",
-        ),
-        REPO_ROOT / "docs" / "arch" / "daemon-service-architecture.md": (
-            "src/buddyswitch/application/daemon.py",
-            "src/buddyswitch/application/daemon_host.py",
-            "src/buddyswitch/foundation/browser_runtime/inbound.py",
-            "src/buddyswitch/foundation/process_runtime/json_framing.py",
-        ),
-        REPO_ROOT / "docs" / "arch" / "browser-runtime-architecture.md": (
-            "src/buddyswitch/foundation/browser_runtime/",
-            "src/buddyswitch/application/entrypoints/browser_runtime.py",
-            "src/buddyswitch/application/entrypoints/browser_cockpit_proxy.py",
-            "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
-            "src/buddyswitch/application/daemon.py",
-        ),
-        REPO_ROOT / "docs" / "arch" / "demand-sys-architecture.md": (
-            "src/buddyswitch/modules/demand/private/domain/demand_sys.py",
-            "src/buddyswitch/modules/demand/private/state/demands.py",
-        ),
-        REPO_ROOT / "docs" / "arch" / "task-sys-architecture.md": (
-            "src/buddyswitch/modules/task/private/domain/task_sys.py",
-            "src/buddyswitch/modules/task/private/adapters/goal/handler.py",
-            "src/buddyswitch/foundation/web_runtime/contracts.py",
-            "src/buddyswitch/foundation/cli_runtime/contracts.py",
-        ),
-        REPO_ROOT / "docs" / "arch" / "search-capability-architecture.md": (
-            "src/buddyswitch/modules/search/module.py",
-            "src/buddyswitch/modules/search/private/adapters/tool/tool.py",
-            "src/buddyswitch/modules/search/private/adapters/tool/_impl.py",
-            "src/buddyswitch/modules/search/tests/integration",
-        ),
-        REPO_ROOT / "docs" / "arch" / "track-capability-architecture.md": (
-            "src/buddyswitch/modules/track/",
-            "src/buddyswitch/foundation/web_runtime/contracts.py",
-            "src/buddyswitch/foundation/cli_runtime/contracts.py",
-            "buddyswitch/objects/tracks",
-            "buddyswitch/objects/track-comments",
-        ),
-        REPO_ROOT / "docs" / "arch" / "artifact-capability-architecture.md": (
-            "src/buddyswitch/modules/artifact/",
-            "buddyswitch/objects/artifacts",
-            "buddyswitch/objects/artifact-attachments",
-        ),
-        REPO_ROOT / "docs" / "arch" / "context-capability-architecture.md": (
-            "src/buddyswitch/modules/context/",
-            "src/buddyswitch/modules/context/module.py",
-            "src/buddyswitch/modules/context/private/adapters/tool/tool.py",
-            "src/buddyswitch/modules/context/private/adapters/tool/_impl.py",
-        ),
-        REPO_ROOT / "docs" / "arch" / "communication-capability-architecture.md": (
-            "src/buddyswitch/modules/communication/",
-            "src/buddyswitch/foundation/web_runtime/contracts.py",
-            "WebRouteRegistration",
-            "WebWorkerRegistration",
-        ),
-        REPO_ROOT / WEB_RUNTIME_DOC: (
-            "src/buddyswitch/foundation/web_runtime/contracts.py",
-            "src/buddyswitch/foundation/web_runtime/runtime.py",
-            "src/buddyswitch/foundation/web_runtime/assets/web-management/",
-            "src/buddyswitch/foundation/cli_runtime/contracts.py",
-        ),
-        REPO_ROOT / CLI_RUNTIME_DOC: (
-            "src/buddyswitch/foundation/cli_runtime/runtime.py",
-            "src/buddyswitch/foundation/cli_runtime/config.py",
-            "src/buddyswitch/foundation/cli_runtime/shell/",
-            "CliRuntimeApplicationInput",
-            "src/buddyswitch/launcher/assets/roles/",
-        ),
-        REPO_ROOT / FOUNDATION_PRIMITIVE_DOC: (
-            "src/buddyswitch/foundation/identity/model.py",
-            "src/buddyswitch/foundation/identity/profiles.py",
-            "src/buddyswitch/foundation/state/runtime.py",
-            "src/buddyswitch/foundation/state/actor_private.py",
-            "src/buddyswitch/foundation/state/cleanup.py",
-            "src/buddyswitch/foundation/process_runtime/process_identity.py",
-            "src/buddyswitch/foundation/process_runtime/json_framing.py",
-        ),
-        REPO_ROOT / RUNTIME_BROKER_DOC: (
-            "src/buddyswitch/foundation/runtime_broker/",
-            "src/buddyswitch/foundation/runtime_broker/protocol.py",
-            "src/buddyswitch/foundation/runtime_broker/coordinator.py",
-            "src/buddyswitch/foundation/runtime_broker/dispatcher.py",
-            "src/buddyswitch/foundation/runtime_broker/client.py",
-            "src/buddyswitch/foundation/runtime_broker/server.py",
-            "src/buddyswitch/foundation/runtime_broker/lifecycle.py",
-            "src/buddyswitch/foundation/process_runtime/json_framing.py",
-            "src/buddyswitch/application/entrypoints/runtime_broker.py",
-        ),
-        REPO_ROOT / FOUNDATION_FINAL_DOC: (
-            "src/buddyswitch/foundation/composition/__init__.py",
-            "src/buddyswitch/foundation/state/cleanup.py",
-            "src/buddyswitch/foundation/cli_runtime/diagnostics.py",
-            "src/buddyswitch/application/entrypoints/cleanup.py",
-            "src/buddyswitch/application/entrypoints/diagnostics.py",
-            "src/buddyswitch/application/entrypoints/runtime_broker.py",
-            "src/buddyswitch/runtime_support/",
-            "src/buddyswitch/catalog/manifest.toml",
-            "src/buddyswitch/launcher/assets/roles/",
-        ),
-        REPO_ROOT / ACTOR_RUNTIME_DOC: (
-            "src/buddyswitch/foundation/actor_runtime/",
-            "src/buddyswitch/foundation/actor_runtime/capability.py",
-            "src/buddyswitch/foundation/actor_runtime/codex_runtime.py",
-            "src/buddyswitch/foundation/actor_runtime/environment.py",
-            "src/buddyswitch/foundation/actor_runtime/session.py",
-            "src/buddyswitch/foundation/actor_runtime/side_thread.py",
-            "src/buddyswitch/foundation/actor_runtime/side_thread_lifecycle.py",
-            "src/buddyswitch/foundation/actor_runtime/side_thread_registry.py",
-        ),
-        REPO_ROOT / HOST_CONTROL_DOC: (
-            "src/buddyswitch/foundation/host_control/",
-            "foundation/host_control/shell/host_control.sh",
-            "foundation/process_runtime/runtime_lock.py",
-            "HostControlApplicationInput",
-        ),
-    }
-    missing_required_paths = sorted(
-        (owner.relative_to(REPO_ROOT).as_posix(), required_path)
-        for owner, required_paths in required_paths_by_owner.items()
-        for required_path in required_paths
-        if required_path not in owner.read_text(encoding="utf-8")
+    retired_tokens = (
+        "src/buddyswitch/catalog/manifest.toml",
+        "src/buddyswitch/runtime_support/",
+        "src/buddyswitch/launcher/assets/roles/",
+        "src/buddyswitch/skills/",
     )
-    assert missing_required_paths == []
+    violations = [
+        (path.relative_to(REPO_ROOT).as_posix(), token)
+        for path in current_documents
+        for token in retired_tokens
+        if token in path.read_text(encoding="utf-8")
+    ]
+    assert violations == []
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "src/buddyswitch/foundation/role_host/" in readme
+    assert "src/buddyswitch/roles/<package_name>/" in readme

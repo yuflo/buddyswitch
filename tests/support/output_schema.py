@@ -23,9 +23,14 @@ def normalize_schema_path(raw_path: str) -> str:
     if path.is_absolute() or ".." in path.parts:
         raise OutputSchemaError(f"schema path must be repo-relative: {raw_path}")
     normalized = path.as_posix()
-    if not normalized.startswith("src/buddyswitch/contracts/schemas/") or not normalized.endswith(".json"):
+    parts = path.parts
+    if not (
+        len(parts) == 6
+        and parts[:3] == ("src", "buddyswitch", "roles")
+        and parts[4:] == ("assets", "result-schema.json")
+    ):
         raise OutputSchemaError(
-            "schema path must be under src/buddyswitch/contracts/schemas/ and end with .json"
+            "schema path must be one Role package assets/result-schema.json"
         )
     return normalized
 

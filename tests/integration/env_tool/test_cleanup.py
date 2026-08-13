@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,8 +11,7 @@ from unittest import mock
 from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-from buddyswitch.application.build import build_application  # noqa: E402
-from buddyswitch.application.role_source import load_valid_role_ids  # noqa: E402
+from buddyswitch.application.build import activate_application, build_application  # noqa: E402
 from buddyswitch.foundation.composition import (  # noqa: E402
     CleanupContribution,
     CleanupIndexProjection,
@@ -24,7 +22,7 @@ from buddyswitch.foundation.state import cleanup as state_cleanup  # noqa: E402
 
 def _build_cleanup_plan(**kwargs: object) -> dict[str, object]:
     return state_cleanup.build_cleanup_plan(
-        valid_role_ids_loader=load_valid_role_ids,
+        valid_role_ids=activate_application().role_host.valid_role_ids,
         **kwargs,
     )
 
@@ -35,9 +33,6 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.shared_root = Path(self._tmp.name)
         self.repo_root = self.shared_root / "state"
         self.repo_root.mkdir(parents=True, exist_ok=True)
-        self.manifest_path = self.repo_root / "buddyswitch" / "manifest.toml"
-        self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml", self.manifest_path)
         self.product_cleanup = build_application().cleanup
 
         self._write_json(
@@ -144,7 +139,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="pm",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
         self.assertEqual(plan["scope"], "role")
@@ -156,31 +150,22 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertNotIn("handoff_objects", plan.get("counts_by_category", {}))
         self.assertNotIn("task_" + "objects", plan.get("counts_by_category", {}))
 
-    def test_cleanup_plan_uses_required_valid_role_projection(self) -> None:
-        loaded_paths: list[Path] = []
-
-        def load_valid_roles(path: Path) -> frozenset[str]:
-            loaded_paths.append(path)
-            return frozenset({"pm"})
-
+    def test_cleanup_plan_requires_valid_role_projection(self) -> None:
         plan = state_cleanup.build_cleanup_plan(
             scope="role",
             role="pm",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
-            valid_role_ids_loader=load_valid_roles,
+            valid_role_ids=frozenset({"pm"}),
             contributions=(),
         )
 
-        self.assertEqual(loaded_paths, [self.manifest_path])
         self.assertEqual(plan["role"], "pm")
         with self.assertRaisesRegex(ValueError, "valid Role source"):
             state_cleanup.build_cleanup_plan(
                 scope="all-data",
                 role=None,
                 repo_root=self.repo_root,
-                manifest_path=self.manifest_path,
-                valid_role_ids_loader=lambda _path: {"pm"},  # type: ignore[arg-type,return-value]
+                valid_role_ids={"pm"},  # type: ignore[arg-type]
                 contributions=(),
             )
 
@@ -189,7 +174,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
         result = state_cleanup.execute_cleanup_plan(
@@ -251,7 +235,6 @@ class CleanupRepositoryTests(unittest.TestCase):
                 scope="role",
                 role=role,
                 repo_root=self.repo_root,
-                manifest_path=self.manifest_path,
                 contributions=self.product_cleanup,
             )
             self.assertEqual(
@@ -268,7 +251,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="design",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
         self.assertNotIn(
@@ -280,7 +262,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
         self.assertIn("message_object_ids", plan)
@@ -343,7 +324,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="pm",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
         self.assertEqual(
@@ -413,7 +393,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
         expected_message_paths = {
@@ -525,7 +504,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="dev",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=self.product_cleanup,
         )
         result = state_cleanup.execute_cleanup_plan(
@@ -554,7 +532,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="pm",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             shared_root=self.shared_root,
             contributions=self.product_cleanup,
         )
@@ -578,7 +555,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             shared_root=self.shared_root,
             contributions=self.product_cleanup,
         )
@@ -616,7 +592,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=(contribution,),
         )
         self.assertEqual(plan["artifact_object_ids"], ["art-stale-execution"])
@@ -664,7 +639,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=(contribution,),
         )
 
@@ -698,7 +672,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="pm",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             shared_root=self.shared_root,
             contributions=(),
         )
@@ -747,7 +720,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             shared_root=declared_shared,
             contributions=(),
         )
@@ -805,7 +777,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=(contribution,),
         )
         self.assertEqual(plan["artifact_object_ids"], ["art-missing-execution"])
@@ -853,7 +824,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=(contribution,),
         )
 
@@ -898,7 +868,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=(contribution,),
         )
         observed_effect_targets: list[tuple[str, bool]] = []
@@ -952,7 +921,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             shared_root=self.shared_root,
             contributions=(contribution,),
         )
@@ -1007,7 +975,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="pm",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=DEMAND.cleanup,
         )
         self.assertEqual(
@@ -1036,7 +1003,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=DEMAND.cleanup,
         )
         self.assertEqual(
@@ -1092,7 +1058,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="role",
             role="pm",
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=TASK.cleanup,
         )
         self.assertEqual(
@@ -1120,7 +1085,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=TASK.cleanup,
         )
         self.assertEqual(
@@ -1181,7 +1145,6 @@ class CleanupRepositoryTests(unittest.TestCase):
             scope="all-data",
             role=None,
             repo_root=self.repo_root,
-            manifest_path=self.manifest_path,
             contributions=(contribution,),
         )
         self.assertEqual(

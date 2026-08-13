@@ -11,11 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from tests.support.paths import REPO_ROOT
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from tests.support.runtime import RuntimeWorkspaceTestCase
-
-ROOT = REPO_ROOT
 
 import buddyswitch.foundation.runtime_broker.broker as runtime_broker  # noqa: E402
 from tests.support import task_fixtures  # noqa: E402
@@ -23,7 +19,6 @@ from buddyswitch.foundation.tool_runtime import context as context_module  # noq
 from buddyswitch.modules.track.private.state import track_comments as comment_repo  # noqa: E402
 from buddyswitch.modules.track.private.state import tracks as track_repo  # noqa: E402
 
-MANIFEST = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
 PROTOCOL = "buddyswitch-runtime-broker/v2"
 
 
@@ -93,8 +88,6 @@ class TrackCommentEnvToolTests(RuntimeWorkspaceTestCase):
         envelope = runtime_broker.dispatch_runtime_request(
             request=request,
             instance_json_path=instance_json,
-            manifest_path=MANIFEST,
-            manifest_loader=env_manifest.load_manifest,
         )
         self.assertIsInstance(envelope, dict)
         assert isinstance(envelope, dict)

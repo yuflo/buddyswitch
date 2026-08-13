@@ -144,15 +144,16 @@ Do not add prose when a machine can enforce the rule, and do not build a framewo
 Stable BuddySwitch paths:
 
 - product source mount: `projects/app/`;
-- environment manifest: `src/buddyswitch/catalog/manifest.toml`;
+- Role host: `src/buddyswitch/foundation/role_host/`;
+- reviewed Role packages: `src/buddyswitch/roles/<package_name>/`;
 - product launcher: `./buddyswitch-codex instance start --role <role>`;
-- role bootstrap guidance: `src/buddyswitch/launcher/assets/roles/<role>/AGENTS.md`;
+- role bootstrap guidance: `src/buddyswitch/roles/<package_name>/AGENTS.md`;
 - runtime track projections: `buddyswitch/objects/tracks/*.json`;
 - runtime task projections: `buddyswitch/objects/task-sys/tasks/*.json`;
 - runtime artifact projections: `buddyswitch/objects/artifacts/*.json`;
 - active-instance private files: `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`, which resolves to the active instance `workspace/private`.
 
-Use environment tools for product-mode state. Do not edit `buddyswitch/objects/**`, `buddyswitch/local/private/**`, or old private runtime paths directly. Runtime contracts belong to code, JSON contracts, role contracts, and tests; do not create prose mirrors.
+Use environment tools for product-mode state. Do not edit `buddyswitch/objects/**`, `buddyswitch/local/private/**`, or old private runtime paths directly. Runtime contracts belong to code, reviewed Role packages, JSON contracts, and tests; do not create prose mirrors.
 
 ## Definition of Done
 

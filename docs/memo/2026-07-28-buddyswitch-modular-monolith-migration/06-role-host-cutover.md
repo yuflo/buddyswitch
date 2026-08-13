@@ -1,7 +1,8 @@
 # S6 RoleHost Cutover Charter
 
-> Current state: READY — S6 R1 ONLY
-> Packet: `BS-MM-S6-ROLE-HOST-R1-20260813-01`
+> Current state: ACCEPTED
+> Acceptance: `06-role-host-cutover-plan/S6-ACCEPTANCE.md`
+> Packets: R1 and R2 consumed
 > Merge unit: one complete Role/Skill truth cutover
 
 ## Acceptance sentence
@@ -57,3 +58,10 @@ RoleHost:
 The source-bound implementation pack is at
 `06-role-host-cutover-plan/README.md`. S6 remains one atomic cutover; its
 internal coherent blocks are not separately acceptable architectures.
+
+The coordinating hub accepted the R2 candidate on 2026-08-13 after rejecting
+R1's global private-Skill namespace, central exact-Role test matrices and
+unearned Foundation fields. The accepted implementation, replacement proof and
+frozen FINAL are recorded in
+`06-role-host-cutover-plan/S6-ACCEPTANCE.md`. S7 preparation is unblocked;
+neither S6 packet may resume.

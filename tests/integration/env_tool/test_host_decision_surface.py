@@ -11,7 +11,6 @@ from tests.support.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 
-from buddyswitch.runtime_support import env_manifest  # noqa: E402
 from buddyswitch.modules.artifact.private.state import artifacts as artifact_repo
 from buddyswitch.modules.track.private.state import track_comments as track_comment_repo
 from buddyswitch.modules.track.private.state import tracks as track_repo
@@ -26,8 +25,6 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         self.workspace = RuntimeTestWorkspace()
         self.addCleanup(self.workspace.close)
         self.runtime_root = self.workspace.root
-        self.manifest_path = ROOT / "src" / "buddyswitch" / "catalog" / "manifest.toml"
-        self.manifest = env_manifest.load_manifest(self.manifest_path)
         self.actor_id = self.workspace.actor_id(role="market", label="act-market-decision-surface")
         self.instance_root = self.workspace.path(f"instances/{self.actor_id}")
         self.instance_json = self.instance_root / "instance.json"
@@ -80,8 +77,6 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
             actor_id=actor_id,
             instance_json=self.instance_json,
             instance_payload={**self.instance_payload, "actor_id": actor_id, "role": role},
-            manifest=self.manifest,
-            manifest_path=self.manifest_path,
         )
 
     def test_context_summarize_projects_runless_decision_surface(self) -> None:
@@ -393,7 +388,7 @@ class HostDecisionSurfaceProductModeTests(unittest.TestCase):
         self.assertEqual(response.get("active_role"), "design")
 
     def test_pm_page_prototype_decision_surface_prefers_direct_private_actor_private_directory_without_phrase_rule(self) -> None:
-        pm_agents = (ROOT / "src" / "buddyswitch" / "launcher" / "assets" / "roles" / "pm" / "AGENTS.md").read_text(
+        pm_agents = (ROOT / "src" / "buddyswitch" / "roles" / "pm" / "AGENTS.md").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("project.access=", pm_agents)
