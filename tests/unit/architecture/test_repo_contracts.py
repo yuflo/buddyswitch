@@ -22,6 +22,14 @@ DEMAND_REPOSITORY_PATH = Path(
     "src/buddyswitch/modules/demand/private/state/demands.py"
 )
 
+RETIRED_REPOSITORY_ROOTS = (
+    Path("artifacts"),
+    Path("buddyswitch"),
+    Path("framework"),
+    Path("scripts"),
+    Path("tools"),
+)
+
 
 def _imported_modules(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -64,6 +72,11 @@ def _call_count(path: Path, name: str) -> int:
         elif isinstance(node.func, ast.Attribute) and node.func.attr == name:
             count += 1
     return count
+
+
+def test_retired_repository_roots_are_absent() -> None:
+    for relative in RETIRED_REPOSITORY_ROOTS:
+        assert not (REPO_ROOT / relative).exists(), relative
 
 
 def test_public_launcher_is_a_thin_python_cli_bootstrap() -> None:

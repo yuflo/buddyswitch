@@ -29,7 +29,6 @@ namespaces = false
   "*/assets/**/*.md",
   "*/assets/**/*.json",
 ]
-"buddyswitch.config" = ["**/*.toml", "**/*.json", "**/*.md"]
 "buddyswitch.contracts" = ["**/*.toml", "**/*.json", "**/*.md"]
 "buddyswitch.foundation.app_server" = ["shell/*.sh"]
 "buddyswitch.foundation.browser_runtime" = ["assets/**/*.json"]
@@ -42,7 +41,6 @@ namespaces = false
   "assets/**/*.js",
   "assets/**/LICENSE*",
 ]
-"buddyswitch.launcher" = ["assets/docs/*.md"]
 "buddyswitch.modules.demand" = ["skills/**/*.md"]
 "buddyswitch.modules.track" = ["skills/**/*.md"]
 "buddyswitch.modules.artifact" = [

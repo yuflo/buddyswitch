@@ -16,7 +16,7 @@ from tests.support.python import PYTHON
 
 
 SourcePreparer = Callable[[Path], None]
-RUNTIME_ASSET = Path("launcher/assets/docs/help.md")
+RUNTIME_ASSET = Path("modules/artifact/assets/artifact-selection-v1.json")
 COLOCATED_TEST = Path("modules/probe/tests/test_probe.py")
 
 
@@ -76,8 +76,6 @@ def add_correspondence_probe(source_root: Path) -> None:
     package_root = source_root / "src" / "buddyswitch"
 
     for relative, content in (
-        (Path("launcher/__init__.py"), '"""launcher."""\n'),
-        (RUNTIME_ASSET, "# Runtime help\n"),
         (Path("modules/__init__.py"), '"""modules."""\n'),
         (Path("modules/probe/__init__.py"), "PROBE = True\n"),
         (Path("modules/probe/tests/__init__.py"), '"""tests."""\n'),

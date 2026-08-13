@@ -143,16 +143,7 @@ def test_actor_runtime_has_one_exact_inert_foundation_owner() -> None:
     assert isinstance(package_docstring.value, ast.Constant)
     assert isinstance(package_docstring.value.value, str)
 
-    assert not [name for name in sorted(RETIRED_FILES) if (LAUNCHER_ROOT / name).exists()]
-
-
-def test_launcher_package_root_is_inert_without_reexport_or_fallback() -> None:
-    package_tree = ast.parse((LAUNCHER_ROOT / "__init__.py").read_text(encoding="utf-8"))
-    assert len(package_tree.body) == 1
-    package_docstring = package_tree.body[0]
-    assert isinstance(package_docstring, ast.Expr)
-    assert isinstance(package_docstring.value, ast.Constant)
-    assert isinstance(package_docstring.value.value, str)
+    assert not LAUNCHER_ROOT.exists()
 
 
 def test_classified_component_join_paths_use_only_current_actor_runtime_root() -> None:

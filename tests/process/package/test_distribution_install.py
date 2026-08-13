@@ -214,20 +214,21 @@ print(json.dumps({
         "buddyswitch.catalog": spec_exists("buddyswitch.catalog"),
         "buddyswitch.runtime_support": spec_exists("buddyswitch.runtime_support"),
         "buddyswitch.skills": spec_exists("buddyswitch.skills"),
-        "buddyswitch.launcher.actor_capability": importlib.util.find_spec("buddyswitch.launcher.actor_capability") is not None,
-        "buddyswitch.launcher.codex_runtime": importlib.util.find_spec("buddyswitch.launcher.codex_runtime") is not None,
-        "buddyswitch.launcher.actor_session": importlib.util.find_spec("buddyswitch.launcher.actor_session") is not None,
-        "buddyswitch.launcher.actor_side_thread": importlib.util.find_spec("buddyswitch.launcher.actor_side_thread") is not None,
-        "buddyswitch.launcher.side_thread_lifecycle": importlib.util.find_spec("buddyswitch.launcher.side_thread_lifecycle") is not None,
-        "buddyswitch.launcher.side_thread_registry": importlib.util.find_spec("buddyswitch.launcher.side_thread_registry") is not None,
-        "buddyswitch.launcher.actor_environment": importlib.util.find_spec("buddyswitch.launcher.actor_environment") is not None,
-        "buddyswitch.launcher.host_control": importlib.util.find_spec("buddyswitch.launcher.host_control") is not None,
-        "buddyswitch.launcher.runtime_lock": importlib.util.find_spec("buddyswitch.launcher.runtime_lock") is not None,
-        "buddyswitch.launcher.web_management": importlib.util.find_spec("buddyswitch.launcher.web_management") is not None,
-        "buddyswitch.launcher.web_contracts": importlib.util.find_spec("buddyswitch.launcher.web_contracts") is not None,
-        "buddyswitch.launcher.cli_contract": importlib.util.find_spec("buddyswitch.launcher.cli_contract") is not None,
-        "buddyswitch.launcher.cli": importlib.util.find_spec("buddyswitch.launcher.cli") is not None,
-        "buddyswitch.launcher.codex_config": importlib.util.find_spec("buddyswitch.launcher.codex_config") is not None,
+        "buddyswitch.launcher": spec_exists("buddyswitch.launcher"),
+        "buddyswitch.launcher.actor_capability": spec_exists("buddyswitch.launcher.actor_capability"),
+        "buddyswitch.launcher.codex_runtime": spec_exists("buddyswitch.launcher.codex_runtime"),
+        "buddyswitch.launcher.actor_session": spec_exists("buddyswitch.launcher.actor_session"),
+        "buddyswitch.launcher.actor_side_thread": spec_exists("buddyswitch.launcher.actor_side_thread"),
+        "buddyswitch.launcher.side_thread_lifecycle": spec_exists("buddyswitch.launcher.side_thread_lifecycle"),
+        "buddyswitch.launcher.side_thread_registry": spec_exists("buddyswitch.launcher.side_thread_registry"),
+        "buddyswitch.launcher.actor_environment": spec_exists("buddyswitch.launcher.actor_environment"),
+        "buddyswitch.launcher.host_control": spec_exists("buddyswitch.launcher.host_control"),
+        "buddyswitch.launcher.runtime_lock": spec_exists("buddyswitch.launcher.runtime_lock"),
+        "buddyswitch.launcher.web_management": spec_exists("buddyswitch.launcher.web_management"),
+        "buddyswitch.launcher.web_contracts": spec_exists("buddyswitch.launcher.web_contracts"),
+        "buddyswitch.launcher.cli_contract": spec_exists("buddyswitch.launcher.cli_contract"),
+        "buddyswitch.launcher.cli": spec_exists("buddyswitch.launcher.cli"),
+        "buddyswitch.launcher.codex_config": spec_exists("buddyswitch.launcher.codex_config"),
         "buddyswitch.runtime_support.env_cleanup": spec_exists("buddyswitch.runtime_support.env_cleanup"),
         "buddyswitch.runtime_support.skill_contracts": spec_exists("buddyswitch.runtime_support.skill_contracts"),
         "buddyswitch.runtime_support.turn_runtime": spec_exists("buddyswitch.runtime_support.turn_runtime"),
@@ -266,6 +267,7 @@ print(json.dumps({
         "buddyswitch.catalog": False,
         "buddyswitch.runtime_support": False,
         "buddyswitch.skills": False,
+        "buddyswitch.launcher": False,
         "buddyswitch.launcher.actor_capability": False,
         "buddyswitch.launcher.codex_runtime": False,
         "buddyswitch.launcher.actor_session": False,
@@ -331,7 +333,7 @@ print(json.dumps({
     )
 
 
-def test_runtime_assets_ship_while_colocated_tests_and_caches_do_not(
+def test_probe_package_ships_while_colocated_tests_and_caches_do_not(
     tmp_path: Path,
 ) -> None:
     installed = install_clean_runtime(
@@ -341,7 +343,6 @@ def test_runtime_assets_ship_while_colocated_tests_and_caches_do_not(
     with zipfile.ZipFile(installed.wheel) as archive:
         names = set(archive.namelist())
 
-    assert "buddyswitch/launcher/assets/docs/help.md" in names
     assert "buddyswitch/modules/probe/__init__.py" in names
     assert not [
         name

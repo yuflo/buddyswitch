@@ -80,14 +80,7 @@ def test_stable_host_control_build_boundary_is_application_supplied() -> None:
 
 
 def test_retired_launcher_owner_import_and_reexport_are_absent() -> None:
-    launcher_tree = ast.parse(
-        (LAUNCHER_ROOT / "__init__.py").read_text(encoding="utf-8")
-    )
-    assert len(launcher_tree.body) == 1
-    package_docstring = launcher_tree.body[0]
-    assert isinstance(package_docstring, ast.Expr)
-    assert isinstance(package_docstring.value, ast.Constant)
-    assert isinstance(package_docstring.value.value, str)
+    assert not LAUNCHER_ROOT.exists()
 
     live_python = (
         *PACKAGE_ROOT.rglob("*.py"),

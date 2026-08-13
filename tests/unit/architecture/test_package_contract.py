@@ -11,6 +11,16 @@ from tests.support.paths import REPO_ROOT
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 PACKAGE_ROOT = REPO_ROOT / "src" / "buddyswitch"
 
+RETIRED_EMPTY_PACKAGE_ROOTS = (
+    PACKAGE_ROOT / "config",
+    PACKAGE_ROOT / "launcher",
+)
+
+
+def test_retired_empty_packages_are_absent() -> None:
+    for path in RETIRED_EMPTY_PACKAGE_ROOTS:
+        assert not path.exists(), path
+
 
 def test_pyproject_is_the_only_exact_package_build_owner() -> None:
     assert PYPROJECT.is_file()
@@ -33,14 +43,12 @@ def test_package_data_names_only_current_runtime_asset_owners() -> None:
     ]["setuptools"]["package-data"]
     assert set(package_data) == {
         "buddyswitch.roles",
-        "buddyswitch.config",
         "buddyswitch.contracts",
         "buddyswitch.foundation.app_server",
         "buddyswitch.foundation.browser_runtime",
         "buddyswitch.foundation.cli_runtime",
         "buddyswitch.foundation.host_control",
         "buddyswitch.foundation.web_runtime",
-        "buddyswitch.launcher",
         "buddyswitch.modules.artifact",
         "buddyswitch.modules.demand",
         "buddyswitch.modules.track",
@@ -56,7 +64,6 @@ def test_package_data_names_only_current_runtime_asset_owners() -> None:
     assert "*/AGENTS.md" in role_patterns
     assert "*/skills/**/*.md" in role_patterns
     assert not any("tests" in pattern for pattern in role_patterns)
-    assert package_data["buddyswitch.launcher"] == ["assets/docs/*.md"]
 
 
 def test_role_packages_and_role_host_are_packaged_source_owners() -> None:

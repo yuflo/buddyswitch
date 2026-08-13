@@ -42,8 +42,8 @@ their required current Role facts directly.
 Foundation CLI Runtime imports or embeds no Application, Launcher, component,
 retired central Role support or concrete Role implementation. Application
 supplies one `RoleRuntime` resolver from RoleHost; CLI Runtime uses only its
-source-access and Browser facts. The Launcher package root remains inert and
-contains no executable owner.
+source-access and Browser facts. No Launcher package root or executable owner
+remains.
 
 ## Preserved public contract
 

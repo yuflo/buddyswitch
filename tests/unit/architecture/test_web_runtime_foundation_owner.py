@@ -118,7 +118,6 @@ def test_web_and_cli_runtimes_have_one_direct_foundation_owner() -> None:
     }
     _assert_inert_package(WEB_ROOT / "__init__.py")
     _assert_inert_package(CLI_ROOT / "__init__.py")
-    _assert_inert_package(PACKAGE_ROOT / "launcher" / "__init__.py")
     assert all(not path.exists() for path in RETIRED_PATHS)
 
 
@@ -191,7 +190,4 @@ def test_web_assets_have_owner_local_package_data() -> None:
         "assets/**/*.css",
         "assets/**/*.js",
         "assets/**/LICENSE*",
-    ]
-    assert package_data["buddyswitch.launcher"] == [
-        "assets/docs/*.md",
     ]

@@ -66,7 +66,7 @@ def _assert_inert_package(path: Path) -> None:
     assert isinstance(statement.value.value, str)
 
 
-def test_cli_runtime_has_one_direct_owner_and_launcher_is_inert() -> None:
+def test_cli_runtime_has_one_direct_owner_and_no_launcher_root() -> None:
     assert {
         path.relative_to(OWNER_ROOT).as_posix()
         for path in OWNER_ROOT.rglob("*")
@@ -82,13 +82,8 @@ def test_cli_runtime_has_one_direct_owner_and_launcher_is_inert() -> None:
         "shell/env.sh",
     }
     _assert_inert_package(OWNER_ROOT / "__init__.py")
-    _assert_inert_package(LAUNCHER_ROOT / "__init__.py")
     assert all(not path.exists() for path in RETIRED_OWNERS)
-    assert {
-        path.relative_to(LAUNCHER_ROOT).as_posix()
-        for path in LAUNCHER_ROOT.rglob("*")
-        if path.is_file()
-    } == {"__init__.py"}
+    assert not LAUNCHER_ROOT.exists()
 
 
 def test_cli_runtime_embeds_no_upward_executable_root() -> None:
@@ -148,4 +143,3 @@ def test_cli_runtime_shells_have_owner_local_package_projection() -> None:
         "tool"
     ]["setuptools"]["package-data"]
     assert package_data["buddyswitch.foundation.cli_runtime"] == ["shell/*.sh"]
-    assert package_data["buddyswitch.launcher"] == ["assets/docs/*.md"]
