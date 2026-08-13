@@ -85,6 +85,24 @@ def test_task_has_one_final_physical_owner_and_no_retired_live_path() -> None:
         assert not (REPO_ROOT / retired).exists(), retired
 
 
+def test_current_guidance_names_task_sys_tool_and_canonical_state_only() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    current_guidance = (
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "AGENTS.md",
+        *sorted((REPO_ROOT / "docs/arch").glob("*.md")),
+    )
+
+    assert "`task_sys.*`, `track.*`, `artifact.*`" in readme
+    assert "`buddyswitch/objects/task-sys/tasks/*.json`" in readme
+    assert [
+        (path.relative_to(REPO_ROOT).as_posix(), retired)
+        for path in current_guidance
+        for retired in ("`task.*`", "taskbox")
+        if retired in path.read_text(encoding="utf-8")
+    ] == []
+
+
 def test_application_selects_task_once_and_declares_exact_daemon_order() -> None:
     from buddyswitch.application.build import build_application
     from buddyswitch.application.composition import COMPONENTS

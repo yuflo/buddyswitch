@@ -1,6 +1,6 @@
 # S7 READY Review
 
-> Decision: `READY`
+> Decision: historical R1 admission; R1 is now `REJECTED — CONSUMED`
 > Packet: `BS-MM-S7-FINAL-R1-20260813-01`
 > Review date: 2026-08-13
 

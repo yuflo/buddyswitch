@@ -27,7 +27,7 @@ Product mode:
 1. Call context discovery (`context.get` or `context.summarize`).
 2. Pick explicit target ids (`track_id`, `task_id`, `artifact_id`) and decide whether any host-private file belongs under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`.
 3. Write product objects with env tools:
-   - `task.*`, `track.*`, `artifact.*`
+   - `task_sys.*`, `track.*`, `artifact.*`
 4. Write active-instance private host files directly under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR`, then attach them explicitly with `artifact.attach_file` using `source_path` when they must become product-readable.
 5. Summarize what was written.
 
@@ -55,8 +55,7 @@ Canonical product state and private local paths:
 
 - `buddyswitch/objects/tracks/*.json`
 - `buddyswitch/objects/artifacts/*.json`
-- `instances/<actor-id>/taskbox/<role>/tasks/*.json`
-- `instances/<actor-id>/taskbox/<role>/history.md`
+- `buddyswitch/objects/task-sys/tasks/*.json`
 
 Private workspace private files are active-instance-local under `$BUDDYSWITCH_ACTOR_PRIVATE_DIR` (`workspace/private`); they are not product-readable object state until an explicit artifact attachment or other product write publishes them.
 

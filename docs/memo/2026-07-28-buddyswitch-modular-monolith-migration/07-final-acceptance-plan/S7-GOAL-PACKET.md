@@ -1,5 +1,9 @@
 # S7 Final System Acceptance Goal Packet
 
+> Status: `REJECTED — CONSUMED`. This R1 packet must not be executed or
+> resumed. See `S7-R1-RETURN-REVIEW.md`; a future R2 requires a separate
+> committed READY packet.
+
 ## 1. Copy-paste session request
 
 ```text

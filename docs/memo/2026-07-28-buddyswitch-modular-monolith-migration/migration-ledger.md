@@ -21,13 +21,14 @@
 | S5 C6F acceptance | `05-foundation-convergence-plan/cli-runtime/S5-C6F-ACCEPTANCE.md`; patch `4676cf6d…`; FINAL `f9dea78e158e473db2a89081e60cb595` |
 | S5 C7/final acceptance | `05-foundation-convergence-plan/final-acceptance/S5-C7-ACCEPTANCE.md`; patch `2126cb32…`; FINAL `364f7e924501414a9ca48b3404645307` |
 | S6 acceptance | `06-role-host-cutover-plan/S6-ACCEPTANCE.md`; patch `58ce6aa5…`; FINAL `56b2be7f071942b89ffecad5e2891bc9` |
+| S3 current-guidance repair | `03-task-goal-boundary-cutover-plan/S3-DOCUMENTATION-REPAIR-ACCEPTANCE.md`; RED `5cb7ecb2…`; GREEN `90a672c1…`; affected `71208e29…` |
 | Active stage | S7 — final system acceptance |
-| State | S0–S6 ACCEPTED; S7 READY |
-| Runtime migration authorized | validation only; no repository/runtime mutation |
+| State | S0–S6 ACCEPTED; S7 PREPARATION ONLY after rejected R1 |
+| Runtime migration authorized | none until repair checkpoint and R2 READY review |
 | Final implementation root | `src/buddyswitch/**` |
 | Runtime target | one installed attributable distribution |
 | Actor target | selected Role/Skill/config/private/project projection; no implementation |
-| Next gate | execute `BS-MM-S7-FINAL-R1-20260813-01`, then hub acceptance and historical-only promotion |
+| Next gate | commit/push the accepted S3 guidance repair, then refresh and issue one source-bound S7 R2 validation packet |
 | Current executable truth | one installed package; physically aggregated explicit product modules; direct product-neutral Foundation owners; physically aggregated reviewed Role packages selected by one narrow RoleHost; no central Role/Skill/profile catalog |
 
 ## Stage ledger
@@ -41,7 +42,7 @@
 | S4 Component waves | ACCEPTED | S3 | coordinating hub | closed; every S4 packet consumed |
 | S5 Foundation | ACCEPTED | S4 | coordinating hub | closed; every S5 packet consumed |
 | S6 RoleHost | ACCEPTED | S5 | coordinating hub | closed; R1 and R2 consumed |
-| S7 Final acceptance | READY | S6 | coordinating hub + migration lead | execute one zero-write focused/frozen-FINAL proof packet |
+| S7 Final acceptance | PREPARATION ONLY | S6 + accepted S3 guidance repair | coordinating hub + migration lead | checkpoint repair, then READY-review a new zero-write R2 packet |
 
 ## S0 completed
 
@@ -558,6 +559,8 @@ source refresh and READY preparation are unblocked.
 | 2026-08-13 | S6 R1 return review / R2 handoff | REPLANNING — BOUNDED COMPLETION | R1 candidate preserved; hub review found global private-Skill lookup, central exact-six test matrices and unearned Foundation profile/Artifact vocabulary; packet `BS-MM-S6-ROLE-HOST-R2-20260813-01`; D-077 | consume R1; repair only the three owner boundaries in place; reprove and run one replacement FINAL; S7 remains blocked |
 | 2026-08-13 | S6 RoleHost acceptance | ACCEPTED | `06-role-host-cutover-plan/S6-ACCEPTANCE.md`; patch `58ce6aa54b04dabb933b02cdafe389867503544d2c6b3bc57392377829f29490`; private/narrow exact `285538ef4b7e4c8091d306ab2ea59ab5`; owner/Role-local `08f71401de114c05ab2c6cb9a479d5c9`; affected `af4886c1a3654524804bf5f1315561ca`; real Actor `0245baaa9b20402e845d21a77a6dbda6`; package `fd32828193b74698b17bf9d79c884065`; FINAL `56b2be7f071942b89ffecad5e2891bc9` | consume R1/R2; close R-ROLE-001–007 and R-DOC-004; commit/push S6 checkpoint; then refresh and READY-review S7 |
 | 2026-08-13 | S7 final acceptance handoff | READY — VALIDATION ONLY | `07-final-acceptance-plan/S7-READY-REVIEW.md`; architecture/package `5e822ce3503c46b7818bb447fc239a27`; real Actor/product `9a85e5acda2846c6bd0a1b2e2b4ab9e5`; source-equivalent baseline `56b2be7f071942b89ffecad5e2891bc9`; packet `BS-MM-S7-FINAL-R1-20260813-01`; D-078 | execute one zero-write validation packet; material defects reopen their owner; hub alone accepts and closes R-DOC-005 |
+| 2026-08-13 | S7 R1 return review | REJECTED — CONSUMED | `07-final-acceptance-plan/S7-R1-RETURN-REVIEW.md`; focused `6d964449d5d445fbb1bfa45e5fbe1b7a`; green FINAL `c43014696e8b473c93e804ff73a0a408`; root README Task contradiction | reopen S3 Task portion of R-DOC-002; no S7 repair and never resume R1 |
+| 2026-08-13 | S3 current-guidance repair | ACCEPTED | `03-task-goal-boundary-cutover-plan/S3-DOCUMENTATION-REPAIR-ACCEPTANCE.md`; patch `a106d869…`; RED `5cb7ecb2954a416e85e44d7d276c9d56`; exact GREEN `90a672c1176049428c05db2faa3d8b4f`; affected `71208e299dc541a092fc4b54f4588170` | close R-DOC-002 again; commit/push repair before preparing S7 R2 |
 
 No stage accepts without a linked source-bound acceptance record.
 
@@ -580,11 +583,11 @@ Stop/replan condition:
 
 ```text
 Stage: S7 / final system acceptance
-Master state: S0–S6 ACCEPTED; S7 READY
-Goal Packet: BS-MM-S7-FINAL-R1-20260813-01
+Master state: S0–S6 ACCEPTED; S7 PREPARATION ONLY after rejected R1
+Goal Packet: none; BS-MM-S7-FINAL-R1-20260813-01 is consumed
 Execution session: unknown until user supplies it
-Last hub checkpoint: S7 READY on pushed S6 executable checkpoint 6a51244192f5bad36a4438f030183acc4c5f9529; architecture/package and representative real-Actor/product preflight green
-Next action: user starts one independent S7 validation task from the Goal Packet
-Expected return: exact focused and sole FINAL evidence, cleanup, R-DOC-005 proposal and ACCEPTED/REJECTED proposal
-No-polling state: PAUSED_FOR_USER_RESULT
+Last hub checkpoint: S7 R1 rejected cleanly; S3 Task current-guidance repair accepted locally with owner-bound RED/GREEN and affected proof
+Next action: hub commits/pushes the repair checkpoint, then source-refreshes and READY-reviews S7 R2
+Expected return: none until R2 is issued
+No-polling state: HUB_PREPARATION_ACTIVE
 ```

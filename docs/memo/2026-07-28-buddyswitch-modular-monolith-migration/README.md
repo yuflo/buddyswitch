@@ -1,7 +1,7 @@
 # BuddySwitch Modular Monolith Migration Pack
 
-> Current state: S0–S6 ACCEPTED; S7 READY
-> Runtime authorization: validation only; no repository/runtime mutation
+> Current state: S0–S6 ACCEPTED; S7 PREPARATION ONLY after rejected R1
+> Runtime authorization: none until the S3 guidance repair is checkpointed and S7 R2 is READY
 > The prior Demand-first pack was replaced after the readiness audit.
 
 Read:
@@ -22,11 +22,11 @@ Read:
 | S0 | `00-program-readiness.md` | ACCEPTED |
 | S1 | `01-single-package-runtime-cutover.md` | ACCEPTED |
 | S2 | `02-demand-component-pilot.md` | ACCEPTED |
-| S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED |
+| S3 | `03-task-goal-boundary-cutover.md` | ACCEPTED — current-guidance repair added |
 | S4 | `04-independent-component-waves.md` | ACCEPTED |
 | S5 | `05-foundation-convergence.md` | ACCEPTED |
 | S6 | `06-role-host-cutover.md` | ACCEPTED |
-| S7 | `07-final-acceptance.md` | READY |
+| S7 | `07-final-acceptance.md` | PREPARATION ONLY |
 
 ## Control surfaces
 
@@ -92,6 +92,15 @@ hub reproduced its complete source, untracked and activation identities,
 reviewed the one-owner/Public/contribution boundaries and accepted S3 in
 `03-task-goal-boundary-cutover-plan/S3-ACCEPTANCE.md`. Both S3 packets are
 consumed.
+
+S7 R1 later rejected the frozen candidate because root `README.md` still
+taught the retired `task.*` and per-instance `taskbox` paths. The executor
+made no write and stopped correctly. The hub accepted the owning S3 repair in
+`03-task-goal-boundary-cutover-plan/S3-DOCUMENTATION-REPAIR-ACCEPTANCE.md`:
+root guidance now names `task_sys` and canonical Task object state, and the
+existing Task architecture proof enforces both positive and absence claims.
+R1 is consumed; S7 remains preparation-only until this repair is committed
+and a source-bound R2 packet is reviewed.
 
 The S4 source refresh then separated the six lanes by real host and dependency
 boundaries. Search is stateless and needs only the existing Tool contribution.
