@@ -197,13 +197,13 @@ GREEN, then freeze and choose FINAL breadth under `buddyswitch-testing`.
 
 ## 7. Execution states
 
-- [ ] `FRAME` — freeze baseline, acceptance sentence, tasks, and cleanup scope.
-- [ ] `TRACE` — map Browser/Web/Host/Actor/IM/state owners for each scenario.
-- [ ] `PROVE` — capture the empty Web state and exact pre-run identities.
-- [ ] `BUILD` — create the real Instance and execute Scenarios B–D through UI.
-- [ ] `REPLACE` — inapplicable unless an authorized defect repair replaces a path.
-- [ ] `VERIFY` — execute Scenario E and reconcile all terminal truths.
-- [ ] `ACCEPT` — audit every scenario claim and publish findings/residual risk.
+- [x] `FRAME` — froze baseline, acceptance sentence, tasks, and cleanup scope.
+- [x] `TRACE` — mapped Browser/Web/Host/Actor/IM/state owners for each scenario.
+- [x] `PROVE` — captured the empty Web state and exact pre-run identities.
+- [x] `BUILD` — created the real Instance and executed Scenarios B–D through UI.
+- [x] `REPLACE` — inapplicable; this audit did not modify product source.
+- [x] `VERIFY` — executed Scenario E and reconciled all terminal truths.
+- [x] `ACCEPT` — audited every scenario and published findings/residual risk.
 
 ## 8. Stop and escalation conditions
 
@@ -223,8 +223,10 @@ explicitly accepted.
 
 ## 9. Completion record
 
-Status: `READY — execution not yet started`
+Status: `COMPLETE — overall acceptance REJECTED; core loop functional`
 
-The report will record exact server/runtime identity, Actor ID, scenario timing,
-accepted screenshots, public object IDs, console/network evidence, cleanup proof,
-findings, omitted checks, and final acceptance or rejection.
+The completed report is
+[2026-08-13-buddyswitch-real-web-actor-experience-report.md](2026-08-13-buddyswitch-real-web-actor-experience-report.md).
+It records exact server/runtime identity, Actor ID, scenario timing, accepted
+screenshots, public object IDs, browser diagnostics, cleanup proof, findings,
+omitted checks, and final disposition.
