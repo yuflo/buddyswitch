@@ -7,6 +7,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 from buddyswitch.foundation.daemon import central_process
 from buddyswitch.foundation.daemon import central_service
 import buddyswitch.foundation.process_runtime.process_identity as process_identity
@@ -143,3 +145,48 @@ def test_sigterm_service_uses_same_cleanup_owner_for_pid_identity_and_socket(
         except (ProcessLookupError, PermissionError):
             pass
         _wait_pid_gone(pid, timeout=2.0)
+
+
+def test_start_interruption_after_process_acquisition_reaps_unpublished_daemon(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("BUDDYSWITCH_PYTHON", sys.executable)
+    paths = central_service.central_daemon_paths(tmp_path / "shared")
+    started_processes: list[subprocess.Popen[bytes]] = []
+    real_popen = central_process.subprocess.Popen
+
+    def capture_process(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        started_processes.append(process)
+        return process
+
+    def interrupt_before_record(_pid_file: Path, _pid: int):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(central_process.subprocess, "Popen", capture_process)
+    monkeypatch.setattr(
+        central_process.process_identity,
+        "write_record",
+        interrupt_before_record,
+    )
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            central_process.start_central_daemon(paths)
+
+        assert len(started_processes) == 1
+        process = started_processes[0]
+        assert _wait_pid_gone(process.pid, timeout=0.5)
+        assert not paths.pid_file.exists()
+        assert not paths.pid_identity_file.exists()
+        assert not paths.socket_path.exists()
+    finally:
+        for process in started_processes:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            _wait_pid_gone(process.pid, timeout=2.0)
+        central_process.cleanup_runtime_files(paths)

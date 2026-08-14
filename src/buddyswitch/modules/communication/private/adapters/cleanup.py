@@ -11,11 +11,13 @@ from buddyswitch.foundation.composition import (
     CleanupIndexProjection,
     OwnedStatePath,
 )
+import buddyswitch.foundation.identity.profiles as identity_profiles
 from buddyswitch.foundation.state.cleanup import iter_directory_files
 
 
 _MESSAGE_OBJECTS = Path("im/messages")
 _RETIRED_MESSAGE_OBJECTS = Path("buddyswitch/objects/messages")
+_OBJECTS_ROOT = Path("buddyswitch/objects")
 
 
 def _identity_id(value: Any) -> str | None:
@@ -31,11 +33,16 @@ def _identity_id(value: Any) -> str | None:
     return None
 
 
-def _actor_role(identity_id: str | None) -> str | None:
+def _actor_role(root: Path, identity_id: str | None) -> str | None:
     if not isinstance(identity_id, str) or not identity_id.startswith("act-"):
         return None
-    role, separator, _suffix = identity_id.removeprefix("act-").partition("-")
-    return role if separator and role else None
+    try:
+        return identity_profiles.get_actor_role_id(
+            identity_id,
+            objects_root=root / _OBJECTS_ROOT,
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
 def _read_payload(path: Path) -> dict[str, Any]:
@@ -135,13 +142,12 @@ def discover(root: Path) -> tuple[OwnedStatePath, ...]:
                     )
                 )
                 continue
+            sender_role = _actor_role(root, sender_identity_id)
+            target_role = _actor_role(root, target_identity_id)
             owner_roles = tuple(
                 dict.fromkeys(
                     role
-                    for role in (
-                        _actor_role(sender_identity_id),
-                        _actor_role(target_identity_id),
-                    )
+                    for role in (sender_role, target_role)
                     if role is not None
                 )
             )
@@ -150,8 +156,8 @@ def discover(root: Path) -> tuple[OwnedStatePath, ...]:
                 "conversation_id": conversation_id,
                 "sender_identity_id": sender_identity_id,
                 "target_identity_id": target_identity_id,
-                "from_role": _actor_role(sender_identity_id),
-                "to_role": _actor_role(target_identity_id),
+                "from_role": sender_role,
+                "to_role": target_role,
                 "object_path": relative_path,
             }
             owned.append(

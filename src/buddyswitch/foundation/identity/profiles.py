@@ -10,12 +10,12 @@ from buddyswitch.foundation.identity.model import ExternalIdentityProfile
 import buddyswitch.foundation.state.runtime as state_runtime
 
 
-def _identity_root() -> Path:
-    return state_runtime.OBJECTS_ROOT / "identities"
+def _identity_root(objects_root: Path | None = None) -> Path:
+    return (state_runtime.OBJECTS_ROOT if objects_root is None else objects_root) / "identities"
 
 
-def _actor_dir() -> Path:
-    return _identity_root() / "actors"
+def _actor_dir(objects_root: Path | None = None) -> Path:
+    return _identity_root(objects_root) / "actors"
 
 
 def _external_dir() -> Path:
@@ -37,13 +37,45 @@ def save_actor_identity_profile(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def get_actor_identity_profile(identity_id: str) -> dict[str, Any] | None:
-    path = _profile_path(_actor_dir(), identity_id, "actor identity id")
+def _load_actor_identity_profile(
+    identity_id: str,
+    *,
+    objects_root: Path | None = None,
+) -> ActorIdentityProfile | None:
+    path = _profile_path(
+        _actor_dir(objects_root),
+        identity_id,
+        "actor identity id",
+    )
     if not path.exists():
         return None
-    return ActorIdentityProfile.from_payload(
-        state_runtime.read_json_object(path)
-    ).to_payload()
+    profile = ActorIdentityProfile.from_payload(state_runtime.read_json_object(path))
+    if profile.identity.id != identity_id:
+        raise ValueError(
+            f"Actor identity profile id '{profile.identity.id}' does not match "
+            f"requested actor identity id '{identity_id}'"
+        )
+    return profile
+
+
+def get_actor_identity_profile(
+    identity_id: str,
+    *,
+    objects_root: Path | None = None,
+) -> dict[str, Any] | None:
+    profile = _load_actor_identity_profile(identity_id, objects_root=objects_root)
+    return profile.to_payload() if profile is not None else None
+
+
+def get_actor_role_id(
+    identity_id: str,
+    *,
+    objects_root: Path | None = None,
+) -> str | None:
+    """Return the canonical Role owned by one Actor Identity Profile."""
+
+    profile = _load_actor_identity_profile(identity_id, objects_root=objects_root)
+    return profile.role_id if profile is not None else None
 
 
 def list_actor_identity_profiles() -> list[dict[str, Any]]:

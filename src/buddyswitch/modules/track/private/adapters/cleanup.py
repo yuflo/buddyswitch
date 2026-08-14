@@ -11,10 +11,12 @@ from buddyswitch.foundation.composition import (
     CleanupIndexProjection,
     OwnedStatePath,
 )
+import buddyswitch.foundation.identity.profiles as identity_profiles
 
 
 _TRACK_RECORDS = Path("buddyswitch/objects/tracks")
 _TRACK_COMMENTS = Path("buddyswitch/objects/track-comments")
+_OBJECTS_ROOT = Path("buddyswitch/objects")
 
 
 def _read_payload(path: Path) -> dict[str, Any] | None:
@@ -25,11 +27,16 @@ def _read_payload(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _role_from_identity_id(value: object) -> str | None:
+def _role_from_identity_id(root: Path, value: object) -> str | None:
     if not isinstance(value, str) or not value.startswith("act-"):
         return None
-    role, separator, _suffix = value.removeprefix("act-").partition("-")
-    return role if separator and role else None
+    try:
+        return identity_profiles.get_actor_role_id(
+            value,
+            objects_root=root / _OBJECTS_ROOT,
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
 def discover_track_records(root: Path) -> tuple[OwnedStatePath, ...]:
@@ -61,14 +68,9 @@ def discover_track_comments(root: Path) -> tuple[OwnedStatePath, ...]:
         owner_role = None
         if payload is not None:
             owner_role = _role_from_identity_id(
+                root,
                 payload.get("by_identity_id")
             )
-            if owner_role is None:
-                by_actor = payload.get("by_actor")
-                if isinstance(by_actor, dict):
-                    role_id = by_actor.get("role_id")
-                    if isinstance(role_id, str) and role_id:
-                        owner_role = role_id
         warning = None
         if payload is None:
             warning = f"Malformed Track comment will be handled only by all-data cleanup: {path.relative_to(root).as_posix()}."

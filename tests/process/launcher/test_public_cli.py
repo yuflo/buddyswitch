@@ -394,8 +394,22 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
             state_root = shared_root / "state"
             task_dir = state_root / "buddyswitch" / "objects" / "task-sys" / "tasks"
             track_dir = state_root / "buddyswitch" / "objects" / "tracks"
+            actor_profile_dir = state_root / "buddyswitch" / "objects" / "identities" / "actors"
             task_dir.mkdir(parents=True, exist_ok=True)
             track_dir.mkdir(parents=True, exist_ok=True)
+            actor_profile_dir.mkdir(parents=True, exist_ok=True)
+            (actor_profile_dir / "act-pm-demo.json").write_text(
+                json.dumps(
+                    {
+                        "identity": {"id": "act-pm-demo", "type": "actor"},
+                        "role_id": "pm",
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             (task_dir / "task-demand-alpha.json").write_text(
                 json.dumps(
                     {
@@ -502,6 +516,92 @@ class TestLauncherPublicCli(ProcessLauncherHarness, unittest.TestCase):
 
             self.assertEqual(track_get.returncode, 0)
             self.assertEqual(self._cli_success_data(track_get, kind="track.get")["track"]["id"], "track-alpha")
+
+    def test_public_cli_task_actor_filter_uses_durable_hyphenated_role_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            shared_root = source_home_path / ".codex-buddyswitch"
+            state_root = shared_root / "state"
+            actor_id = "act-secondary-market-investor-durable"
+            role_id = "secondary-market-investor"
+            profile_path = (
+                state_root
+                / "buddyswitch"
+                / "objects"
+                / "identities"
+                / "actors"
+                / f"{actor_id}.json"
+            )
+            task_path = (
+                state_root
+                / "buddyswitch"
+                / "objects"
+                / "task-sys"
+                / "tasks"
+                / "task-demand-hyphenated-role.json"
+            )
+            profile_path.parent.mkdir(parents=True, exist_ok=True)
+            task_path.parent.mkdir(parents=True, exist_ok=True)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "identity": {"id": actor_id, "type": "actor"},
+                        "role_id": role_id,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            task_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "id": "task-demand-hyphenated-role",
+                        "actor_target": {"actor_id": actor_id, "role_id": role_id},
+                        "demand_ref": {
+                            "demand_id": "demand-hyphenated-role",
+                            "basis_revision": 1,
+                            "demand_ref": "dref-hyphenated-role",
+                        },
+                        "objective": "Prove durable Task reads use the Identity Profile.",
+                        "selection": {
+                            "reason": "Exercise the canonical Actor-to-Role relation.",
+                            "selected_at": "2026-08-14T00:00:00Z",
+                        },
+                        "goal_binding": None,
+                        "status": "active",
+                        "result": None,
+                        "created_at": "2026-08-14T00:00:00Z",
+                        "updated_at": "2026-08-14T00:00:00Z",
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(source_home_path)
+            env["BUDDYSWITCH_SHARED_ROOT"] = str(shared_root)
+            env["BUDDYSWITCH_STATE_ROOT"] = str(state_root)
+            env.pop("CODEX_HOME", None)
+
+            completed = run_process(
+                [str(LAUNCHER), "task", "list", "--actor", actor_id],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, msg=completed.stdout + completed.stderr)
+            tasks = self._cli_success_data(completed, kind="task.list")["tasks"]
+            self.assertEqual([task["task_id"] for task in tasks], ["task-demand-hyphenated-role"])
+            self.assertEqual(tasks[0]["actor"], {"actor_id": actor_id, "role_id": role_id})
+            self.assertFalse((shared_root / "instances" / actor_id).exists())
     def test_public_cli_task_and_track_malformed_arguments_emit_canonical_errors(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:
             source_home_path = Path(source_home)

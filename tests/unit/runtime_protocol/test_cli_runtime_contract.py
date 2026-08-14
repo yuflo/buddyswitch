@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
+from unittest import mock
 
 from buddyswitch.application import cli_runtime as application_cli_runtime
 from buddyswitch.application.build import activate_application
 from buddyswitch.foundation.actor_runtime import codex_runtime
 from buddyswitch.foundation.actor_runtime import session as actor_session
 from buddyswitch.foundation.cli_runtime import contracts as cli_contract
+from buddyswitch.foundation.daemon import central_service
 from buddyswitch.foundation.host_control import runtime as host_control
 from buddyswitch.foundation.cli_runtime import runtime as cli
 
@@ -112,6 +116,92 @@ class CliRuntimeContractTests(unittest.TestCase):
             "BUDDYSWITCH_CLI_RUNTIME_ROLE_BROWSER_CAPABILITY",
             environment,
         )
+
+    def test_web_child_non_interrupt_exit_code_propagates(self) -> None:
+        application_input = application_cli_runtime.assemble_cli_runtime(
+            activate_application()
+        )
+        completed = cli.subprocess.CompletedProcess(
+            args=["web-child"],
+            returncode=17,
+        )
+        child = mock.Mock(pid=43210)
+        child.wait.return_value = 17
+        child.poll.return_value = 17
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / ".codex-buddyswitch"
+            paths = central_service.central_daemon_paths(shared_root)
+            with (
+                mock.patch.object(cli, "_shared_root_from_env", return_value=shared_root),
+                mock.patch.object(
+                    cli.central_process,
+                    "start_central_daemon",
+                    return_value={"socket_path": str(paths.socket_path)},
+                ),
+                mock.patch.object(cli.central_process, "stop_if_idle") as stop_if_idle,
+                mock.patch.object(cli.subprocess, "run", return_value=completed),
+                mock.patch.object(cli.subprocess, "Popen", return_value=child),
+            ):
+                status = cli._run_web([], application_input=application_input)
+
+        self.assertEqual(status, 17)
+        stop_if_idle.assert_called_once()
+        stopped_paths = stop_if_idle.call_args.args[0]
+        self.assertEqual(stopped_paths.socket_path, paths.socket_path)
+
+    def test_web_startup_interrupts_stop_daemon_and_restore_sigterm_handler(self) -> None:
+        application_input = application_cli_runtime.assemble_cli_runtime(
+            activate_application()
+        )
+        self.assertNotIsInstance(
+            cli._WebTerminationRequested(cli.signal.SIGTERM),
+            Exception,
+        )
+        prior_sigint_handler = cli.signal.getsignal(cli.signal.SIGINT)
+        prior_sigterm_handler = cli.signal.getsignal(cli.signal.SIGTERM)
+        with tempfile.TemporaryDirectory() as temp_root:
+            shared_root = Path(temp_root) / ".codex-buddyswitch"
+            paths = central_service.central_daemon_paths(shared_root)
+            for interruption, expected_status in (
+                (KeyboardInterrupt(), 0),
+                (cli._WebTerminationRequested(cli.signal.SIGTERM), 143),
+            ):
+                with self.subTest(interruption=type(interruption).__name__):
+                    with (
+                        mock.patch.object(
+                            cli,
+                            "_shared_root_from_env",
+                            return_value=shared_root,
+                        ),
+                        mock.patch.object(
+                            cli.central_process,
+                            "start_central_daemon",
+                            side_effect=interruption,
+                        ),
+                        mock.patch.object(
+                            cli.central_process,
+                            "stop_if_idle",
+                        ) as stop_if_idle,
+                        mock.patch.object(cli.subprocess, "Popen") as popen,
+                    ):
+                        status = cli._run_web(
+                            [],
+                            application_input=application_input,
+                        )
+
+                    self.assertEqual(status, expected_status)
+                    popen.assert_not_called()
+                    stop_if_idle.assert_called_once()
+                    stopped_paths = stop_if_idle.call_args.args[0]
+                    self.assertEqual(stopped_paths.socket_path, paths.socket_path)
+                    self.assertIs(
+                        cli.signal.getsignal(cli.signal.SIGINT),
+                        prior_sigint_handler,
+                    )
+                    self.assertIs(
+                        cli.signal.getsignal(cli.signal.SIGTERM),
+                        prior_sigterm_handler,
+                    )
 
     def test_success_envelope_has_stable_machine_keys(self) -> None:
         payload = cli_contract.success("task_result", {"task_id": "task-1"})

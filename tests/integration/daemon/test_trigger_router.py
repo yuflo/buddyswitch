@@ -419,6 +419,61 @@ class DaemonTriggerRouterTests(unittest.TestCase):
             self.assertIsNone(row["last_error"])
             self.assertEqual(row["dispatch_result"]["handling_status"], "handled")
 
+    def test_due_scheduled_trigger_matched_ignored_is_delivered_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_root:
+            instance = self._instance(temp_root)
+            instance["state"].create_schedule(
+                delay_seconds=0,
+                trigger_type="browser.page.expired",
+                payload={"target_id": "target-idempotent"},
+                source_context={"owner": "browser"},
+                now="2026-06-24T00:00:00Z",
+            )
+            calls: list[Any] = []
+
+            class IdempotentBrowserExpiryHandler:
+                name = "browser_page_expired"
+
+                def handles(self, trigger: Any) -> bool:
+                    return trigger.type == "browser.page.expired"
+
+                def handle(self, _context: object, _state: object, _runtime: object, trigger: Any) -> object:
+                    calls.append(trigger)
+                    return contracts.HandlerResult.ignored()
+
+            first = self.instance.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[IdempotentBrowserExpiryHandler()],
+                now="2026-06-24T00:00:01Z",
+            )
+            second = self.instance.sweep_due_scheduled_triggers(
+                instance["context"],
+                instance["state"],
+                runtime=object(),
+                handlers=[IdempotentBrowserExpiryHandler()],
+                now="2026-06-24T00:00:02Z",
+            )
+
+            self.assertEqual(first["swept_count"], 1)
+            self.assertEqual(first["delivered_count"], 1)
+            self.assertEqual(first["failed_count"], 0)
+            self.assertEqual(second["swept_count"], 0)
+            self.assertEqual(len(calls), 1)
+            saved = json.loads(
+                daemon_state.daemon_state_file(instance["context"].instance_root).read_text(
+                    encoding="utf-8"
+                )
+            )
+            row = saved["scheduled_triggers"]["schedule-1"]
+            self.assertEqual(row["status"], "delivered")
+            self.assertEqual(row["delivered_at"], "2026-06-24T00:00:01Z")
+            self.assertIsNone(row["last_error"])
+            self.assertEqual(row["dispatch_result"]["matched_count"], 1)
+            self.assertEqual(row["dispatch_result"]["handled_count"], 0)
+            self.assertEqual(row["dispatch_result"]["handling_status"], "ignored")
+
     def test_due_scheduled_trigger_preserves_schedule_refreshed_during_handling(self) -> None:
         with tempfile.TemporaryDirectory() as temp_root:
             instance = self._instance(temp_root)

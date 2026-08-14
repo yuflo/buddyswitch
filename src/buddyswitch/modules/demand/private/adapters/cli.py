@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from buddyswitch.foundation.cli_runtime import contracts as cli_contract
 from buddyswitch.foundation.host_control import runtime as host_control
+import buddyswitch.foundation.identity.profiles as identity_profiles
 from buddyswitch.modules.demand.private import read_model
 
 
@@ -17,18 +18,15 @@ def _required_actor(args: Sequence[str], *, context: str) -> str:
     ).strip()
 
 
-def _actor_target(actor_id: str) -> dict[str, str]:
+def _actor_target(actor_id: str) -> dict[str, str] | None:
     try:
-        host_control.validate_actor_id(actor_id)
+        normalized = host_control.validate_actor_id(actor_id)
     except host_control.HostControlError as exc:
         raise cli_contract.CliError("INVALID_ARGUMENT", str(exc)) from exc
-    role, separator, _suffix = actor_id.removeprefix("act-").partition("-")
-    if not separator or not role:
-        raise cli_contract.CliError(
-            "INVALID_ARGUMENT",
-            "actor id must include a role segment",
-        )
-    return {"actor_id": actor_id, "role_id": role}
+    role_id = identity_profiles.get_actor_role_id(normalized)
+    if role_id is None:
+        return None
+    return {"actor_id": normalized, "role_id": role_id}
 
 
 def dispatch(args: Sequence[str]) -> cli_contract.CliCommandResult:
@@ -39,11 +37,14 @@ def dispatch(args: Sequence[str]) -> cli_contract.CliCommandResult:
     try:
         if command == "list":
             actor_id = _required_actor(rest, context="demand list")
+            actor_target = _actor_target(actor_id)
             return cli_contract.CliCommandResult(
                 "demand.list",
                 {
-                    "demands": read_model.list_external_demands(
-                        actor_target=_actor_target(actor_id)
+                    "demands": (
+                        []
+                        if actor_target is None
+                        else read_model.list_external_demands(actor_target=actor_target)
                     )
                 },
             )
@@ -55,9 +56,14 @@ def dispatch(args: Sequence[str]) -> cli_contract.CliCommandResult:
                 )
             demand_id = rest[0]
             actor_id = _required_actor(rest[1:], context="demand get")
-            demand = read_model.get_external_demand(
-                demand_id,
-                actor_target=_actor_target(actor_id),
+            actor_target = _actor_target(actor_id)
+            demand = (
+                None
+                if actor_target is None
+                else read_model.get_external_demand(
+                    demand_id,
+                    actor_target=actor_target,
+                )
             )
             if demand is None:
                 raise cli_contract.CliError(

@@ -34,6 +34,27 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
         role_id: str = "dev",
     ) -> Path:
         target = {"actor_id": actor_id, "role_id": role_id}
+        profile_path = (
+            state_root
+            / "buddyswitch"
+            / "objects"
+            / "identities"
+            / "actors"
+            / f"{actor_id}.json"
+        )
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        profile_path.write_text(
+            json.dumps(
+                {
+                    "identity": {"id": actor_id, "type": "actor"},
+                    "role_id": role_id,
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         path = (
             state_root
             / "buddyswitch"
@@ -153,6 +174,39 @@ class DemandCommandTests(ProcessLauncherHarness, unittest.TestCase):
             )
             self.assertEqual(wrong_actor.returncode, 3)
             self._cli_error(wrong_actor, code="NOT_FOUND")
+
+    def test_list_and_get_resolve_hyphenated_role_from_durable_identity_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as source_home:
+            source_home_path = Path(source_home)
+            state_root = source_home_path / ".codex-buddyswitch" / "state"
+            actor_id = "act-secondary-market-investor-demand"
+            role_id = "secondary-market-investor"
+            self._write_aggregate(
+                state_root,
+                actor_id=actor_id,
+                role_id=role_id,
+            )
+            env = self._env(source_home_path, state_root)
+
+            listed = self._run(env, "demand", "list", "--actor", actor_id)
+            fetched = self._run(
+                env,
+                "demand",
+                "get",
+                "demand-older",
+                "--actor",
+                actor_id,
+            )
+
+            self.assertEqual(listed.returncode, 0, msg=listed.stdout + listed.stderr)
+            rows = self._cli_success_data(listed, kind="demand.list")["demands"]
+            self.assertEqual([row["demand_id"] for row in rows], ["demand-newer", "demand-older"])
+            self.assertTrue(all(row["actor"] == {"actor_id": actor_id, "role_id": role_id} for row in rows))
+            self.assertEqual(fetched.returncode, 0, msg=fetched.stdout + fetched.stderr)
+            demand = self._cli_success_data(fetched, kind="demand.get")["demand"]
+            self.assertEqual(demand["demand_id"], "demand-older")
+            self.assertEqual(demand["actor"], {"actor_id": actor_id, "role_id": role_id})
+            self.assertFalse((state_root.parent / "instances" / actor_id).exists())
 
     def test_cli_exposes_only_list_and_get_without_mutating_demand_state(self) -> None:
         with tempfile.TemporaryDirectory() as source_home:

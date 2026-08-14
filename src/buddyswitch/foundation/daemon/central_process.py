@@ -53,6 +53,25 @@ def terminate_record(record: process_identity.RecordedProcess) -> bool:
     return not process_identity.is_running(record)
 
 
+def _terminate_acquired_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return
+    try:
+        process.wait(timeout=STOP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait()
+
+
 def cleanup_runtime_files(paths: central_service.CentralDaemonPaths) -> None:
     for path in (paths.pid_file, paths.pid_identity_file, paths.socket_path):
         try:
@@ -107,34 +126,42 @@ def start_central_daemon(paths: central_service.CentralDaemonPaths) -> dict[str,
         "--shared-root",
         str(paths.shared_root),
     ]
-    with paths.log_file.open("ab") as log_handle:
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            cwd=str(paths.shared_root),
-        )
-    process_identity.write_record(paths.pid_file, process.pid)
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with paths.log_file.open("ab") as log_handle:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                cwd=str(paths.shared_root),
+            )
+        process_identity.write_record(paths.pid_file, process.pid)
 
-    deadline = time.monotonic() + 5.0
-    ping: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            cleanup_runtime_files(paths)
-            raise RuntimeError(f"central daemon exited before ready; see {paths.log_file}")
+        deadline = time.monotonic() + 5.0
+        ping: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(
+                    f"central daemon exited before ready; see {paths.log_file}"
+                )
+            try:
+                ping = ping_central_daemon(socket_path=paths.socket_path)
+                break
+            except Exception:
+                time.sleep(POLL_SECONDS)
+        else:
+            raise RuntimeError(
+                f"central daemon did not become ready; see {paths.log_file}"
+            )
+    except BaseException:
         try:
-            ping = ping_central_daemon(socket_path=paths.socket_path)
-            break
-        except Exception:
-            time.sleep(POLL_SECONDS)
-    else:
-        recorded_process = process_identity.read_record(paths.pid_file)
-        if recorded_process is not None:
-            terminate_record(recorded_process)
-        cleanup_runtime_files(paths)
-        raise RuntimeError(f"central daemon did not become ready; see {paths.log_file}")
+            if process is not None:
+                _terminate_acquired_process(process)
+        finally:
+            cleanup_runtime_files(paths)
+        raise
 
     return {
         "ok": True,

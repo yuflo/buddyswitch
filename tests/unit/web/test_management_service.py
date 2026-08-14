@@ -263,14 +263,21 @@ class WebManagementUnitTests(RuntimeWorkspaceTestCase):
         block = source[start:end]
 
         ensure_index = block.index("central_process.start_central_daemon")
-        run_index = block.index("subprocess.run")
+        signal_index = block.index("signal.signal(signal.SIGTERM")
+        run_index = block.index("child = subprocess.Popen(")
+        wait_index = block.index("child.wait")
         helper_index = block.index("application_input.web_module")
         stop_index = block.index("central_process.stop_if_idle")
+        self.assertLess(signal_index, ensure_index)
         self.assertLess(ensure_index, run_index)
         self.assertLess(helper_index, run_index)
+        self.assertLess(run_index, wait_index)
+        self.assertLess(wait_index, stop_index)
         self.assertLess(run_index, stop_index)
         self.assertIn("BUDDYSWITCH_CENTRAL_DAEMON_SOCKET", block)
-        self.assertIn("return int(completed.returncode)", block)
+        self.assertIn("start_new_session=True", block)
+        self.assertIn("except KeyboardInterrupt", block)
+        self.assertIn("return int(child.wait())", block)
 
     def test_serve_with_workers_starts_stops_and_closes_server(self) -> None:
         class StopServer(Exception):

@@ -715,11 +715,27 @@ def sweep_due_scheduled_triggers(
         )
         dispatch_result = dispatch_trigger(context, state, runtime, trigger, handlers)
         swept_count += 1
-        if (
-            dispatch_result.get("handling_status") == "handled"
-            and isinstance(dispatch_result.get("handled_count"), int)
-            and dispatch_result.get("handled_count") > 0
-        ):
+        handling_status = dispatch_result.get("handling_status")
+        matched_count = dispatch_result.get("matched_count")
+        if handling_status == "failed":
+            error = dispatch_result.get("handling_error")
+            if not isinstance(error, str) or not error:
+                error = "scheduled trigger handler failed"
+            current_schedule = _schedule_row(state, schedule_id)
+            if _schedule_matches_dispatch_snapshot(current_schedule, schedule):
+                updated = state.mark_schedule_failed(
+                    schedule_id,
+                    message=error,
+                    dispatch_result=dispatch_result,
+                    now=timestamp,
+                )
+                failed_count += 1
+            else:
+                updated = current_schedule if current_schedule is not None else schedule
+        elif isinstance(matched_count, int) and matched_count > 0 and handling_status in {
+            "handled",
+            "ignored",
+        }:
             current_schedule = _schedule_row(state, schedule_id)
             if _schedule_matches_dispatch_snapshot(current_schedule, schedule):
                 updated = state.mark_schedule_delivered(schedule_id, dispatch_result=dispatch_result, now=timestamp)
@@ -727,14 +743,11 @@ def sweep_due_scheduled_triggers(
             else:
                 updated = current_schedule if current_schedule is not None else schedule
         else:
-            error = dispatch_result.get("handling_error")
-            if not isinstance(error, str) or not error:
-                error = "scheduled trigger had no matching handler"
             current_schedule = _schedule_row(state, schedule_id)
             if _schedule_matches_dispatch_snapshot(current_schedule, schedule):
                 updated = state.mark_schedule_failed(
                     schedule_id,
-                    message=error,
+                    message="scheduled trigger had no matching handler",
                     dispatch_result=dispatch_result,
                     now=timestamp,
                 )

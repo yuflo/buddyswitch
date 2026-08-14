@@ -44,6 +44,45 @@ function consoleResponse(actorId, status, health) {
   });
 }
 
+test('lifecycle status copy distinguishes progressive, successful, and failed phases', () => {
+  const actorId = 'act-market-copy';
+  const successCases = [
+    ['start', 'Starting ' + actorId, 'Started ' + actorId + '.'],
+    ['stop', 'Stopping ' + actorId, 'Stopped ' + actorId + '.'],
+    ['resume', 'Resuming ' + actorId, 'Resumed ' + actorId + '.'],
+    ['delete', 'Deleting ' + actorId, 'Deleted ' + actorId + '.'],
+    ['retry', 'Retrying ' + actorId, 'Retried ' + actorId + '.'],
+  ];
+  for (const [action, label, expected] of successCases) {
+    assert.equal(app.lifecycleOperationStatusText(lifecycleOperation({
+      action,
+      status: 'succeeded',
+      label,
+      target: { actor_id: actorId, role: 'market' },
+      result: { ok: true, actor_id: actorId },
+    })), expected);
+  }
+  assert.equal(app.lifecycleOperationStatusText(lifecycleOperation({
+    action: 'clear',
+    status: 'succeeded',
+    label: 'Clearing thread for ' + actorId,
+    target: { actor_id: actorId, role: 'market' },
+    result: { ok: true, actor_id: actorId, thread_id: 'thread-cleared' },
+  })), 'Cleared thread for ' + actorId + '. Thread thread-cleared.');
+  assert.equal(app.lifecycleOperationStatusText(lifecycleOperation({
+    action: 'stop',
+    status: 'running',
+    label: 'Stopping ' + actorId,
+    detail: 'Launcher command is running.',
+  })), 'Stopping ' + actorId + '. Launcher command is running.');
+  assert.equal(app.lifecycleOperationStatusText(lifecycleOperation({
+    action: 'delete',
+    status: 'failed',
+    label: 'Deleting ' + actorId,
+    error: { code: 'DELETE_FAILED', message: 'Delete was refused.' },
+  })), 'Deleting ' + actorId + ' failed: Delete was refused.');
+});
+
 test('selected actor context renders lifecycle-owned active controls', () => {
   const state = app.createState();
   const elements = createRenderElements();
@@ -187,7 +226,10 @@ test('Clear lifecycle operation reaches terminal state and refreshes the selecte
 
     assert.deepEqual(state.lifecycleOperations, {});
     assert.equal(app.selectedActorRuntime(state).thread_id, 'thread-' + actorId);
-    assert.match(elements.messageBanner.textContent, /completed/);
+    assert.equal(
+      elements.messageBanner.textContent,
+      'Cleared thread for ' + actorId + '. Thread thread-new.'
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -724,6 +724,9 @@ test('stale send completion cannot clear a newer actor send pending state', asyn
 
 test('record projected IM messages keeps sent and reply directions', () => {
   const state = app.createState();
+  state.actors = [
+    { actor_id: 'act-market-1', role: 'market' },
+  ];
   const sentEcho = app.recordImProjectedMessage(state, imMessage({
     id: 'msg-sent-1',
     sender: 'ext-1',
@@ -760,6 +763,34 @@ test('record projected IM messages keeps sent and reply directions', () => {
       replyTo: 'msg-sent-1',
     },
   ]);
+});
+
+test('projected IM labels use canonical actor rows and never parse actor IDs', () => {
+  const state = app.createState();
+  const actorId = 'act-secondary-market-investor-opaque';
+  const unprofiledActorId = 'act-secondary-market-investor-unprofiled';
+  state.actors = [
+    { actor_id: actorId, role: 'secondary-market-investor' },
+  ];
+
+  app.recordImProjectedMessage(state, imMessage({
+    id: 'msg-profiled-label',
+    sender: actorId,
+    target: 'ext-web',
+    content: 'profiled',
+  }));
+  app.recordImProjectedMessage(state, imMessage({
+    id: 'msg-unprofiled-label',
+    sender: unprofiledActorId,
+    target: 'ext-web',
+    content: 'unprofiled',
+  }));
+
+  assert.equal(
+    state.imConversation[0].sender,
+    'secondary-market-investor/' + actorId
+  );
+  assert.equal(state.imConversation[1].sender, unprofiledActorId);
 });
 
 test('clearing im conversation records owner identity and removes stale rows', () => {

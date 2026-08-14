@@ -101,6 +101,62 @@ def test_profile_reads_reject_corrupt_json_and_invalid_payloads() -> None:
         workspace.close()
 
 
+def test_actor_role_lookup_uses_the_validated_profile_at_the_selected_objects_root(
+    tmp_path: Path,
+) -> None:
+    objects_root = tmp_path / "buddyswitch" / "objects"
+    actor_id = "act-secondary-market-investor-profile"
+    profile_path = objects_root / "identities" / "actors" / f"{actor_id}.json"
+    profile_path.parent.mkdir(parents=True)
+    profile_path.write_text(
+        json.dumps(
+            {
+                "identity": {"id": actor_id, "type": "actor"},
+                "role_id": "secondary-market-investor",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert identity_profiles.get_actor_role_id(
+        actor_id,
+        objects_root=objects_root,
+    ) == "secondary-market-investor"
+    assert identity_profiles.get_actor_role_id(
+        "act-secondary-market-investor-missing",
+        objects_root=objects_root,
+    ) is None
+
+
+def test_actor_role_lookup_rejects_a_profile_for_a_different_actor(
+    tmp_path: Path,
+) -> None:
+    objects_root = tmp_path / "buddyswitch" / "objects"
+    actor_id = "act-requested-profile"
+    profile_path = objects_root / "identities" / "actors" / f"{actor_id}.json"
+    profile_path.parent.mkdir(parents=True)
+    profile_path.write_text(
+        json.dumps(
+            {
+                "identity": {"id": "act-different-profile", "type": "actor"},
+                "role_id": "dev",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="does not match requested actor identity id",
+    ):
+        identity_profiles.get_actor_role_id(
+            actor_id,
+            objects_root=objects_root,
+        )
+
+
 def test_invalid_profile_save_does_not_write() -> None:
     workspace = RuntimeTestWorkspace()
     try:

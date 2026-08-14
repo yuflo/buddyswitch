@@ -35,6 +35,19 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.repo_root.mkdir(parents=True, exist_ok=True)
         self.product_cleanup = build_application().cleanup
 
+        for actor_id, role_id in (
+            ("act-pm-clean", "pm"),
+            ("act-dev-clean", "dev"),
+            ("act-design-clean", "design"),
+        ):
+            self._write_json(
+                f"buddyswitch/objects/identities/actors/{actor_id}.json",
+                {
+                    "identity": {"id": actor_id, "type": "actor"},
+                    "role_id": role_id,
+                },
+            )
+
         self._write_json(
             "buddyswitch/objects/tracks/track-demo.json",
             {
@@ -60,7 +73,7 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "id": "art-pm-r1",
                 "kind": "prd",
                 "title": "PM PRD",
-                "created_by_actor": {"actor_id": "act-pm-clean", "role_id": "pm"},
+                "created_by_identity_id": "act-pm-clean",
                 "published_to_track": None,
                 "publication_role": None,
                 "summary": "",
@@ -79,7 +92,7 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "id": "art-dev-r1",
                 "kind": "implementation-report",
                 "title": "DEV report",
-                "created_by_actor": {"actor_id": "act-dev-clean", "role_id": "dev"},
+                "created_by_identity_id": "act-dev-clean",
                 "published_to_track": None,
                 "publication_role": None,
                 "summary": "",
@@ -219,13 +232,13 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "id": "comment-test",
                 "track_id": "track-demo",
                 "thread_id": "comment-test",
-                "by_actor": {"actor_id": "act-design-clean", "role_id": "design"},
+                "by_identity_id": "act-design-clean",
                 "content": "looks good",
                 "reply_to": None,
                 "mentioned_actors": [],
                 "status": "open",
                 "created_at": "2026-05-17T00:00:00+08:00",
-                "resolved_by_actor": None,
+                "resolved_by_identity_id": None,
                 "resolved_at": None,
                 "resolution_summary": None,
             },
@@ -471,13 +484,13 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "id": "comment-dev-clean",
                 "track_id": "track-clean-comment",
                 "thread_id": "comment-dev-clean",
-                "by_actor": {"actor_id": "act-dev-clean", "role_id": "dev"},
+                "by_identity_id": "act-dev-clean",
                 "content": "delete me",
                 "reply_to": None,
                 "mentioned_actors": [],
                 "status": "open",
                 "created_at": "2026-05-17T00:00:00+08:00",
-                "resolved_by_actor": None,
+                "resolved_by_identity_id": None,
                 "resolved_at": None,
                 "resolution_summary": None,
             },
@@ -488,13 +501,13 @@ class CleanupRepositoryTests(unittest.TestCase):
                 "id": "comment-design-keep",
                 "track_id": "track-clean-comment",
                 "thread_id": "comment-design-keep",
-                "by_actor": {"actor_id": "act-design-clean", "role_id": "design"},
+                "by_identity_id": "act-design-clean",
                 "content": "keep me",
                 "reply_to": None,
                 "mentioned_actors": [],
                 "status": "open",
                 "created_at": "2026-05-17T00:00:01+08:00",
-                "resolved_by_actor": None,
+                "resolved_by_identity_id": None,
                 "resolved_at": None,
                 "resolution_summary": None,
             },
@@ -515,6 +528,131 @@ class CleanupRepositoryTests(unittest.TestCase):
         self.assertFalse(self._path("buddyswitch/objects/track-comments/track-clean-comment/comment-dev-clean.json").exists())
         self.assertTrue(self._path("buddyswitch/objects/track-comments/track-clean-comment/comment-design-keep.json").exists())
         self.assertEqual(json.loads(track_path.read_text(encoding="utf-8")), track_payload)
+
+    def test_role_cleanup_resolves_actor_roles_only_from_canonical_identity_profiles(self) -> None:
+        actor_id = "act-secondary-market-investor-clean"
+        missing_profile_actor_id = "act-secondary-market-investor-unprofiled"
+        role_id = "secondary-market-investor"
+        self._write_json(
+            f"buddyswitch/objects/identities/actors/{actor_id}.json",
+            {
+                "identity": {"id": actor_id, "type": "actor"},
+                "role_id": role_id,
+            },
+        )
+        for message_id, sender_identity_id in (
+            ("msg-profiled-role", actor_id),
+            ("msg-unprofiled-role", missing_profile_actor_id),
+        ):
+            self._write_json(
+                f"im/messages/{message_id}.json",
+                {
+                    "id": message_id,
+                    "conversation_id": f"conv-{message_id}",
+                    "sender_identity": {"id": sender_identity_id, "type": "actor"},
+                    "target_identity": {"id": "ext-cleanup-client", "type": "external"},
+                    "content": "cleanup profile proof",
+                    "reply_to": None,
+                    "created_at": "2026-08-14T00:00:00Z",
+                },
+            )
+        for comment_id, by_identity_id in (
+            ("comment-profiled-role", actor_id),
+            ("comment-unprofiled-role", missing_profile_actor_id),
+        ):
+            self._write_json(
+                f"buddyswitch/objects/track-comments/track-cleanup-profile/{comment_id}.json",
+                {
+                    "id": comment_id,
+                    "track_id": "track-cleanup-profile",
+                    "thread_id": comment_id,
+                    "by_identity_id": by_identity_id,
+                    "content": "cleanup profile proof",
+                    "reply_to": None,
+                    "mentioned_identity_ids": [],
+                    "status": "open",
+                    "created_at": "2026-08-14T00:00:00Z",
+                    "resolved_by_identity_id": None,
+                    "resolved_at": None,
+                    "resolution_summary": None,
+                },
+            )
+        for artifact_id, created_by_identity_id in (
+            ("artifact-profiled-role", actor_id),
+            ("artifact-unprofiled-role", missing_profile_actor_id),
+        ):
+            self._write_json(
+                f"buddyswitch/objects/artifacts/{artifact_id}.json",
+                {
+                    "id": artifact_id,
+                    "created_by_identity_id": created_by_identity_id,
+                },
+            )
+            attachment = self._path(
+                f"buddyswitch/objects/artifact-attachments/{artifact_id}/proof.txt"
+            )
+            attachment.parent.mkdir(parents=True, exist_ok=True)
+            attachment.write_text("cleanup profile proof", encoding="utf-8")
+
+        plan = _build_cleanup_plan(
+            scope="role",
+            role=role_id,
+            repo_root=self.repo_root,
+            contributions=self.product_cleanup,
+        )
+
+        self.assertEqual(
+            {
+                path
+                for path, category in plan["path_categories"].items()
+                if category == "message_objects"
+            },
+            {"im/messages/msg-profiled-role.json"},
+        )
+        self.assertEqual(
+            {
+                path
+                for path, category in plan["path_categories"].items()
+                if category == "comment_objects"
+            },
+            {
+                "buddyswitch/objects/track-comments/track-cleanup-profile/comment-profiled-role.json"
+            },
+        )
+        self.assertEqual(plan["message_records"][0]["from_role"], role_id)
+        self.assertEqual(plan["comment_records"][0]["author_role"], role_id)
+        self.assertEqual(
+            {
+                path
+                for path, category in plan["path_categories"].items()
+                if category == "artifact_objects"
+            },
+            {"buddyswitch/objects/artifacts/artifact-profiled-role.json"},
+        )
+        self.assertEqual(
+            {
+                path
+                for path, category in plan["path_categories"].items()
+                if category == "artifact_attachments"
+            },
+            {
+                "buddyswitch/objects/artifact-attachments/"
+                "artifact-profiled-role/proof.txt"
+            },
+        )
+        self.assertEqual(plan["artifact_records"][0]["producer_role"], role_id)
+        self.assertTrue(
+            any("msg-unprofiled-role.json" in warning for warning in plan["warnings"]),
+            msg=plan,
+        )
+        self.assertTrue(
+            any("comment-unprofiled-role" in warning for warning in plan["warnings"]),
+            msg=plan,
+        )
+        self.assertTrue(
+            any("artifact-unprofiled-role" in warning for warning in plan["warnings"]),
+            msg=plan,
+        )
 
     def test_role_cleanup_uses_instance_actor_private_owner_boundary(self) -> None:
         pm_workspace = self._instance_workspace(actor_id="act-pm-cleanup", role="pm")

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from buddyswitch.foundation.cli_runtime import contracts as cli_contract
 from buddyswitch.foundation.host_control import runtime as host_control
+import buddyswitch.foundation.identity.profiles as identity_profiles
 from buddyswitch.modules.task.private import read_model
 
 
@@ -24,18 +25,15 @@ def _single_positional(
     return rows[0]
 
 
-def _actor_target(actor_id: str) -> dict[str, str]:
+def _actor_target(actor_id: str) -> dict[str, str] | None:
     try:
         normalized = host_control.validate_actor_id(actor_id)
     except host_control.HostControlError as exc:
         raise cli_contract.CliError("INVALID_ARGUMENT", str(exc)) from exc
-    role, separator, _suffix = normalized.removeprefix("act-").partition("-")
-    if not separator or not role:
-        raise cli_contract.CliError(
-            "INVALID_ARGUMENT",
-            "actor id must include a role segment",
-        )
-    return {"actor_id": normalized, "role_id": role}
+    role_id = identity_profiles.get_actor_role_id(normalized)
+    if role_id is None:
+        return None
+    return {"actor_id": normalized, "role_id": role_id}
 
 
 def dispatch(args: Sequence[str]) -> cli_contract.CliCommandResult:
@@ -51,9 +49,14 @@ def dispatch(args: Sequence[str]) -> cli_contract.CliCommandResult:
                 "task list",
             )
             target = _actor_target(actor_id) if actor_id is not None else None
+            tasks = (
+                []
+                if actor_id is not None and target is None
+                else read_model.list_external_tasks(actor_target=target)
+            )
             return cli_contract.CliCommandResult(
                 "task.list",
-                {"tasks": read_model.list_external_tasks(actor_target=target)},
+                {"tasks": tasks},
             )
         if command == "get":
             task_id = _single_positional(

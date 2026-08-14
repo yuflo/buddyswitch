@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -105,6 +106,12 @@ class WebProcessExited(Exception):
     def __init__(self, status: int) -> None:
         super().__init__(status)
         self.status = status
+
+
+class _WebTerminationRequested(BaseException):
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
 
 
 @dataclass(frozen=True)
@@ -456,19 +463,59 @@ def _run_web(
 ) -> int:
     parsed = _parse_web_args(args)
     paths = central_service.central_daemon_paths(_shared_root_from_env())
-    daemon_result = central_process.start_central_daemon(paths)
-    env = os.environ.copy()
-    env["BUDDYSWITCH_CENTRAL_DAEMON_SOCKET"] = str(daemon_result.get("socket_path") or paths.socket_path)
-    argv = [str(_python()), "-m", application_input.web_module]
-    if parsed.get("host") is not None:
-        argv.extend([DASH + "host", str(parsed["host"])])
-    if parsed.get("port") is not None:
-        argv.extend([DASH + "port", str(parsed["port"])])
+    child: subprocess.Popen[bytes] | None = None
+    previous_sigint_handler = signal.getsignal(signal.SIGINT)
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+    def request_web_termination(signum: int, _frame: object) -> None:
+        raise _WebTerminationRequested(signum)
+
+    signal.signal(signal.SIGTERM, request_web_termination)
     try:
-        completed = subprocess.run(argv, cwd=PACKAGE_ROOT, env=env, check=False)
-        return int(completed.returncode)
+        try:
+            daemon_result = central_process.start_central_daemon(paths)
+            env = os.environ.copy()
+            env["BUDDYSWITCH_CENTRAL_DAEMON_SOCKET"] = str(
+                daemon_result.get("socket_path") or paths.socket_path
+            )
+            argv = [str(_python()), "-m", application_input.web_module]
+            if parsed.get("host") is not None:
+                argv.extend([DASH + "host", str(parsed["host"])])
+            if parsed.get("port") is not None:
+                argv.extend([DASH + "port", str(parsed["port"])])
+            child = subprocess.Popen(
+                argv,
+                cwd=PACKAGE_ROOT,
+                env=env,
+                start_new_session=True,
+            )
+            return int(child.wait())
+        except KeyboardInterrupt:
+            return 0
+        except _WebTerminationRequested as exc:
+            return 128 + exc.signum
     finally:
-        central_process.stop_if_idle(paths)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            if child is not None and child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    if child.poll() is None:
+                        try:
+                            os.killpg(child.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        child.wait()
+            central_process.stop_if_idle(paths)
+        finally:
+            signal.signal(signal.SIGINT, previous_sigint_handler)
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
 
 def _actor_session() -> actor_session.ActorSession:

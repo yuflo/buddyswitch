@@ -11,10 +11,12 @@ from buddyswitch.foundation.composition import (
     CleanupIndexProjection,
     OwnedStatePath,
 )
+import buddyswitch.foundation.identity.profiles as identity_profiles
 
 
 _ARTIFACT_RECORDS = Path("buddyswitch/objects/artifacts")
 _ARTIFACT_ATTACHMENTS = Path("buddyswitch/objects/artifact-attachments")
+_OBJECTS_ROOT = Path("buddyswitch/objects")
 
 
 def _read_payload(path: Path) -> dict[str, Any] | None:
@@ -25,28 +27,28 @@ def _read_payload(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _role_from_identity_id(value: object) -> str | None:
+def _role_from_identity_id(root: Path, value: object) -> str | None:
     if not isinstance(value, str) or not value.startswith("act-"):
         return None
-    role, separator, _suffix = value.removeprefix("act-").partition("-")
-    return role if separator and role else None
+    try:
+        return identity_profiles.get_actor_role_id(
+            value,
+            objects_root=root / _OBJECTS_ROOT,
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
-def _artifact_owner_role(payload: dict[str, Any] | None) -> str | None:
+def _artifact_owner_role(
+    root: Path,
+    payload: dict[str, Any] | None,
+) -> str | None:
     if payload is None:
         return None
-    owner_role = _role_from_identity_id(
+    return _role_from_identity_id(
+        root,
         payload.get("created_by_identity_id")
     )
-    if owner_role is not None:
-        return owner_role
-    created_by_actor = payload.get("created_by_actor")
-    role_id = (
-        created_by_actor.get("role_id")
-        if isinstance(created_by_actor, dict)
-        else None
-    )
-    return role_id if isinstance(role_id, str) and role_id else None
 
 
 def _owner_roles_by_artifact(root: Path) -> dict[str, str | None]:
@@ -54,7 +56,7 @@ def _owner_roles_by_artifact(root: Path) -> dict[str, str | None]:
     if not directory.is_dir():
         return {}
     return {
-        path.stem: _artifact_owner_role(_read_payload(path))
+        path.stem: _artifact_owner_role(root, _read_payload(path))
         for path in sorted(directory.glob("*.json"))
     }
 
@@ -73,7 +75,7 @@ def discover_artifact_records(root: Path) -> tuple[OwnedStatePath, ...]:
             and payload.get("id")
             else None
         )
-        owner_role = _artifact_owner_role(payload)
+        owner_role = _artifact_owner_role(root, payload)
         warning = None
         if payload is None:
             warning = f"Malformed Artifact will be handled only by all-data cleanup: {path.relative_to(root).as_posix()}."

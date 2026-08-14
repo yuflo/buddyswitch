@@ -345,6 +345,102 @@ test('deleting final actor clears projection and invalidates prior selection gen
   }
 });
 
+test('stale actor console rejection after delete cannot overwrite terminal success', async () => {
+  const originalFetch = globalThis.fetch;
+  const staleConsole = deferred();
+  const actorId = 'act-delete-stale-console';
+  globalThis.fetch = async function (url, options) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/' + actorId + '/console') {
+      return staleConsole.promise;
+    }
+    if (requestUrl === '/api/instances/' + actorId) {
+      assert.equal(options && options.method, 'DELETE');
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-stale-console',
+          action: 'delete',
+          status: 'running',
+          label: 'Deleting ' + actorId,
+          target: { actor_id: actorId, role: 'market' },
+        }),
+      });
+    }
+    if (requestUrl === '/api/operations/op-delete-stale-console') {
+      return okResponse({
+        operation: lifecycleOperation({
+          id: 'op-delete-stale-console',
+          action: 'delete',
+          status: 'succeeded',
+          label: 'Deleting ' + actorId,
+          target: { actor_id: actorId, role: 'market' },
+          result: { ok: true, actor_id: actorId },
+        }),
+      });
+    }
+    if (requestUrl === '/api/actors') return okResponse({ actors: [] });
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: actorId, role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = actorId;
+    state.actorConsole = { actor: { actor_id: actorId, role: 'market' } };
+    state.lifecycleOperationPollDelaysMs = [];
+
+    const staleRefresh = app.refreshSelectedActorConsoleAndRender(state, elements);
+    assert.equal(state.actorRefreshInFlight, true);
+    state.actors[0].lifecycle_state = 'stopped';
+    state.actors[0].runtime = { status: 'inactive', app_server_health: 'unhealthy' };
+    await app.runLifecycleAction(state, elements, 'delete', actorId);
+    await app.pollLifecycleOperations(state, elements);
+    const deletionMessage = state.message;
+    assert.match(deletionMessage, /Delet/);
+
+    staleConsole.reject(new Error('Actor instance no longer exists.'));
+    await staleRefresh;
+
+    assert.equal(state.message, deletionMessage);
+    assert.equal(state.actorCardError, '');
+    assert.equal(state.selectedActorId, '');
+    assert.equal(state.actorConsole, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('current actor console rejection remains visible', async () => {
+  const originalFetch = globalThis.fetch;
+  const actorId = 'act-current-console-error';
+  globalThis.fetch = async function (url) {
+    const requestUrl = typeof url === 'string' ? url : url && url.url ? url.url : '';
+    if (requestUrl === '/api/actors/' + actorId + '/console') {
+      throw new Error('Current actor console failed.');
+    }
+    throw new Error('unexpected fetch ' + requestUrl);
+  };
+
+  try {
+    const state = app.createState();
+    const elements = createRenderElements();
+    state.actors = [
+      { actor_id: actorId, role: 'market', lifecycle_state: 'active', runtime: { status: 'active', app_server_health: 'healthy' } },
+    ];
+    state.selectedActorId = actorId;
+
+    await app.refreshSelectedActorConsoleAndRender(state, elements);
+
+    assert.equal(state.message, 'Current actor console failed.');
+    assert.equal(elements.messageBanner.textContent, 'Current actor console failed.');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('manual refresh explicitly selects and loads preferred actor when selection is missing', async () => {
   const originalFetch = globalThis.fetch;
   let missingActorRequested = false;

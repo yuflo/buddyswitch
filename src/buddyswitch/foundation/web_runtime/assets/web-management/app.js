@@ -115,6 +115,28 @@
     return 'Working';
   }
 
+  function lifecycleActionCompletedVerb(action) {
+    if (action === 'start') {
+      return 'Started';
+    }
+    if (action === 'stop') {
+      return 'Stopped';
+    }
+    if (action === 'resume') {
+      return 'Resumed';
+    }
+    if (action === 'clear') {
+      return 'Cleared';
+    }
+    if (action === 'delete') {
+      return 'Deleted';
+    }
+    if (action === 'retry') {
+      return 'Retried';
+    }
+    return 'Completed';
+  }
+
   function lifecycleActionName(action) {
     if (action === 'start') {
       return 'Start';
@@ -190,7 +212,12 @@
       const threadId = operation.action === 'clear' && typeof result.thread_id === 'string' && result.thread_id
         ? result.thread_id
         : '';
-      const completed = label ? label + ' completed.' : 'Lifecycle operation completed.';
+      const progressiveVerb = lifecycleActionVerb(operation.action);
+      const completedVerb = lifecycleActionCompletedVerb(operation.action);
+      const completedLabel = label.indexOf(progressiveVerb) === 0
+        ? completedVerb + label.slice(progressiveVerb.length)
+        : completedVerb + (label ? ' ' + label : '');
+      const completed = completedLabel + '.';
       return threadId ? completed + ' Thread ' + threadId + '.' : completed;
     }
     const detail = typeof operation.detail === 'string' && operation.detail ? operation.detail : 'Operation is running.';
@@ -923,13 +950,19 @@
     };
   }
 
-  function identityLabel(identityId) {
+  function identityLabel(state, identityId) {
     if (typeof identityId !== 'string' || !identityId) {
       return '';
     }
     if (identityId.indexOf('act-') === 0) {
-      const parts = identityId.split('-');
-      const roleId = parts.length > 2 ? parts[1] : '';
+      const actor = actorById(state, identityId);
+      const consoleActor = state.actorConsole && state.actorConsole.actor;
+      const consoleRole = consoleActor && consoleActor.actor_id === identityId
+        ? consoleActor.role
+        : '';
+      const roleId = actor && typeof actor.role === 'string' && actor.role
+        ? actor.role
+        : consoleRole;
       return roleId ? roleId + '/' + identityId : identityId;
     }
     if (identityId.indexOf('ext-') === 0) {
@@ -1042,7 +1075,7 @@
     return rememberImEntry(state, {
       id: typeof message.id === 'string' ? message.id : '',
       direction: sent ? 'sent' : 'reply',
-      sender: sent ? 'you' : identityLabel(senderIdentityId),
+      sender: sent ? 'you' : identityLabel(state, senderIdentityId),
       content: typeof message.content === 'string' ? message.content : '',
       deliveryStatus: '',
       wakeStatus: '',
@@ -2570,6 +2603,9 @@
     if (!shouldRefreshSelectedActorConsole(state)) {
       return;
     }
+    const requestedActorId = state.selectedActorId;
+    const requestId = state.actorSelectionRequestId;
+    const consoleRequestId = state.actorConsoleRequestId + 1;
     state.actorRefreshInFlight = true;
     try {
       await refreshSelectedActorConsole(state);
@@ -2577,6 +2613,9 @@
       renderActorInteractionRegions(state, elements);
       renderAttachTools(state, elements);
     } catch (error) {
+      if (!isCurrentActorConsoleRequest(state, requestedActorId, requestId, consoleRequestId)) {
+        return;
+      }
       state.message = error.message;
       renderShell(state, elements);
     } finally {
